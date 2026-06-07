@@ -1,0 +1,32 @@
+version: "3"
+
+tasks:
+  install:
+    desc: Install frontend dependencies
+    cmds:
+      - bun install
+
+  dev:
+    desc: Start the Next.js development server
+    cmds:
+      - bun run dev
+
+  lint:
+    desc: Run ESLint
+    cmds:
+      - bun run lint
+
+  build:
+    desc: Build the frontend for production
+    cmds:
+      - bun run build
+
+  start:
+    desc: Start the production Next.js server
+    cmds:
+      - bun run start
+
+  shadcn:add:
+    desc: Add shadcn/ui components, for example `task shadcn:add -- button card`
+    cmds:
+      - bunx --bun shadcn@latest add {{.CLI_ARGS}}

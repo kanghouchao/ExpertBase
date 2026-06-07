@@ -1,0 +1,142 @@
+name: ${COMPOSE_PROJECT_NAME:-expertbase-development}
+
+services:
+  traefik:
+    image: traefik:v3.6
+    container_name: ${COMPOSE_PROJECT_NAME:-expertbase-development}-traefik
+    restart: unless-stopped
+    command:
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --entrypoints.web.address=:80
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+    ports:
+      - "${TRAEFIK_HTTP_PORT:-8080}:80"
+      - "${TRAEFIK_DASHBOARD_PORT:-8081}:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.traefik.rule: Host(`traefik.${APP_HOST:-expertbase.localhost}`)
+      traefik.http.routers.traefik.service: api@internal
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-expertbase-development}-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-expertbase}
+      POSTGRES_USER: ${POSTGRES_USER:-expertbase}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-expertbase}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:8.2.0-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-expertbase-development}-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-expertbase-development}-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-expertbase}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-expertbase-secret}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test:
+        - CMD
+        - mc
+        - ready
+        - local
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.minio.rule: Host(`${MINIO_HOST:-minio.expertbase.localhost}`)
+      traefik.http.routers.minio.entrypoints: web
+      traefik.http.services.minio.loadbalancer.server.port: "9001"
+
+  backend:
+    image: ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+    container_name: ${COMPOSE_PROJECT_NAME:-expertbase-development}-backend
+    profiles:
+      - app
+    working_dir: /app
+    command: ${BACKEND_COMMAND:-uv run python main.py}
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_NAME: ${APP_NAME:-Expert Base API}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-expertbase}:${POSTGRES_PASSWORD:-expertbase}@postgres:5432/${POSTGRES_DB:-expertbase}
+      REDIS_URL: redis://redis:6379/0
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_BUCKET: ${MINIO_BUCKET:-expertbase}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ../backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.backend.rule: Host(`${API_HOST:-api.expertbase.localhost}`)
+      traefik.http.routers.backend.entrypoints: web
+      traefik.http.services.backend.loadbalancer.server.port: "8000"
+
+  frontend:
+    image: oven/bun:1.3.8
+    container_name: ${COMPOSE_PROJECT_NAME:-expertbase-development}-frontend
+    profiles:
+      - app
+    working_dir: /app
+    command: ${FRONTEND_COMMAND:-bun run dev --hostname 0.0.0.0}
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://api.expertbase.localhost:8080}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ../frontend:/app
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.frontend.rule: Host(`${APP_HOST:-expertbase.localhost}`)
+      traefik.http.routers.frontend.entrypoints: web
+      traefik.http.services.frontend.loadbalancer.server.port: "3000"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

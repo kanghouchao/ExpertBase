@@ -1,0 +1,27 @@
+version: "3"
+
+tasks:
+  install:
+    desc: Install backend dependencies
+    cmds:
+      - uv sync
+
+  lint:
+    desc: Run Ruff lint checks
+    cmds:
+      - uv run ruff check .
+
+  format:
+    desc: Format backend Python files
+    cmds:
+      - uv run ruff format .
+
+  test:
+    desc: Run backend tests
+    cmds:
+      - uv run pytest
+
+  lock:
+    desc: Refresh uv.lock without upgrading dependencies
+    cmds:
+      - uv lock

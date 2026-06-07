@@ -1,0 +1,73 @@
+version: "3"
+
+tasks:
+  start:
+    desc: Start infrastructure services for ENV, defaults to development
+    dir: infra
+    cmds:
+      - task up ENV={{.ENV | default "development"}}
+
+  start:app:
+    desc: Start infrastructure plus app services for ENV, defaults to development
+    dir: infra
+    cmds:
+      - task up-app ENV={{.ENV | default "development"}}
+
+  stop:
+    desc: Stop infrastructure services for ENV, defaults to development
+    dir: infra
+    cmds:
+      - task down ENV={{.ENV | default "development"}}
+
+  stop:app:
+    desc: Stop infrastructure plus app services for ENV, defaults to development
+    dir: infra
+    cmds:
+      - task down-app ENV={{.ENV | default "development"}}
+
+  restart:
+    desc: Restart local infrastructure services
+    cmds:
+      - task stop
+      - task start
+
+  restart:app:
+    desc: Restart local infrastructure plus frontend and backend app services
+    cmds:
+      - task stop:app
+      - task start:app
+
+  status:
+    desc: Show service status for ENV, defaults to development
+    dir: infra
+    cmds:
+      - task ps ENV={{.ENV | default "development"}}
+
+  logs:
+    desc: Follow service logs, for example `task logs -- postgres`
+    dir: infra
+    cmds:
+      - task logs ENV={{.ENV | default "development"}} -- {{.CLI_ARGS}}
+
+  config:
+    desc: Validate Compose configuration for ENV, defaults to development
+    dir: infra
+    cmds:
+      - task config ENV={{.ENV | default "development"}}
+
+  config:app:
+    desc: Validate Compose app configuration for ENV, defaults to development
+    dir: infra
+    cmds:
+      - task config-app ENV={{.ENV | default "development"}}
+
+  clean:cache:
+    desc: Remove local build and tool caches
+    cmds:
+      - rm -rf frontend/.next frontend/.turbo backend/.pytest_cache backend/.ruff_cache
+
+  clean:docker:
+    desc: Remove stopped containers and dangling Docker cache
+    prompt: This removes stopped containers and dangling Docker cache. Continue?
+    cmds:
+      - docker system prune -f
