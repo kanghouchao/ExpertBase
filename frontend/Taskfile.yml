@@ -16,6 +16,16 @@ tasks:
     cmds:
       - bun run lint
 
+  format:
+    desc: Format frontend files with Prettier
+    cmds:
+      - bun run format
+
+  format:check:
+    desc: Check frontend formatting with Prettier
+    cmds:
+      - bun run format:check
+
   build:
     desc: Build the frontend for production
     cmds:
