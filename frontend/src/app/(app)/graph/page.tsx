@@ -1,5 +1,5 @@
-import { ComingSoon } from "@/components/shell/coming-soon";
+import { GraphView } from "./graph-view";
 
 export default function GraphPage() {
-  return <ComingSoon id="graph" />;
+  return <GraphView />;
 }

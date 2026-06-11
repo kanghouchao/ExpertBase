@@ -1,5 +1,5 @@
-import { ComingSoon } from "@/components/shell/coming-soon";
+import { BotsView } from "./bots-view";
 
 export default function BotsPage() {
-  return <ComingSoon id="bots" />;
+  return <BotsView />;
 }

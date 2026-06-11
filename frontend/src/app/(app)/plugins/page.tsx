@@ -1,5 +1,5 @@
-import { ComingSoon } from "@/components/shell/coming-soon";
+import { PluginsView } from "./plugins-view";
 
 export default function PluginsPage() {
-  return <ComingSoon id="plugins" />;
+  return <PluginsView />;
 }

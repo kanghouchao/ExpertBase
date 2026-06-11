@@ -1,5 +1,5 @@
-import { ComingSoon } from "@/components/shell/coming-soon";
+import { WikiView } from "./wiki-view";
 
 export default function WikiPage() {
-  return <ComingSoon id="wiki" />;
+  return <WikiView />;
 }

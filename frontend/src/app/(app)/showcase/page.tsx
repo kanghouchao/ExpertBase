@@ -1,5 +1,5 @@
-import { ComingSoon } from "@/components/shell/coming-soon";
+import { ShowcaseView } from "./showcase-view";
 
 export default function ShowcasePage() {
-  return <ComingSoon id="showcase" />;
+  return <ShowcaseView />;
 }

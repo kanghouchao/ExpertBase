@@ -1,5 +1,5 @@
-import { ComingSoon } from "@/components/shell/coming-soon";
+import { WorkshopView } from "./workshop-view";
 
 export default function WorkshopPage() {
-  return <ComingSoon id="workshop" />;
+  return <WorkshopView />;
 }

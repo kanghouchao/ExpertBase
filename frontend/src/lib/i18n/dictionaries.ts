@@ -100,9 +100,6 @@ const zh: Dict = {
   "dash.health.found.a": "发现 ",
   "dash.health.found.b": " 个孤立条目、4 项可优化",
   "dash.health.cta": "去工作坊优化",
-  // placeholders
-  "coming.soon": "此视图即将上线",
-  "coming.soon.sub": "工作台已就绪，其余视图正在按阶段实现。",
 };
 
 const en: Dict = {
@@ -185,8 +182,6 @@ const en: Dict = {
   "dash.health.found.a": "Found ",
   "dash.health.found.b": " orphan entries, 4 to optimize",
   "dash.health.cta": "Optimize in Workshop",
-  "coming.soon": "This view is coming soon",
-  "coming.soon.sub": "The Overview is ready; the remaining views ship in later phases.",
 };
 
 const ja: Dict = {
@@ -269,8 +264,6 @@ const ja: Dict = {
   "dash.health.found.a": "",
   "dash.health.found.b": " 件の孤立項目、ほか4件の改善余地",
   "dash.health.cta": "工房で最適化",
-  "coming.soon": "このビューは近日公開",
-  "coming.soon.sub": "ダッシュボードは準備完了。残りのビューは段階的に実装します。",
 };
 
 export const DICT: Record<Lang, Dict> = { zh, en, ja };

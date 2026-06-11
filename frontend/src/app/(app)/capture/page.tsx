@@ -1,5 +1,5 @@
-import { ComingSoon } from "@/components/shell/coming-soon";
+import { CaptureView } from "./capture-view";
 
 export default function CapturePage() {
-  return <ComingSoon id="capture" />;
+  return <CaptureView />;
 }
