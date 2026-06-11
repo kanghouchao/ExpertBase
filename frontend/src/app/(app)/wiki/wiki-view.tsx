@@ -183,7 +183,7 @@ export function WikiView() {
               </article>
               <div className="mt-7 grid grid-cols-2 gap-5">
                 <div>
-                  <div className="mb-2.5 font-mono text-xs font-bold tracking-[0.1em] text-ink-muted uppercase">
+                  <div className="mb-2.5 font-mono text-xs font-bold tracking-widest text-ink-muted uppercase">
                     关联条目 →
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -199,7 +199,7 @@ export function WikiView() {
                   </div>
                 </div>
                 <div>
-                  <div className="mb-2.5 font-mono text-xs font-bold tracking-[0.1em] text-ink-muted uppercase">
+                  <div className="mb-2.5 font-mono text-xs font-bold tracking-widest text-ink-muted uppercase">
                     ← 反向链接
                   </div>
                   <div className="flex flex-wrap gap-2">

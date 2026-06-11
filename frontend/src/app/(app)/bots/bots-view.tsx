@@ -83,7 +83,7 @@ export function BotsView() {
                   key={item}
                   className="flex items-center gap-2 rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-[13px] font-semibold"
                 >
-                  <input type="checkbox" defaultChecked className="accent-[var(--brand)]" />
+                  <input type="checkbox" defaultChecked className="accent-brand" />
                   {item}
                 </label>
               ))}
