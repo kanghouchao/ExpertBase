@@ -20,13 +20,6 @@ tasks:
     cmds:
       - docker compose --env-file {{.ENV_FILE}} -f {{.COMPOSE_FILE}} config
 
-  config-app:
-    desc: Validate and render Docker Compose configuration including app services
-    deps:
-      - init-env
-    cmds:
-      - docker compose --env-file {{.ENV_FILE}} -f {{.COMPOSE_FILE}} --profile app config
-
   up:
     desc: Start infrastructure services
     deps:
@@ -34,26 +27,12 @@ tasks:
     cmds:
       - docker compose --env-file {{.ENV_FILE}} -f {{.COMPOSE_FILE}} up -d
 
-  up-app:
-    desc: Start infrastructure plus frontend and backend services
-    deps:
-      - init-env
-    cmds:
-      - docker compose --env-file {{.ENV_FILE}} -f {{.COMPOSE_FILE}} --profile app up -d
-
   down:
     desc: Stop infrastructure services
     deps:
       - init-env
     cmds:
       - docker compose --env-file {{.ENV_FILE}} -f {{.COMPOSE_FILE}} down
-
-  down-app:
-    desc: Stop infrastructure plus frontend and backend services
-    deps:
-      - init-env
-    cmds:
-      - docker compose --env-file {{.ENV_FILE}} -f {{.COMPOSE_FILE}} --profile app down
 
   ps:
     desc: Show service status

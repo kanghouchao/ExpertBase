@@ -35,8 +35,3 @@ tasks:
     desc: Start the production Next.js server
     cmds:
       - bun run start
-
-  shadcn:add:
-    desc: Add shadcn/ui components, for example `task shadcn:add -- button card`
-    cmds:
-      - bunx --bun shadcn@latest add {{.CLI_ARGS}}

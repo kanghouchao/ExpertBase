@@ -1,37 +1,37 @@
 # Expert Base Infrastructure
 
-This directory contains Docker Compose infrastructure for Expert Base.
+このディレクトリには、Expert Base の Docker Compose インフラが含まれます。
 
-Development and production are intentionally split into separate Compose files because their runtime assumptions are different. Development favors local ergonomics. Production favors deployment boundaries.
+development と production は、実行時の前提が異なるため、意図的に別々の Compose ファイルに分けています。development はローカルでの扱いやすさを優先します。production はデプロイ境界を優先します。
 
-This is still an early infrastructure baseline. The production Compose file is not a complete production operations setup yet: HTTPS, certificates, backups, monitoring, logging, secret management, and upgrade procedures are still future work.
+これはまだ初期インフラベースラインです。production Compose ファイルは、完全な本番運用セットアップではありません。HTTPS、証明書、バックアップ、監視、ログ、シークレット管理、アップグレード手順は今後の作業です。
 
-## Environments
+## 環境
 
-The default environment is `development`.
+デフォルト環境は `development` です。
 
 ```bash
 task config
 task up
 ```
 
-Use `ENV=production` for the production baseline:
+production baseline には `ENV=production` を使います。
 
 ```bash
 ENV=production task config
 ENV=production task up
 ```
 
-The Taskfile maps environments like this:
+Taskfile は環境を次のように対応付けます。
 
 ```txt
 ENV=development -> compose.development.yml + env/development.env
 ENV=production  -> compose.production.yml  + env/production.env
 ```
 
-If `env/<ENV>.env` does not exist, `task init-env` creates it from the matching example file.
+`env/<ENV>.env` が存在しない場合、`task init-env` は対応する example file から作成します。
 
-## Files
+## ファイル
 
 ```txt
 infra/
@@ -46,7 +46,7 @@ infra/
   AGENTS.md                     # agent instructions for this directory
 ```
 
-Do not commit `env/*.env`.
+`env/*.env` はコミットしません。
 
 ## Development Services
 
@@ -59,17 +59,17 @@ Backend        # optional app profile, bind-mounted source
 Frontend       # optional app profile, bind-mounted source
 ```
 
-Development uses:
+development では次を使います。
 
 - `compose.development.yml`
 - `env/development.env`
 - `*.localhost` hostnames
-- direct ports for debugging
+- debugging 用の direct ports
 - bind-mounted frontend and backend source
-- development commands such as `bun run dev`
-- Traefik dashboard with insecure local access
+- `bun run dev` などの development commands
+- insecure local access を許可した Traefik dashboard
 
-Default development routes:
+デフォルトの development routes:
 
 ```txt
 http://expertbase.localhost:8080
@@ -78,7 +78,7 @@ http://minio.expertbase.localhost:8080
 http://traefik.expertbase.localhost:8080
 ```
 
-Default development direct ports:
+デフォルトの development direct ports:
 
 ```txt
 Traefik HTTP:      8080
@@ -102,21 +102,21 @@ Backend        # image-based service
 Frontend       # image-based service
 ```
 
-Production uses:
+production では次を使います。
 
 - `compose.production.yml`
 - `env/production.env`
 - real hostnames
 - image-based frontend and backend services
-- no bind-mounted source code
-- no direct PostgreSQL, Redis, or MinIO ports
-- no insecure Traefik dashboard
+- bind-mounted source code なし
+- PostgreSQL、Redis、MinIO の direct ports なし
+- insecure Traefik dashboard なし
 
-Production currently exposes HTTP only. HTTPS and certificate automation should be added once the deployment target is clear.
+production は現在 HTTP のみを公開します。HTTPS と証明書自動化は、deployment target が明確になってから追加します。
 
-## Commands
+## コマンド
 
-Run commands from `infra/`.
+コマンドは `infra/` から実行します。
 
 ```bash
 task init-env
@@ -130,34 +130,34 @@ task down-app
 task down
 ```
 
-With explicit environment:
+明示的な環境:
 
 ```bash
 ENV=development task config
 ENV=production task config
 ```
 
-`task config` validates and renders the Compose configuration.
+`task config` は Compose configuration を検証し、レンダリングします。
 
-`task config-app` validates and renders the Compose configuration including frontend and backend services. It is mainly useful for development because production includes app services by default.
+`task config-app` は frontend と backend service を含めた Compose configuration を検証し、レンダリングします。production はデフォルトで app services を含むため、主に development で有用です。
 
-`task up` starts services for the selected environment.
+`task up` は選択された環境の services を起動します。
 
-`task up-app` starts services with the `app` profile. Use this for development when you want Compose to include the frontend and backend services.
+`task up-app` は `app` profile 付きで services を起動します。development で frontend と backend services も Compose に含めたい場合に使います。
 
-`task ps` shows service status.
+`task ps` は service status を表示します。
 
-`task logs` follows logs for all services. Use `task logs -- postgres` to follow one service.
+`task logs` は全 services の logs を follow します。特定 service のみを follow するには `task logs -- postgres` を使います。
 
-`task down-app` stops services including the `app` profile.
+`task down-app` は `app` profile を含む services を停止します。
 
-`task down` stops services without deleting named volumes.
+`task down` は named volumes を削除せずに services を停止します。
 
-AI agents and contributors should prefer these `task` commands instead of calling `docker compose` directly.
+AI エージェントとコントリビューターは、直接 `docker compose` を呼ぶのではなく、これらの `task` コマンドを優先します。
 
-## Data
+## データ
 
-Compose uses named Docker volumes:
+Compose は named Docker volumes を使います。
 
 ```txt
 postgres_data
@@ -165,6 +165,6 @@ redis_data
 minio_data
 ```
 
-Stopping services with `task down` does not delete these volumes.
+`task down` で services を停止しても、これらの volumes は削除されません。
 
-Do not add destructive cleanup tasks unless explicitly requested.
+明示的に依頼されない限り、破壊的な cleanup tasks は追加しません。

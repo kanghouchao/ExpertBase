@@ -1,10 +1,10 @@
 # Expert Base Backend
 
-This directory contains the Expert Base backend project.
+このディレクトリには、Expert Base のバックエンドプロジェクトが含まれます。
 
-The backend is currently initialized as a Python application project. It has dependency management, tooling, environment conventions, and task commands in place, but no FastAPI application code has been created yet.
+バックエンドは現在、Python アプリケーションプロジェクトとして初期化されています。依存関係管理、ツール、環境規約、task コマンドは用意されていますが、FastAPI アプリケーションコードはまだ作成されていません。
 
-## Technology Stack
+## 技術スタック
 
 - Python 3.13
 - uv
@@ -18,46 +18,48 @@ The backend is currently initialized as a Python application project. It has dep
 - Ruff
 - Pytest
 
-## Current Baseline
+## 現在のベースライン
 
-The backend has been initialized with:
+バックエンドは次の内容で初期化されています。
 
-- runtime dependencies in `pyproject.toml`
-- development dependencies in `pyproject.toml`
-- locked dependencies in `uv.lock`
-- local environment template in `.env.example`
-- backend task commands in `Taskfile.yml`
-- backend agent instructions in `AGENTS.md`
+- `pyproject.toml` の runtime dependencies
+- `pyproject.toml` の development dependencies
+- `.env.example` のローカル環境テンプレート
+- `Taskfile.yml` のバックエンド task コマンド
+- `AGENTS.md` のバックエンド向けエージェント指示
 
-No API app, routes, models, migrations, workers, or business modules have been implemented yet.
+API app、routes、models、migrations、workers、business modules はまだ実装されていません。
 
-## Commands
+## コマンド
 
-Run commands from `backend/`.
+コマンドは `backend/` から実行します。
 
 ```bash
 task install
 task lint
 task format
+task format:check
 task test
 task lock
 ```
 
-`task install` installs dependencies with uv.
+`task install` は uv で依存関係をインストールします。
 
-`task lint` runs Ruff lint checks.
+`task lint` は Ruff lint checks を実行します。
 
-`task format` formats Python files with Ruff.
+`task format` は Ruff で Python ファイルを整形します。
 
-`task test` runs Pytest.
+`task format:check` は Ruff の整形状態を検証します。
 
-`task lock` refreshes `uv.lock` without upgrading dependencies.
+`task test` は Pytest を実行します。
 
-AI agents and contributors should prefer the `task` commands instead of calling `uv` directly.
+`task lock` は依存関係を upgrade せずに `uv.lock` を更新します。`uv.lock` はローカル生成物として扱い、Git にはコミットしません。
 
-## Planned Directory Structure
+AI エージェントとコントリビューターは、直接 `uv` を呼ぶのではなく `task` コマンドを優先します。
 
-Application code has not been created yet. When implementation starts, use this structure:
+## 予定しているディレクトリ構成
+
+アプリケーションコードはまだ作成されていません。実装を開始したら、次の構成を使います。
 
 ```txt
 backend/
@@ -70,20 +72,19 @@ backend/
   tests/                # backend tests
   alembic/              # database migrations
   pyproject.toml
-  uv.lock
 ```
 
-Do not create empty architecture folders. Add a directory when the first real file needs it.
+空のアーキテクチャフォルダは作りません。最初の実ファイルが必要になった時点でディレクトリを追加します。
 
-## Environment
+## 環境
 
-Copy `.env.example` to `.env` for local development when backend code starts using environment configuration.
+バックエンドコードが環境設定を使い始める段階で、ローカル開発用に `.env.example` を `.env` にコピーします。
 
 ```bash
 cp .env.example .env
 ```
 
-The current environment template includes:
+現在の環境テンプレートには次が含まれます。
 
 - `APP_ENV`
 - `APP_NAME`
@@ -92,13 +93,13 @@ The current environment template includes:
 - `OBJECT_STORAGE_ENDPOINT`
 - `OBJECT_STORAGE_BUCKET`
 
-## Development Notes
+## 開発メモ
 
-This project is configured as a uv application project:
+このプロジェクトは uv application project として設定されています。
 
 ```toml
 [tool.uv]
 package = false
 ```
 
-That means uv does not require an importable Python package before dependencies can be managed. Application package structure will be added when backend implementation begins.
+これは、依存関係管理のために import 可能な Python package を先に用意する必要がない、という意味です。バックエンド実装を開始するときに、アプリケーション package structure を追加します。

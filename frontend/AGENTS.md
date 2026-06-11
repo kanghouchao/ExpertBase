@@ -1,11 +1,3 @@
-<!-- BEGIN:nextjs-agent-rules -->
-
-# This is NOT the Next.js you know
-
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
-
-<!-- END:nextjs-agent-rules -->
-
 # Frontend Agent Guidelines
 
 ## Scope
@@ -28,18 +20,13 @@ When working under `frontend/`, follow this file in addition to the repository-l
 
 - Prefer Taskfile commands for frontend work.
 - Use `task install`, `task dev`, `task lint`, `task build`, and `task start` instead of calling `bun` directly.
-- Use `task shadcn:add -- <component>` instead of calling `bunx --bun shadcn@latest add <component>` directly.
 - Run direct `bun` or `bunx` commands only when the Taskfile does not expose the needed operation. If doing so, state why.
 
 ## Directory Rules
 
 - `src/app/`: routes, layouts, pages, route groups, and app-level loading/error files.
 - `src/components/ui/`: shadcn/ui generated primitives. Do not edit casually; treat changes as local forks of upstream components.
-- `src/components/`: project-specific shared components.
-- `src/features/`: feature-level UI and client interactions when a feature grows beyond one route.
 - `src/lib/`: framework-neutral utilities, API clients, and configuration helpers.
-- `src/hooks/`: reusable client hooks. Hooks here must be client-safe.
-- `src/types/`: shared frontend-only TypeScript types.
 
 Create new folders only when the first real file needs them. Do not add empty architecture folders.
 
