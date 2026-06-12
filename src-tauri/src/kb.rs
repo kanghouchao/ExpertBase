@@ -10,7 +10,7 @@ pub struct KbStatus {
   pub initialized: bool,
 }
 
-/// Ensure the knowledge base root directory exists under the app data dir.
+/// アプリデータディレクトリ内にナレッジベースのルートを作成する。
 pub fn ensure_kb_root(base_dir: &Path) -> std::io::Result<PathBuf> {
   let root = base_dir.join("knowledge-base");
   std::fs::create_dir_all(&root)?;

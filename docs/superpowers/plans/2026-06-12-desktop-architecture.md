@@ -6,7 +6,7 @@
 
 **Architecture:** The existing Next.js App Router UI (pure client code, mock data) is switched to static export and loaded by a Tauri 2 shell. A minimal Rust knowledge-base layer initializes the local app data directory and exposes it over IPC. `backend/` (FastAPI hello) and `infra/` (Docker/Traefik) are deleted.
 
-**Tech Stack:** Tauri 2 (Rust), Next.js 16 static export, React 19, Bun, Taskfile.
+**Tech Stack:** Tauri 2 (Rust), Next.js 16 static export, React 19, Bun, root `package.json` scripts.
 
 **Spec:** `docs/superpowers/specs/2026-06-12-desktop-architecture-design.md`
 
@@ -145,7 +145,7 @@ Expected: `src-tauri/` created with `Cargo.toml`, `src/`, `icons/`, `capabilitie
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: http://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost"
     }
   },
   "bundle": {
@@ -382,11 +382,11 @@ git commit -m "feat(frontend): add typed Tauri IPC client and KB status line"
 
 ---
 
-### Task 6: Tear down backend/infra and update Taskfiles + docs
+### Task 6: Tear down backend/infra and update root scripts + docs
 
 **Files:**
 - Delete: `backend/`, `infra/`
-- Modify: `Taskfile.yml` (root), `README.md` (root), `AGENTS.md` (root)
+- Modify: `package.json` (root), `README.md` (root), `AGENTS.md` (root)
 - Modify: `frontend/AGENTS.md` (backend-client rule → IPC-client rule)
 
 - [ ] **Step 1: Delete the web-era directories**
@@ -395,44 +395,25 @@ git commit -m "feat(frontend): add typed Tauri IPC client and KB status line"
 git rm -r backend infra
 ```
 
-- [ ] **Step 2: Replace root `Taskfile.yml`**
+- [ ] **Step 2: Add root `package.json` scripts**
 
-```yaml
-version: "3"
-
-tasks:
-  install:
-    desc: Install all dependencies
-    cmds:
-      - bun install
-      - bun install --cwd frontend
-
-  dev:
-    desc: Run the desktop app in development mode
-    cmds:
-      - bunx tauri dev
-
-  build:
-    desc: Build the desktop app bundles
-    cmds:
-      - bunx tauri build
-
-  lint:
-    desc: Lint the frontend
-    dir: frontend
-    cmds:
-      - bun run lint
-
-  test:
-    desc: Run Rust tests
-    dir: src-tauri
-    cmds:
-      - cargo test
-
-  clean:cache:
-    desc: Remove local build and tool caches
-    cmds:
-      - rm -rf frontend/.next frontend/out frontend/.turbo src-tauri/target
+```json
+{
+  "name": "expertbase",
+  "private": true,
+  "scripts": {
+    "setup": "bun install && bun install --cwd frontend",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "lint": "bun run --cwd frontend lint",
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "clean": "rm -rf frontend/.next frontend/out src-tauri/target",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
 ```
 
 - [ ] **Step 3: Update root `AGENTS.md`**
@@ -452,23 +433,23 @@ Expert Base is a private, extensible, local-first knowledge base system for prof
 
 ## Command Policy
 
-Use Taskfile commands as the primary entrypoint.
+Use the root `package.json` scripts as the primary entrypoint.
 
 At the repository root, prefer:
 
-- `task install`  // Installs all dependencies.
-- `task dev`      // Runs the desktop app in development mode.
-- `task build`    // Builds the desktop app bundles.
-- `task lint`     // Lints the frontend.
-- `task test`     // Runs Rust tests.
-- `task clean:cache` // Cleans up build caches.
+- `bun run setup`  // Installs all dependencies.
+- `bun run dev`    // Runs the desktop app in development mode.
+- `bun run build`  // Builds the desktop app bundles.
+- `bun run lint`   // Lints the frontend.
+- `bun run test`   // Runs Rust tests.
+- `bun run clean`  // Cleans up build caches.
 
-Inside subdirectories, read the local `AGENTS.md` first and use that directory's Taskfile.
+Inside subdirectories, read the local `AGENTS.md` first.
 ```
 
 - [ ] **Step 4: Update root `README.md`**
 
-Rewrite the アーキテクチャ方針 section to state: local-first Tauri 2 desktop app; UI is Next.js static export in `frontend/`; Rust core in `src-tauri/`; knowledge base data lives locally (Markdown files + derived index); server-dependent capabilities (sync, web publish, bot hosting) are future optional cloud services. Update the command list to match the new Taskfile (`install`, `dev`, `build`, `lint`, `test`, `clean:cache`) and drop the `ENV=production` compose instructions.
+Rewrite the アーキテクチャ方針 section to state: local-first Tauri 2 desktop app; UI is Next.js static export in `frontend/`; Rust core in `src-tauri/`; knowledge base data lives locally (Markdown files + derived index); server-dependent capabilities (sync, web publish, bot hosting) are future optional cloud services. Update the command list to match the root `package.json` scripts (`setup`, `dev`, `build`, `lint`, `test`, `clean`) and drop the `ENV=production` compose instructions.
 
 - [ ] **Step 5: Update `frontend/AGENTS.md`**
 
@@ -479,9 +460,9 @@ Replace the sentence about backend API clients in "Next.js Practices":
 
 Also add one line to Technical Baseline: "Build target: static export (`output: \"export\"`) loaded by the Tauri 2 shell; no server runtime."
 
-- [ ] **Step 6: Verify the Taskfile works**
+- [ ] **Step 6: Verify the root scripts work**
 
-Run from repo root: `task lint && task test`
+Run from repo root: `bun run lint && bun run test`
 Expected: both pass.
 
 - [ ] **Step 7: Commit**
@@ -502,14 +483,14 @@ git commit -m "feat!: remove web backend/infra; repo is now a Tauri desktop app"
 Run from repo root:
 
 ```bash
-task lint && task test && (cd frontend && bun run build)
+bun run lint && bun run test && bun run build
 ```
 
 Expected: all pass.
 
 - [ ] **Step 2: Launch the app in dev mode**
 
-Run from repo root in the background: `bunx tauri dev`
+Run from repo root in the background: `bun run dev`
 Wait for the Rust build to finish and the window process to appear.
 
 Verify: `pgrep -fl "expert-base"` shows the app process (and the UI loaded without panics in the tauri dev output). Then terminate the dev process.

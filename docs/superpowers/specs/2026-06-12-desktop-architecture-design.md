@@ -39,7 +39,7 @@ ExpertBase/
 │   ├── tauri.conf.json  # frontendDist = ../frontend/out, devUrl = localhost:3000
 │   └── Cargo.toml
 ├── docs/
-└── Taskfile.yml         # dev / build / lint をデスクトップアプリ向けに書き換え
+└── package.json         # dev / build / lint / test をデスクトップアプリ向けに集約
 ```
 
 `backend/` と `infra/` は削除。
@@ -56,7 +56,7 @@ ExpertBase/
 1. Next.js を静的エクスポートに切り替え、ビルドが通る
 2. Tauri 2 シェルが既存 UI を表示して起動する
 3. Rust 側に最小のナレッジベース層: アプリデータディレクトリの初期化 + UI から呼べる IPC コマンド（旧 hello API の置き換えに相当）
-4. `backend/`・`infra/` の削除、Taskfile・README・AGENTS.md の更新
+4. `backend/`・`infra/` の削除、root `package.json`・README・AGENTS.md の更新
 
 スコープ外: 同期、プラグインシステム、発布機能、AI パイプライン、MCP サーバー（いずれも本設計の方向性とは整合済み、別マイルストーン）。
 
@@ -67,6 +67,6 @@ ExpertBase/
 
 ## テスト / 検証
 
-- `task lint` と `bun run build`（静的エクスポート）が通る
+- `bun run lint` と `bun run build`（静的エクスポート + Tauri バンドル）が通る
 - `cargo check`（src-tauri）が通る
 - `tauri dev` でウィンドウが起動し、UI が表示され、IPC コマンドが往復する
