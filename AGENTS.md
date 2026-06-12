@@ -2,6 +2,12 @@
 
 Expert Base is a private, extensible, local-first knowledge base system for professional knowledge workers, shipped as a Tauri 2 desktop application.
 
+## Language Policy
+
+- Write code comments and documentation in Japanese.
+- Converse with the user in Chinese.
+- Write `AGENTS.md` and `CLAUDE.md` files in English.
+
 ## Repository Baseline
 
 - `frontend/`: UI (Next.js static export). See [package.json](frontend/package.json).
