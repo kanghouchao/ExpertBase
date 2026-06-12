@@ -2,7 +2,7 @@
 
 ## Scope
 
-This directory contains the Expert Base web application. It is a Next.js App Router project using TypeScript, React, Tailwind CSS, and shadcn/ui.
+This directory contains the Expert Base UI. It is a Next.js App Router project using TypeScript, React, Tailwind CSS, and shadcn/ui, statically exported and loaded by the Tauri 2 desktop shell in `src-tauri/`.
 
 When working under `frontend/`, follow this file in addition to the repository-level instructions.
 
@@ -15,11 +15,12 @@ When working under `frontend/`, follow this file in addition to the repository-l
 - Styling: Tailwind CSS v4 through `src/app/globals.css`.
 - Component system: shadcn/ui source components under `src/components/ui`.
 - Import alias: `@/*`.
+- Build target: static export (`output: "export"`) loaded by the Tauri 2 shell; no server runtime.
 
 ## Command Policy
 
 - Prefer Taskfile commands for frontend work.
-- Use `task install`, `task dev`, `task lint`, `task build`, and `task start` instead of calling `bun` directly.
+- Use `task install`, `task dev`, `task lint`, `task build`, and `task format` instead of calling `bun` directly.
 - Run direct `bun` or `bunx` commands only when the Taskfile does not expose the needed operation. If doing so, state why.
 
 ## Directory Rules
@@ -37,7 +38,7 @@ Create new folders only when the first real file needs them. Do not add empty ar
 - Avoid request waterfalls. Start independent async work early and await it together.
 - Do not pass large server objects into Client Components. Pass minimal serialized props.
 - Use route-level `loading.tsx`, `error.tsx`, and `not-found.tsx` only when the route needs them.
-- Keep API calls to the backend behind a small typed client in `src/lib` instead of scattering `fetch` calls through UI components.
+- Keep Tauri IPC calls behind the typed client in `src/lib/tauri` instead of scattering `invoke` calls through UI components.
 
 ## shadcn/ui Practices
 

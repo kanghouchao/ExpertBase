@@ -1,6 +1,6 @@
 # Expert Base Frontend
 
-このディレクトリには、Expert Base の Web アプリケーションが含まれます。
+このディレクトリには、Expert Base の UI が含まれます。Next.js の静的エクスポートとしてビルドされ、`src-tauri/` の Tauri 2 デスクトップシェルが読み込みます。
 
 フロントエンドは、プロダクト UI を担当します。対象には、ナレッジワークスペース管理、ソース取り込みフロー、Wiki レビューワークフロー、アシスタント設定、公開制御、将来の管理画面が含まれます。
 
@@ -46,7 +46,7 @@ src/types/               # Frontend-only TypeScript types
 
 コマンドは `frontend/` から実行します。
 
-`task dev` はローカルの Next.js 開発サーバーを起動します。
+`task dev` はローカルの Next.js 開発サーバーを起動します（通常はリポジトリルートの `task dev` が Tauri 経由で自動起動します）。
 
 `task lint` は、フロントエンド変更を完了扱いにする前に通す必要があります。
 

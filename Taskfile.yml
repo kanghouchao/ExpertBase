@@ -1,49 +1,35 @@
 version: "3"
 
 tasks:
-  start:
-    desc: Start infrastructure services for ENV, defaults to development
-    dir: infra
+  install:
+    desc: Install all dependencies
     cmds:
-      - task up ENV={{.ENV | default "development"}}
+      - bun install
+      - bun install --cwd frontend
 
-  stop:
-    desc: Stop infrastructure services for ENV, defaults to development
-    dir: infra
+  dev:
+    desc: Run the desktop app in development mode
     cmds:
-      - task down ENV={{.ENV | default "development"}}
+      - bunx tauri dev
 
-  restart:
-    desc: Restart local infrastructure services
+  build:
+    desc: Build the desktop app bundles
     cmds:
-      - task stop
-      - task start
+      - bunx tauri build
 
-  status:
-    desc: Show service status for ENV, defaults to development
-    dir: infra
+  lint:
+    desc: Lint the frontend
+    dir: frontend
     cmds:
-      - task ps ENV={{.ENV | default "development"}}
+      - bun run lint
 
-  logs:
-    desc: Follow service logs, for example `task logs -- postgres`
-    dir: infra
+  test:
+    desc: Run Rust tests
+    dir: src-tauri
     cmds:
-      - task logs ENV={{.ENV | default "development"}} -- {{.CLI_ARGS}}
-
-  config:
-    desc: Validate Compose configuration for ENV, defaults to development
-    dir: infra
-    cmds:
-      - task config ENV={{.ENV | default "development"}}
+      - cargo test
 
   clean:cache:
     desc: Remove local build and tool caches
     cmds:
-      - rm -rf frontend/.next frontend/.turbo backend/.pytest_cache backend/.ruff_cache
-
-  clean:docker:
-    desc: Remove stopped containers and dangling Docker cache
-    prompt: This removes stopped containers and dangling Docker cache. Continue?
-    cmds:
-      - docker system prune -f
+      - rm -rf frontend/.next frontend/out frontend/.turbo src-tauri/target

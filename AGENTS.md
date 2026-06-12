@@ -1,12 +1,11 @@
 # Expert Base Agent Guidelines
 
-Expert Base is a private, extensible knowledge base system for professional knowledge workers.
+Expert Base is a private, extensible, local-first knowledge base system for professional knowledge workers, shipped as a Tauri 2 desktop application.
 
 ## Repository Baseline
 
-- `frontend/`: [package.json](frontend/package.json).
-- `backend/`: [pyproject.toml](backend/pyproject.toml).
-- `infra/`: [compose.development.yml](infra/compose.development.yml).
+- `frontend/`: UI (Next.js static export). See [package.json](frontend/package.json).
+- `src-tauri/`: Rust core (desktop shell, local data layer). See [Cargo.toml](src-tauri/Cargo.toml).
 - `docs/`: User stories and feature specifications.
 
 ## Command Policy
@@ -15,12 +14,11 @@ Use Taskfile commands as the primary entrypoint.
 
 At the repository root, prefer:
 
-- `task start`  // Starts all services.
-- `task start:app` // Starts only the application services (frontend and backend).
-- `task stop` // Stops all services.
-- `task stop:app` // Stops only the application services (frontend and backend).
-- `task status` // Shows the status of all services.
-- `task logs` // Shows logs for all services.
-- `task clean:cache` // Cleans up cache and temporary files.
+- `task install`  // Installs all dependencies.
+- `task dev`      // Runs the desktop app in development mode.
+- `task build`    // Builds the desktop app bundles.
+- `task lint`     // Lints the frontend.
+- `task test`     // Runs Rust tests.
+- `task clean:cache` // Cleans up build caches.
 
 Inside subdirectories, read the local `AGENTS.md` first and use that directory's Taskfile.
