@@ -19,9 +19,9 @@ When working under `frontend/`, follow this file in addition to the repository-l
 
 ## Command Policy
 
-- Prefer Taskfile commands for frontend work.
-- Use `task install`, `task dev`, `task lint`, `task build`, and `task format` instead of calling `bun` directly.
-- Run direct `bun` or `bunx` commands only when the Taskfile does not expose the needed operation. If doing so, state why.
+- Prefer the `package.json` scripts for frontend work.
+- Use `bun install`, `bun run dev`, `bun run lint`, `bun run build`, and `bun run format` from `frontend/`.
+- Run other `bun` or `bunx` commands only when the scripts do not expose the needed operation. If doing so, state why.
 
 ## Directory Rules
 
@@ -43,7 +43,7 @@ Create new folders only when the first real file needs them. Do not add empty ar
 ## shadcn/ui Practices
 
 - Use shadcn/ui components before creating custom primitives.
-- Add components with `task shadcn:add -- <component>`.
+- Add components with `bunx shadcn add <component>`.
 - Check installed components before importing them.
 - Use semantic tokens such as `bg-background`, `text-foreground`, `text-muted-foreground`, `border-border`, and `bg-card`.
 - Use `cn()` from `src/lib/utils.ts` for conditional classes.
@@ -68,7 +68,7 @@ Create new folders only when the first real file needs them. Do not add empty ar
 
 ## Quality Bar
 
-- Before finishing frontend changes, run `task lint`.
-- Run `task build` when changing routing, layout, config, imports, or anything that can affect production compilation.
+- Before finishing frontend changes, run `bun run lint`.
+- Run `bun run build` when changing routing, layout, config, imports, or anything that can affect production compilation.
 - If build fails due to local sandbox or network restrictions, report the exact reason instead of hiding it.
 - Do not modify generated shadcn/ui components unless the change is intentional and documented.

@@ -46,12 +46,12 @@ src/types/               # Frontend-only TypeScript types
 
 コマンドは `frontend/` から実行します。
 
-`task dev` はローカルの Next.js 開発サーバーを起動します（通常はリポジトリルートの `task dev` が Tauri 経由で自動起動します）。
+`bun run dev` はローカルの Next.js 開発サーバーを起動します（通常はリポジトリルートの `bun run dev` が Tauri 経由で自動起動します）。
 
-`task lint` は、フロントエンド変更を完了扱いにする前に通す必要があります。
+`bun run lint` は、フロントエンド変更を完了扱いにする前に通す必要があります。
 
-`task format` は Prettier でフロントエンドファイルを整形します。
+`bun run format` は Prettier でフロントエンドファイルを整形します。
 
-`task format:check` は Prettier の整形状態を検証します。
+`bun run format:check` は Prettier の整形状態を検証します。
 
-`task build` は、routing、layout、config、import、本番ビルドに影響するコードを変更したときに使います。
+`bun run build` は、routing、layout、config、import、本番ビルドに影響するコードを変更したときに使います。

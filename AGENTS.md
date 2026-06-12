@@ -10,15 +10,15 @@ Expert Base is a private, extensible, local-first knowledge base system for prof
 
 ## Command Policy
 
-Use Taskfile commands as the primary entrypoint.
+Use the root `package.json` scripts as the primary entrypoint.
 
 At the repository root, prefer:
 
-- `task install`  // Installs all dependencies.
-- `task dev`      // Runs the desktop app in development mode.
-- `task build`    // Builds the desktop app bundles.
-- `task lint`     // Lints the frontend.
-- `task test`     // Runs Rust tests.
-- `task clean:cache` // Cleans up build caches.
+- `bun run setup`  // Installs all dependencies.
+- `bun run dev`    // Runs the desktop app in development mode.
+- `bun run build`  // Builds the desktop app bundles.
+- `bun run lint`   // Lints the frontend.
+- `bun run test`   // Runs Rust tests.
+- `bun run clean`  // Cleans up build caches.
 
-Inside subdirectories, read the local `AGENTS.md` first and use that directory's Taskfile.
+Inside subdirectories, read the local `AGENTS.md` first.

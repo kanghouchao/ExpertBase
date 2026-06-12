@@ -1,5 +1,15 @@
 {
-  "dependencies": {},
+  "name": "expertbase",
+  "private": true,
+  "scripts": {
+    "setup": "bun install && bun install --cwd frontend",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "lint": "bun run --cwd frontend lint",
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "clean": "rm -rf frontend/.next frontend/out src-tauri/target",
+    "tauri": "tauri"
+  },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
   }
