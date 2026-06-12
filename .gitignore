@@ -1,5 +1,1 @@
-## Mac
-*.DS_Store
-
-## Windows
-Thumbs.db
+node_modules/
