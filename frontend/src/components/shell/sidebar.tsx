@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Logo } from "@/components/eb/logo";
 import { NavItem } from "@/components/shell/nav-item";
 import { KbSwitcher } from "@/components/shell/kb-switcher";
+import { KbStatus } from "@/components/shell/kb-status";
 import { useI18n } from "@/components/providers";
 import { NAV, PENDING } from "@/lib/data/mock";
 
@@ -54,6 +55,7 @@ export function Sidebar({
       </nav>
 
       <KbSwitcher activeId={activeKb} setActiveId={setActiveKb} />
+      <KbStatus />
     </aside>
   );
 }
