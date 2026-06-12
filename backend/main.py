@@ -1,6 +1,8 @@
-def main():
-    print("Hello from backend!")
+from fastapi import FastAPI
+
+app = FastAPI(title="Expert Base API")
 
 
-if __name__ == "__main__":
-    main()
+@app.get("/hello")
+def hello():
+    return {"message": "Hello, world!"}

@@ -12,13 +12,13 @@ services:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
     ports:
-      - "${TRAEFIK_HTTP_PORT:-8080}:80"
+      - "${TRAEFIK_HTTP_PORT:-80}:80"
       - "${TRAEFIK_DASHBOARD_PORT:-8081}:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     labels:
       traefik.enable: "true"
-      traefik.http.routers.traefik.rule: Host(`traefik.${APP_HOST:-expertbase.localhost}`)
+      traefik.http.routers.traefik.rule: Host(`${TRAEFIK_HOST:-traefik.expertbase.localhost}`)
       traefik.http.routers.traefik.service: api@internal
 
   postgres:
@@ -92,7 +92,7 @@ services:
     profiles:
       - app
     working_dir: /app
-    command: ${BACKEND_COMMAND:-uv run python main.py}
+    command: ${BACKEND_COMMAND:-uv run uvicorn main:app --host 0.0.0.0 --port 8000}
     environment:
       APP_ENV: ${APP_ENV:-development}
       APP_NAME: ${APP_NAME:-Expert Base API}
@@ -113,8 +113,11 @@ services:
         condition: service_healthy
     labels:
       traefik.enable: "true"
-      traefik.http.routers.backend.rule: Host(`${API_HOST:-api.expertbase.localhost}`)
+      traefik.http.routers.backend.rule: Host(`${APP_HOST:-expertbase.localhost}`) && PathPrefix(`${API_PATH_PREFIX:-/api}`)
       traefik.http.routers.backend.entrypoints: web
+      traefik.http.routers.backend.priority: "20"
+      traefik.http.routers.backend.middlewares: backend-strip-api
+      traefik.http.middlewares.backend-strip-api.stripprefix.prefixes: ${API_PATH_PREFIX:-/api}
       traefik.http.services.backend.loadbalancer.server.port: "8000"
 
   frontend:
@@ -123,20 +126,26 @@ services:
     profiles:
       - app
     working_dir: /app
-    command: ${FRONTEND_COMMAND:-bun run dev --hostname 0.0.0.0}
+    command:
+      - sh
+      - -c
+      - ${FRONTEND_COMMAND:-bun install && bun run dev --hostname 0.0.0.0}
     environment:
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://api.expertbase.localhost:8080}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://${APP_HOST:-expertbase.localhost}${API_PATH_PREFIX:-/api}}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     volumes:
       - ../frontend:/app
+      - frontend_node_modules:/app/node_modules
     labels:
       traefik.enable: "true"
       traefik.http.routers.frontend.rule: Host(`${APP_HOST:-expertbase.localhost}`)
       traefik.http.routers.frontend.entrypoints: web
+      traefik.http.routers.frontend.priority: "10"
       traefik.http.services.frontend.loadbalancer.server.port: "3000"
 
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  frontend_node_modules:
