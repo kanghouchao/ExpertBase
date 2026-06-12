@@ -8,10 +8,13 @@ import { PageHead } from "@/components/eb/page-head";
 import { Panel } from "@/components/eb/panel";
 import { Tag } from "@/components/eb/tag";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { useI18n } from "@/components/providers";
 import { GRAPH_CATS, GRAPH_DATA } from "@/lib/data/mock";
+import { wikiCategoryLabel } from "@/lib/i18n/data";
 import { cn } from "@/lib/utils";
 
 export function GraphView() {
+  const { t } = useI18n();
   const [selected, setSelected] = useState<string | null>("yancha");
   const selectedNode = GRAPH_DATA.nodes.find((node) => node.id === selected);
   const neighbours = useMemo(() => {
@@ -25,14 +28,14 @@ export function GraphView() {
   return (
     <div className="view-enter">
       <PageHead
-        eyebrow="关系图谱 · Graph"
-        title="知识的关联网络"
-        sub={`${GRAPH_DATA.nodes.length} 个概念、${GRAPH_DATA.edges.length} 条双向链接，由关系图谱自动编织。`}
+        eyebrow={t("graph.eyebrow")}
+        title={t("graph.title")}
+        sub={t("graph.sub", { nodes: GRAPH_DATA.nodes.length, edges: GRAPH_DATA.edges.length })}
         right={
           <>
             <Button variant="outline" className="border-line-strong bg-surface">
               <Icon name="layers" size={17} />
-              重新布局
+              {t("graph.relayout")}
             </Button>
             <Link
               href="/wiki"
@@ -42,7 +45,7 @@ export function GraphView() {
               )}
             >
               <Icon name="book" size={17} />
-              列表视图
+              {t("graph.list")}
             </Link>
           </>
         }
@@ -56,7 +59,7 @@ export function GraphView() {
                 className="flex items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 font-mono text-[11.5px] font-semibold text-ink-soft"
               >
                 <span className="size-2 rounded-full" style={{ background: color }} />
-                {cat}
+                {wikiCategoryLabel(cat, t)}
               </span>
             ))}
           </div>
@@ -124,13 +127,13 @@ export function GraphView() {
                   className="size-1.75 rounded-full"
                   style={{ background: GRAPH_CATS[selectedNode.cat] }}
                 />
-                {selectedNode.cat}
+                {wikiCategoryLabel(selectedNode.cat, t)}
               </Tag>
               <h2 className="mt-3 font-serif text-[28px] font-semibold text-ink">
                 {selectedNode.label}
               </h2>
               <div className="mt-1.5 font-mono text-[12.5px] text-ink-muted">
-                {neighbours.length} 个连接 · 直接连接
+                {t("graph.connections", { count: neighbours.length })}
               </div>
               <div className="mt-5 grid gap-1.5">
                 {neighbours.map(
@@ -147,7 +150,7 @@ export function GraphView() {
                         />
                         <span className="text-[13.5px] font-semibold text-ink">{node.label}</span>
                         <span className="ml-auto font-mono text-[11px] text-ink-faint">
-                          {node.cat}
+                          {wikiCategoryLabel(node.cat, t)}
                         </span>
                       </button>
                     )
@@ -155,7 +158,7 @@ export function GraphView() {
               </div>
               <Button className="mt-4 w-full">
                 <Icon name="spark" size={15} />
-                AI 寻找更多关联
+                {t("graph.aiMore")}
               </Button>
             </>
           )}

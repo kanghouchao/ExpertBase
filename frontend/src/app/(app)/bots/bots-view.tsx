@@ -8,23 +8,26 @@ import { PageHead } from "@/components/eb/page-head";
 import { Panel } from "@/components/eb/panel";
 import { Tag } from "@/components/eb/tag";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { useI18n } from "@/components/providers";
+import { L } from "@/lib/data/overrides";
 import { BOT_CHAT, BOTS } from "@/lib/data/mock";
 import { cn } from "@/lib/utils";
 
 export function BotsView() {
+  const { t, lang } = useI18n();
   const [botId, setBotId] = useState(BOTS[0].id);
   const bot = BOTS.find((item) => item.id === botId) ?? BOTS[0];
 
   return (
     <div className="view-enter">
       <PageHead
-        eyebrow="机器人 · Bots"
-        title="让 Wiki 开口说话"
-        sub="把知识库一键变成对话机器人，接入 LINE、Telegram 等渠道，为会员提供 7×24 的自然语言问答。"
+        eyebrow={t("bots.eyebrow")}
+        title={t("bots.title")}
+        sub={t("bots.sub")}
         right={
           <Button>
             <Icon name="plus" size={17} />
-            新建机器人
+            {t("bots.new")}
           </Button>
         }
       />
@@ -41,19 +44,21 @@ export function BotsView() {
                     <Icon name="bot" size={19} />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-semibold text-ink">{item.name}</div>
+                    <div className="truncate font-semibold text-ink">
+                      {L("bot", item, "name", lang)}
+                    </div>
                     <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-ink-muted">
-                      {item.desc}
+                      {L("bot", item, "desc", lang)}
                     </p>
                   </div>
                   <Tag tone={item.status === "online" ? "ai" : "muted"}>
-                    {item.status === "online" ? "在线" : "草稿"}
+                    {t(item.status === "online" ? "bots.online" : "bots.draft")}
                   </Tag>
                 </div>
                 <div className="mt-4 flex gap-4 font-mono text-[11px] text-ink-faint">
                   <span>{item.channel}</span>
-                  <span>{item.members} 会员</span>
-                  <span>{item.msgs} 消息</span>
+                  <span>{t("bots.members", { count: item.members })}</span>
+                  <span>{t("bots.messages", { count: item.msgs })}</span>
                 </div>
               </Panel>
             </button>
@@ -63,53 +68,60 @@ export function BotsView() {
             className={cn(buttonVariants({ variant: "outline" }), "border-line-strong bg-surface")}
           >
             <Icon name="plug" size={15} />
-            从插件市场添加渠道
+            {t("bots.addChannel")}
           </Link>
         </div>
         <div className="grid grid-cols-[1fr_360px] gap-5">
           <Panel>
             <div className="mb-5 flex items-start justify-between">
               <div>
-                <h2 className="font-serif text-[30px] font-semibold text-ink">{bot.name}</h2>
-                <p className="mt-1 text-[13.5px] text-ink-muted">{bot.desc}</p>
+                <h2 className="font-serif text-[30px] font-semibold text-ink">
+                  {L("bot", bot, "name", lang)}
+                </h2>
+                <p className="mt-1 text-[13.5px] text-ink-muted">{L("bot", bot, "desc", lang)}</p>
               </div>
               <Tag tone={bot.status === "online" ? "ai" : "muted"}>
-                {bot.status === "online" ? "● 在线" : "草稿"}
+                {t(bot.status === "online" ? "bots.online.dot" : "bots.draft")}
               </Tag>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              {["引用知识来源", "仅回答库内问题", "记录会员问题", "转人工兜底"].map((item) => (
+              {[
+                "bots.policy.cite",
+                "bots.policy.scope",
+                "bots.policy.log",
+                "bots.policy.handoff",
+              ].map((item) => (
                 <label
                   key={item}
                   className="flex items-center gap-2 rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-[13px] font-semibold"
                 >
                   <input type="checkbox" defaultChecked className="accent-brand" />
-                  {item}
+                  {t(item)}
                 </label>
               ))}
             </div>
             <div className="mt-5 rounded-xl border border-ai-soft bg-ai-wash p-4 text-[13px] text-ink-soft">
               <div className="mb-1 flex items-center gap-2 font-bold text-ai">
                 <Icon name="db" size={15} />
-                由本地向量库检索增强
+                {t("bots.rag.title")}
               </div>
-              回答会优先引用 Wiki 条目，并在无法命中时提示用户补充素材。
+              {t("bots.rag.body")}
             </div>
             <div className="mt-5 flex gap-3">
               <Button variant="outline" className="border-line-strong bg-surface">
                 <Icon name="check" size={15} />
-                保存草稿
+                {t("bots.saveDraft")}
               </Button>
               <Button>
                 <Icon name="upload" size={15} />
-                发布上线
+                {t("bots.publish")}
               </Button>
             </div>
           </Panel>
           <Panel pad={0} className="overflow-hidden">
             <div className="border-b border-line px-4 py-3">
-              <div className="font-semibold">实时预览 · 试着对话</div>
-              <div className="mt-0.5 font-mono text-[11px] text-ai">● 在线 · 通常秒回</div>
+              <div className="font-semibold">{t("bots.preview")}</div>
+              <div className="mt-0.5 font-mono text-[11px] text-ai">{t("bots.replySpeed")}</div>
             </div>
             <div className="grid gap-3 p-4">
               {BOT_CHAT.map((message, index) => (
@@ -137,7 +149,7 @@ export function BotsView() {
             </div>
             <div className="border-t border-line p-3">
               <div className="flex items-center gap-2 rounded-xl border border-line-strong bg-surface-2 px-3 py-2 text-[13px] text-ink-faint">
-                试着问问看…
+                {t("bots.ask")}
                 <Icon name="send" size={15} className="ml-auto text-brand" />
               </div>
             </div>

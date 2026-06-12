@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 
 import { Icon, type IconName } from "@/components/eb/icon";
@@ -6,7 +8,10 @@ import { Panel } from "@/components/eb/panel";
 import { Ring } from "@/components/eb/ring";
 import { Tag } from "@/components/eb/tag";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/components/providers";
 import { LINT, PENDING, RAW_MATERIALS, STATS, type TagTone } from "@/lib/data/mock";
+import { L } from "@/lib/data/overrides";
+import { qualityLabel } from "@/lib/i18n/data";
 import { cn } from "@/lib/utils";
 import { MaterialRow } from "../_components/material-row";
 
@@ -23,6 +28,8 @@ function QueueCard({
   tone?: TagTone;
   href: string;
 }) {
+  const { t } = useI18n();
+
   return (
     <Link href={href}>
       <Panel hover className="h-full">
@@ -41,7 +48,7 @@ function QueueCard({
           </div>
         </div>
         <div className="flex items-center justify-between border-t border-line pt-3">
-          <Tag tone={tone}>AI 辅助</Tag>
+          <Tag tone={tone}>{t("workshop.aiAssist")}</Tag>
           <Icon name="arrowR" size={15} className="text-ink-faint" />
         </div>
       </Panel>
@@ -50,16 +57,18 @@ function QueueCard({
 }
 
 export function WorkshopView() {
+  const { t, lang } = useI18n();
+
   return (
     <div className="view-enter">
       <PageHead
-        eyebrow="工作坊 · Workshop"
-        title="整理与加工"
-        sub="把素材加工成知识，把已有知识修补完善。你定方向，AI 在一旁辅助。"
+        eyebrow={t("workshop.eyebrow")}
+        title={t("workshop.title")}
+        sub={t("workshop.sub")}
         right={
           <Button variant="outline" className="border-line-strong bg-surface">
             <Icon name="scan" size={17} />
-            重新体检
+            {t("workshop.rescan")}
           </Button>
         }
       />
@@ -69,24 +78,26 @@ export function WorkshopView() {
           <Ring value={STATS.health} size={58} sw={6} />
           <div className="flex-1">
             <div className="text-[15px] font-bold text-ink">
-              知识库健康度 {STATS.health >= 70 ? "良好" : "待提升"}
+              {t("workshop.health", { level: qualityLabel(STATS.health, t) })}
             </div>
-            <div className="mt-1 text-[13px] text-ink-muted">
-              AI 体检 12 分钟前 · 这里集中处理素材加工与知识修补
-            </div>
+            <div className="mt-1 text-[13px] text-ink-muted">{t("workshop.scan")}</div>
           </div>
           <div className="flex gap-7 pr-2">
             <div>
               <div className="font-serif text-[26px] leading-none font-bold text-brand">
                 {PENDING}
               </div>
-              <div className="mt-1 font-mono text-[11px] text-ink-faint">待加工素材</div>
+              <div className="mt-1 font-mono text-[11px] text-ink-faint">
+                {t("workshop.pendingMaterials")}
+              </div>
             </div>
             <div>
               <div className="font-serif text-[26px] leading-none font-bold text-ai">
                 {LINT.length}
               </div>
-              <div className="mt-1 font-mono text-[11px] text-ink-faint">待优化知识</div>
+              <div className="mt-1 font-mono text-[11px] text-ink-faint">
+                {t("workshop.pendingKnowledge")}
+              </div>
             </div>
           </div>
         </div>
@@ -95,7 +106,7 @@ export function WorkshopView() {
       <div className="grid grid-cols-[1fr_1fr] gap-5">
         <div>
           <h2 className="mb-3 font-mono text-[12px] font-bold tracking-[0.12em] text-ink-muted uppercase">
-            待加工素材
+            {t("workshop.pendingMaterials")}
           </h2>
           <Panel pad={0}>
             {RAW_MATERIALS.filter((item) => item.status !== "processed").map((item) => (
@@ -104,7 +115,7 @@ export function WorkshopView() {
                 material={item}
                 action={
                   <Button size="sm" variant="outline">
-                    加工
+                    {t("workshop.process")}
                   </Button>
                 }
               />
@@ -113,7 +124,7 @@ export function WorkshopView() {
         </div>
         <div>
           <h2 className="mb-3 font-mono text-[12px] font-bold tracking-[0.12em] text-ink-muted uppercase">
-            待优化知识
+            {t("workshop.pendingKnowledge")}
           </h2>
           <div className="grid gap-3">
             {LINT.map((issue) => (
@@ -128,8 +139,8 @@ export function WorkshopView() {
                         ? "clock"
                         : "edit"
                 }
-                title={issue.title}
-                body={issue.detail}
+                title={L("lint", issue, "title", lang)}
+                body={L("lint", issue, "detail", lang)}
                 tone={issue.sev === "high" ? "accent" : "ai"}
                 href="/wiki"
               />

@@ -6,10 +6,12 @@ export function SegTabs<T extends string>({
   tabs,
   value,
   onChange,
+  label,
 }: {
   tabs: readonly T[];
   value: T;
   onChange: (value: T) => void;
+  label?: (value: T) => string;
 }) {
   return (
     <div className="inline-flex rounded-[11px] border border-line bg-surface-2 p-0.75">
@@ -24,7 +26,7 @@ export function SegTabs<T extends string>({
               active ? "bg-surface text-ink shadow-(--shadow-sm)" : "text-ink-muted hover:text-ink"
             )}
           >
-            {tab}
+            {label ? label(tab) : tab}
           </button>
         );
       })}

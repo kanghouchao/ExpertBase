@@ -25,7 +25,7 @@ export function Sidebar({
       item={item}
       active={item.id === activeId}
       label={t(`nav.${item.id}`)}
-      sublabel={t(`nav.${item.id}.en`)}
+      sublabel={t(`nav.${item.id}.sub`)}
       badge={item.id === "workshop" ? PENDING : undefined}
     />
   );
