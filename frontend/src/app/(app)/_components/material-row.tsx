@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { Icon } from "@/components/eb/icon";
 import { Tag } from "@/components/eb/tag";
 import { useI18n } from "@/components/providers";
-import { RAW_TYPE, STATUS, type RawMaterial } from "@/lib/data/mock";
+import { RAW_TYPE, STATUS, type RawMaterial } from "@/lib/data/types";
 
 export function MaterialRow({ material, action }: { material: RawMaterial; action?: ReactNode }) {
   const { t } = useI18n();
@@ -22,7 +22,7 @@ export function MaterialRow({ material, action }: { material: RawMaterial; actio
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13.5px] font-semibold text-ink">{material.title}</div>
         <div className="mt-0.5 truncate font-mono text-[11px] text-ink-faint">
-          {t(material.sourceKey)} · {t(material.dateKey)} · {material.size}
+          {material.source} · {material.date} · {material.size}
         </div>
       </div>
       <Tag tone={STATUS[material.status].tone}>{t(`st.${material.status}`)}</Tag>

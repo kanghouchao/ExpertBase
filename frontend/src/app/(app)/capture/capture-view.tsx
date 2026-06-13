@@ -8,7 +8,8 @@ import { PageHead } from "@/components/eb/page-head";
 import { Panel } from "@/components/eb/panel";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/components/providers";
-import { RAW_MATERIALS } from "@/lib/data/mock";
+import { EmptyState } from "@/components/eb/empty-state";
+import { RAW_MATERIALS } from "@/lib/data/store";
 import { MaterialRow } from "../_components/material-row";
 import { SegTabs } from "../_components/seg-tabs";
 
@@ -19,26 +20,9 @@ export function CaptureView() {
   const { t } = useI18n();
   const [tab, setTab] = useState<Tab>("upload");
   const [text, setText] = useState("");
-  const [items, setItems] = useState(RAW_MATERIALS);
+  const items = RAW_MATERIALS;
   const pending = items.filter((item) => item.status !== "processed");
-
-  const addItem = () => {
-    setItems((current) => [
-      {
-        id: `n${Date.now()}`,
-        type: "pdf",
-        title: t("capture.new.title"),
-        sourceKey: "raw.r2.source",
-        dateKey: "time.2h",
-        status: "pending",
-        size: "—",
-        preview: t("capture.new.preview"),
-        words: 0,
-        tags: [],
-      },
-      ...current,
-    ]);
-  };
+  const captureDisabled = true;
 
   return (
     <div className="view-enter mx-auto max-w-190">
@@ -51,8 +35,8 @@ export function CaptureView() {
         <div className="p-5.5">
           {tab === "upload" && (
             <button
-              onClick={addItem}
-              className="w-full rounded-2xl border-2 border-dashed border-line-strong bg-surface-2 px-6 py-12 text-center transition hover:border-brand hover:bg-brand-wash"
+              disabled={captureDisabled}
+              className="w-full cursor-not-allowed rounded-2xl border-2 border-dashed border-line-strong bg-surface-2 px-6 py-12 text-center opacity-70 transition"
             >
               <span className="mx-auto mb-4 grid size-14 place-items-center rounded-[15px] bg-surface text-brand shadow-(--shadow-sm)">
                 <Icon name="upload" size={26} />
@@ -62,6 +46,9 @@ export function CaptureView() {
               </span>
               <span className="mt-1.5 block text-[13px] text-ink-muted">
                 {t("capture.upload.sub")}
+              </span>
+              <span className="mt-2 block text-[12.5px] font-semibold text-brand">
+                {t("capture.disabled")}
               </span>
               <span className="mt-4 flex justify-center gap-2 text-ink-muted">
                 {(["pdf", "doc", "audio", "video", "scan", "note"] as IconName[]).map((icon) => (
@@ -78,13 +65,19 @@ export function CaptureView() {
 
           {tab === "record" && (
             <div className="py-8 text-center">
-              <button className="mx-auto grid size-24 place-items-center rounded-full bg-ink text-paper shadow-(--shadow-md)">
+              <button
+                disabled={captureDisabled}
+                className="mx-auto grid size-24 cursor-not-allowed place-items-center rounded-full bg-ink text-paper opacity-70 shadow-(--shadow-md)"
+              >
                 <Icon name="mic" size={34} />
               </button>
               <div className="mt-5 font-mono text-[28px] font-semibold tracking-[0.04em] text-ink">
                 00:00
               </div>
               <div className="mt-2.5 text-[13.5px] text-ink-muted">{t("capture.record.tip")}</div>
+              <div className="mt-2 text-[12.5px] font-semibold text-brand">
+                {t("capture.disabled")}
+              </div>
             </div>
           )}
 
@@ -100,17 +93,16 @@ export function CaptureView() {
                 <span className="font-mono text-xs text-ink-faint">
                   {t("capture.manual.count", { count: text.length })}
                 </span>
-                <Button size="sm" disabled={!text.trim()}>
+                <Button size="sm" disabled>
                   <Icon name="check" size={15} />
                   {t("capture.manual.save")}
                 </Button>
               </div>
+              <div className="mt-2 text-[12.5px] font-semibold text-brand">
+                {t("capture.disabled")}
+              </div>
             </div>
           )}
-        </div>
-        <div className="flex items-center gap-2 border-t border-line bg-surface-2 px-5.5 py-3 text-[12.5px] text-ink-muted">
-          <Icon name="plug" size={15} className="text-ai" />
-          {t("capture.plugin.note")}
         </div>
       </Panel>
 
@@ -130,6 +122,9 @@ export function CaptureView() {
         </Link>
       </div>
       <Panel pad={0}>
+        {items.length === 0 && (
+          <EmptyState icon="inbox" title={t("empty.materials")} sub={t("empty.materials.sub")} />
+        )}
         {items.slice(0, 5).map((item) => (
           <MaterialRow key={item.id} material={item} />
         ))}

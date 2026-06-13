@@ -5,17 +5,10 @@ import { usePathname } from "next/navigation";
 import { Logo } from "@/components/eb/logo";
 import { NavItem } from "@/components/shell/nav-item";
 import { KbSwitcher } from "@/components/shell/kb-switcher";
-import { KbStatus } from "@/components/shell/kb-status";
 import { useI18n } from "@/components/providers";
-import { NAV, PENDING } from "@/lib/data/mock";
+import { NAV } from "@/lib/nav";
 
-export function Sidebar({
-  activeKb,
-  setActiveKb,
-}: {
-  activeKb: string;
-  setActiveKb: (id: string) => void;
-}) {
+export function Sidebar({ onAddKb }: { onAddKb: () => void }) {
   const { t } = useI18n();
   const pathname = usePathname();
   const activeId = NAV.find((n) => n.href === pathname)?.id ?? "dash";
@@ -27,7 +20,6 @@ export function Sidebar({
       active={item.id === activeId}
       label={t(`nav.${item.id}`)}
       sublabel={t(`nav.${item.id}.sub`)}
-      badge={item.id === "workshop" ? PENDING : undefined}
     />
   );
 
@@ -54,8 +46,7 @@ export function Sidebar({
         {NAV.slice(5).map(renderItem)}
       </nav>
 
-      <KbSwitcher activeId={activeKb} setActiveId={setActiveKb} />
-      <KbStatus />
+      <KbSwitcher onAdd={onAddKb} />
     </aside>
   );
 }

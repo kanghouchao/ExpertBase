@@ -5,13 +5,13 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Panel } from "@/components/eb/panel";
-import { Tag } from "@/components/eb/tag";
 import { PageHead } from "@/components/eb/page-head";
 import { Icon, type IconName } from "@/components/eb/icon";
 import { useI18n } from "@/components/providers";
 import { RecentMaterials } from "@/components/dashboard/recent-materials";
 import { WikiHealth } from "@/components/dashboard/wiki-health";
-import { PENDING, STATS } from "@/lib/data/mock";
+import { PENDING, STATS } from "@/lib/data/store";
+import { useKbStore } from "@/lib/kb/store";
 
 type Tone = "accent" | "ai";
 
@@ -93,6 +93,7 @@ function PipelineStep({
 
 export function DashboardView() {
   const { t, lang } = useI18n();
+  const { active } = useKbStore();
   const nf = new Intl.NumberFormat(lang === "zh" ? "zh-CN" : lang);
   const count = (value: number, unitKey: string) => `${nf.format(value)} ${t(unitKey)}`;
 
@@ -103,7 +104,7 @@ export function DashboardView() {
         title={
           <>
             {t("dash.greet.a")}
-            <span className="text-brand italic">{t("dash.greet.b")}</span>
+            <span className="text-brand italic">{active?.name ?? t("nav.dash")}</span>
           </>
         }
         sub={t("dash.sub")}
@@ -127,7 +128,6 @@ export function DashboardView() {
             <div className="text-[15px] font-bold">{t("dash.pipeline")}</div>
             <div className="mt-0.75 text-[12.5px] text-ink-muted">{t("dash.pipeline.sub")}</div>
           </div>
-          <Tag tone="ai">{t("dash.plugins.running")}</Tag>
         </div>
         <div className="flex items-start">
           <PipelineStep

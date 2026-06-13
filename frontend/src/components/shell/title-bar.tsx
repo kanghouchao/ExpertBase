@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 
 import { Icon } from "@/components/eb/icon";
 import { useI18n } from "@/components/providers";
-import { NAV } from "@/lib/data/mock";
+import { NAV } from "@/lib/nav";
 
 export function TitleBar({ kbLabel, onSettings }: { kbLabel: string; onSettings: () => void }) {
   const { t } = useI18n();

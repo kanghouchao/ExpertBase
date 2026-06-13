@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import type { TagTone } from "@/lib/data/mock";
+import type { TagTone } from "@/lib/data/types";
 
 const TONES: Record<TagTone, string> = {
   line: "bg-transparent text-ink-muted border-line-strong",

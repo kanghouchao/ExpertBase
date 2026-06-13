@@ -1,29 +1,8 @@
 import type { Translate } from "@/lib/i18n/translate";
 
-const WIKI_CATEGORY_KEYS: Record<string, string> = {
-  全部: "cat.all",
-  茶类: "cat.teaType",
-  工艺: "cat.craft",
-  仓储: "cat.storageTea",
-  冲泡: "cat.brewing",
-  成分: "cat.component",
-  器具: "cat.tool",
-};
-
-const PLUGIN_CATEGORY_KEYS: Record<string, string> = {
-  全部: "cat.all",
-  处理: "cat.process",
-  存储: "cat.storage",
-  发布: "cat.publish",
-  Bot: "Bot",
-};
-
+// カテゴリはユーザーデータ由来のため翻訳しない。「全部」センチネルだけ UI 言語に追従する。
 export function wikiCategoryLabel(category: string, t: Translate): string {
-  return t(WIKI_CATEGORY_KEYS[category] ?? category);
-}
-
-export function pluginCategoryLabel(category: string, t: Translate): string {
-  return t(PLUGIN_CATEGORY_KEYS[category] ?? category);
+  return category === "全部" ? t("cat.all") : category;
 }
 
 export function qualityLabel(value: number, t: Translate): string {

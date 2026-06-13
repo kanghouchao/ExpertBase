@@ -6,8 +6,10 @@ import { cn } from "@/lib/utils";
 import { Panel } from "@/components/eb/panel";
 import { Tag } from "@/components/eb/tag";
 import { Icon } from "@/components/eb/icon";
+import { EmptyState } from "@/components/eb/empty-state";
 import { useI18n } from "@/components/providers";
-import { RAW_MATERIALS, RAW_TYPE, STATUS } from "@/lib/data/mock";
+import { RAW_MATERIALS } from "@/lib/data/store";
+import { RAW_TYPE, STATUS } from "@/lib/data/types";
 
 export function RecentMaterials() {
   const { t } = useI18n();
@@ -22,6 +24,9 @@ export function RecentMaterials() {
           {t("dash.viewAll")} <Icon name="chevR" size={13} />
         </Link>
       </div>
+      {RAW_MATERIALS.length === 0 && (
+        <EmptyState icon="inbox" title={t("empty.materials")} sub={t("empty.materials.sub")} />
+      )}
       {RAW_MATERIALS.slice(0, 4).map((r, i) => {
         const ty = RAW_TYPE[r.type];
         return (
@@ -42,7 +47,7 @@ export function RecentMaterials() {
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-semibold">{r.title}</span>
               <span className="mt-0.5 block font-mono text-xs text-ink-faint">
-                {t(r.sourceKey)} · {t(r.dateKey)}
+                {r.source} · {r.date}
               </span>
             </span>
             <Tag tone={STATUS[r.status].tone}>{t(`st.${r.status}`)}</Tag>

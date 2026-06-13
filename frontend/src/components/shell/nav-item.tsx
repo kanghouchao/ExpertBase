@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/eb/icon";
-import type { NavItem as NavItemData } from "@/lib/data/mock";
+import type { NavItem as NavItemData } from "@/lib/nav";
 
 export function NavItem({
   item,

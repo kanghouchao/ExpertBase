@@ -10,10 +10,15 @@ import { Ring } from "@/components/eb/ring";
 import { Tag } from "@/components/eb/tag";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useI18n } from "@/components/providers";
-import { WIKI, WIKI_CATS, type WikiEntry } from "@/lib/data/mock";
+import { EmptyState } from "@/components/eb/empty-state";
+import { WIKI } from "@/lib/data/store";
+import type { WikiEntry } from "@/lib/data/types";
 import { qualityLabel, wikiCategoryLabel } from "@/lib/i18n/data";
 import { cn } from "@/lib/utils";
 import { SegTabs } from "../_components/seg-tabs";
+
+// カテゴリはユーザーデータ由来。「全部」だけはセンチネルとして常に先頭に置く。
+const ALL_CAT = "全部";
 
 function EntryCard({ entry, onOpen }: { entry: WikiEntry; onOpen: (entry: WikiEntry) => void }) {
   const { t } = useI18n();
@@ -62,12 +67,13 @@ function EntryCard({ entry, onOpen }: { entry: WikiEntry; onOpen: (entry: WikiEn
 
 export function WikiView() {
   const { t } = useI18n();
-  const [category, setCategory] = useState<(typeof WIKI_CATS)[number]>("全部");
+  const [category, setCategory] = useState<string>(ALL_CAT);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<WikiEntry | null>(null);
+  const cats = [ALL_CAT, ...new Set(WIKI.map((entry) => entry.cat))];
   const list = WIKI.filter(
     (entry) =>
-      (category === "全部" || entry.cat === category) &&
+      (category === ALL_CAT || entry.cat === category) &&
       (!query || entry.title.includes(query) || entry.excerpt.includes(query))
   );
 
@@ -104,7 +110,7 @@ export function WikiView() {
       />
       <div className="mb-4.5 flex flex-wrap items-center gap-3.5">
         <SegTabs
-          tabs={WIKI_CATS}
+          tabs={cats}
           value={category}
           onChange={setCategory}
           label={(item) => wikiCategoryLabel(item, t)}
@@ -120,11 +126,17 @@ export function WikiView() {
           />
         </label>
       </div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(258px,1fr))] gap-3.5">
-        {list.map((entry) => (
-          <EntryCard key={entry.id} entry={entry} onOpen={setOpen} />
-        ))}
-      </div>
+      {list.length === 0 ? (
+        <Panel pad={0}>
+          <EmptyState icon="book" title={t("empty.wiki")} sub={t("empty.wiki.sub")} />
+        </Panel>
+      ) : (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(258px,1fr))] gap-3.5">
+          {list.map((entry) => (
+            <EntryCard key={entry.id} entry={entry} onOpen={setOpen} />
+          ))}
+        </div>
+      )}
 
       {open && (
         <div
@@ -182,10 +194,6 @@ export function WikiView() {
               </Panel>
               <article className="text-[15.5px] leading-[1.85] text-ink-soft">
                 <p>{open.excerpt}</p>
-                <p className="mt-4">{t("wiki.body.extra")}</p>
-                <blockquote className="mt-4 rounded-r-[10px] border-l-3 border-brand bg-surface px-4.5 py-3.5 italic">
-                  {t("wiki.quote")}
-                </blockquote>
               </article>
               <div className="mt-7 grid grid-cols-2 gap-5">
                 <div>
