@@ -8,7 +8,7 @@ export type RouteId =
   | "workshop"
   | "wiki"
   | "graph"
-  | "showcase"
+  | "publish"
   | "bots"
   | "plugins";
 
@@ -25,7 +25,7 @@ export const NAV: NavItem[] = [
   { id: "workshop", href: "/workshop", icon: "merge" },
   { id: "wiki", href: "/wiki", icon: "book" },
   { id: "graph", href: "/graph", icon: "graph", tone: "ai" },
-  { id: "showcase", href: "/showcase", icon: "eye" },
+  { id: "publish", href: "/publish", icon: "broadcast" },
   { id: "bots", href: "/bots", icon: "bot" },
   { id: "plugins", href: "/plugins", icon: "plug" },
 ];

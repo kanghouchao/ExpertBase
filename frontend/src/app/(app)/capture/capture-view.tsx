@@ -9,17 +9,24 @@ import { Panel } from "@/components/eb/panel";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/components/providers";
 import { EmptyState } from "@/components/eb/empty-state";
+import { cn } from "@/lib/utils";
 import { RAW_MATERIALS } from "@/lib/data/store";
 import { MaterialRow } from "../_components/material-row";
 import { SegTabs } from "../_components/seg-tabs";
 
-const TABS = ["upload", "record", "manual"] as const;
+const TABS = ["upload", "record", "manual", "web"] as const;
 type Tab = (typeof TABS)[number];
+
+// 入力欄に値を入れて UX を示すための中立的なプレースホルダー例。
+const WEB_EXAMPLES = ["example.com/article", "blog.example.com/post", "docs.example.com/guide"];
 
 export function CaptureView() {
   const { t } = useI18n();
   const [tab, setTab] = useState<Tab>("upload");
   const [text, setText] = useState("");
+  const [webUrl, setWebUrl] = useState("");
+  const [depth, setDepth] = useState(1);
+  const [readability, setReadability] = useState(true);
   const items = RAW_MATERIALS;
   const pending = items.filter((item) => item.status !== "processed");
   const captureDisabled = true;
@@ -97,6 +104,94 @@ export function CaptureView() {
                   <Icon name="check" size={15} />
                   {t("capture.manual.save")}
                 </Button>
+              </div>
+              <div className="mt-2 text-[12.5px] font-semibold text-brand">
+                {t("capture.disabled")}
+              </div>
+            </div>
+          )}
+
+          {tab === "web" && (
+            <div>
+              {/* URL 入力行 */}
+              <div className="flex items-center gap-2.5 rounded-xl border border-line-strong bg-surface-2 py-1 pr-1 pl-3.5 transition-colors focus-within:border-ai">
+                <Icon name="globe" size={19} className="flex-none text-ai" />
+                <input
+                  value={webUrl}
+                  onChange={(event) => setWebUrl(event.target.value)}
+                  placeholder={t("capture.web.placeholder")}
+                  className="min-w-0 flex-1 bg-transparent py-2.25 font-mono text-[14.5px] text-ink outline-none placeholder:text-ink-faint"
+                />
+                <Button size="sm" disabled>
+                  <Icon name="arrowR" size={15} />
+                  {t("capture.web.crawl")}
+                </Button>
+              </div>
+
+              {/* 抓取オプション */}
+              <div className="mt-3.25 flex flex-wrap items-center gap-4 pl-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[12.5px] text-ink-muted">{t("capture.web.depth")}</span>
+                  <div className="inline-flex overflow-hidden rounded-[9px] border border-line-strong">
+                    {[1, 2, 3].map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setDepth(d)}
+                        className={cn(
+                          "h-7 w-7.5 font-mono text-[13px] font-semibold transition-colors",
+                          d > 1 && "border-l border-line",
+                          depth === d ? "bg-ai text-white" : "bg-surface text-ink-muted"
+                        )}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReadability((value) => !value)}
+                  className={cn(
+                    "flex items-center gap-1.75 text-[12.5px] font-semibold transition-colors",
+                    readability ? "text-ai" : "text-ink-faint"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "relative h-4.5 w-8 flex-none rounded-full transition-colors",
+                      readability ? "bg-ai" : "bg-line-strong"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "absolute top-0.5 size-3.5 rounded-full bg-white transition-[left]",
+                        readability ? "left-4" : "left-0.5"
+                      )}
+                    />
+                  </span>
+                  {t("capture.web.readability")}
+                </button>
+              </div>
+
+              {/* 入力例 */}
+              <div className="mt-4.5 flex flex-wrap items-center gap-2">
+                <span className="font-mono text-xs text-ink-faint">{t("capture.web.examples")}</span>
+                {WEB_EXAMPLES.map((example) => (
+                  <button
+                    key={example}
+                    type="button"
+                    onClick={() => setWebUrl(`https://${example}`)}
+                    className="rounded-full border border-line bg-surface px-3 py-1.25 font-mono text-xs text-ink-soft transition-colors hover:bg-surface-2"
+                  >
+                    {example}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-4 flex items-center gap-2.25">
+                <Icon name="plug" size={15} className="flex-none text-ai" />
+                <span className="text-[12.5px] text-ink-muted">{t("capture.web.hint")}</span>
               </div>
               <div className="mt-2 text-[12.5px] font-semibold text-brand">
                 {t("capture.disabled")}
