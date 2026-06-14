@@ -31,13 +31,13 @@ pub fn run() {
       kb::interface::kb_read_inbox_material,
       kb::interface::kb_save_entry,
       kb::interface::kb_list_inbox,
-      capture::capture_text,
-      capture::capture_file,
-      capture::capture_web,
-      ai::ai_has_key,
-      ai::ai_list_ollama_models,
-      workshop::workshop_draft,
-      workshop::workshop_confirm
+      capture::interface::capture_text,
+      capture::interface::capture_file,
+      capture::interface::capture_web,
+      ai::interface::ai_has_key,
+      ai::interface::ai_list_ollama_models,
+      workshop::interface::workshop_draft,
+      workshop::interface::workshop_confirm
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

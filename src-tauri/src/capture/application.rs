@@ -1,38 +1,18 @@
+//! capture アプリケーション層。取り込みユースケース。
+//! ドメイン（タイプ判定）とインフラ（抽出・FS）を編成し、受信箱へ素材を確定する。
+//! すべての取り込みは AI なし・完全ローカル。
+
 use std::path::Path;
 
 use chrono::Utc;
 use rusqlite::Connection;
-use tauri::Manager;
 
+use crate::capture::domain::{kind_for_ext, split_name};
+use crate::capture::infrastructure::{doc, web};
 use crate::kb::index;
 use crate::kb::material::{serialize_material, Material, MaterialMeta};
 
-pub mod doc;
-pub mod web;
-
-/// 拡張子から素材タイプを判定する。未知は "file"。
-pub fn kind_for_ext(ext: &str) -> &'static str {
-  match ext.to_ascii_lowercase().as_str() {
-    "md" | "markdown" | "txt" | "text" => "text",
-    "pdf" => "pdf",
-    "doc" | "docx" => "doc",
-    "mp3" | "wav" | "m4a" | "aac" | "flac" | "ogg" => "audio",
-    "mp4" | "mov" | "mkv" | "webm" | "avi" => "video",
-    "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg" => "image",
-    _ => "file",
-  }
-}
-
-/// 名前を (ステム, 拡張子) に分割する。
-fn split_name(name: &str) -> (&str, Option<&str>) {
-  match name.rsplit_once('.') {
-    Some((stem, ext)) if !stem.is_empty() => (stem, Some(ext)),
-    _ => (name, None),
-  }
-}
-
 /// 受信箱へ素材を 1 件書き出し、インデックスへ登録して相対パスを返す。
-/// すべての取り込みはこの 1 関数を通る（AI なし・完全ローカル）。
 pub fn write_material(
   root: &Path,
   conn: &Connection,
@@ -86,26 +66,18 @@ pub fn copy_attachment(root: &Path, src: &Path) -> Result<String, String> {
 }
 
 /// テキスト/Markdown の貼り付けを受信箱へ取り込む。
-#[tauri::command]
-pub fn capture_text(
-  app: tauri::AppHandle,
-  content: String,
-  source: String,
-) -> Result<String, String> {
-  let home = app.path().home_dir().map_err(|e| e.to_string())?;
-  let (root, conn) = crate::kb::open_active(&home)?;
-  write_material(&root, &conn, "text", &source, &content, None)
+pub fn ingest_text(home: &Path, content: &str, source: &str) -> Result<String, String> {
+  let (root, conn) = crate::kb::open_active(home)?;
+  write_material(&root, &conn, "text", source, content, None)
 }
 
 /// ローカルファイルを受信箱へ取り込む。
 /// 文字を持つ素材（テキスト）は本文として抽出し、
 /// 不透明メディア（音声/動画/画像）は attachments/ へコピーして添付参照にする。
-/// PDF/Word の本文抽出は capture/doc.rs（Task 2.2）で実装する。
-#[tauri::command]
-pub fn capture_file(app: tauri::AppHandle, path: String) -> Result<String, String> {
-  let home = app.path().home_dir().map_err(|e| e.to_string())?;
-  let (root, conn) = crate::kb::open_active(&home)?;
-  let src = Path::new(&path);
+/// PDF/Word は本文を抽出し、原本も添付として残す（出典参照のため）。
+pub fn ingest_file(home: &Path, path: &str) -> Result<String, String> {
+  let (root, conn) = crate::kb::open_active(home)?;
+  let src = Path::new(path);
   let ext = src.extension().and_then(|s| s.to_str()).unwrap_or("");
   let kind = kind_for_ext(ext);
   let source = src.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
@@ -115,7 +87,6 @@ pub fn capture_file(app: tauri::AppHandle, path: String) -> Result<String, Strin
       write_material(&root, &conn, "text", &source, &body, None)
     }
     "pdf" | "doc" => {
-      // デジタル文書は本文を抽出し、原本も添付として残す（出典参照のため）。
       let body = if kind == "pdf" {
         doc::extract_pdf(src)?
       } else {
@@ -125,7 +96,6 @@ pub fn capture_file(app: tauri::AppHandle, path: String) -> Result<String, Strin
       write_material(&root, &conn, kind, &source, &body, Some(&att))
     }
     _ => {
-      // 音声/動画/画像など不透明メディアは添付として保存（本文は任意で空）。
       let att = copy_attachment(&root, src)?;
       write_material(&root, &conn, kind, &source, "", Some(&att))
     }
@@ -133,41 +103,22 @@ pub fn capture_file(app: tauri::AppHandle, path: String) -> Result<String, Strin
 }
 
 /// Web ページを取り込む。Rust 側で取得し、Readability で本文を抽出して受信箱へ保存する。
-/// 原始 HTML はクラウドへ送らない（取得は HTTPS、抽出はローカル）。
-#[tauri::command]
-pub async fn capture_web(app: tauri::AppHandle, url: String) -> Result<String, String> {
-  let home = app.path().home_dir().map_err(|e| e.to_string())?;
-  let html = reqwest::Client::new()
-    .get(&url)
-    .header("User-Agent", "ExpertBase/0.1 (+local capture)")
-    .send()
-    .await
-    .map_err(|e| e.to_string())?
-    .text()
-    .await
-    .map_err(|e| e.to_string())?;
-  let (title, markdown) = web::extract_readable(&html, &url)?;
+pub async fn ingest_web(home: &Path, url: &str) -> Result<String, String> {
+  let html = web::fetch_html(url).await?;
+  let (title, markdown) = web::extract_readable(&html, url)?;
   let body = if title.trim().is_empty() {
     markdown
   } else {
     format!("# {title}\n\n{markdown}")
   };
-  let (root, conn) = crate::kb::open_active(&home)?;
-  write_material(&root, &conn, "web", &url, &body, None)
+  let (root, conn) = crate::kb::open_active(home)?;
+  write_material(&root, &conn, "web", url, &body, None)
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  #[test]
-  fn kind_for_ext_maps_known_extensions() {
-    assert_eq!(kind_for_ext("pdf"), "pdf");
-    assert_eq!(kind_for_ext("PNG"), "image");
-    assert_eq!(kind_for_ext("mp3"), "audio");
-    assert_eq!(kind_for_ext("md"), "text");
-    assert_eq!(kind_for_ext("xyz"), "file");
-  }
+  use crate::kb::index;
 
   #[test]
   fn write_text_material_creates_inbox_file_and_indexes() {

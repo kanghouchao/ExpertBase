@@ -1,16 +1,7 @@
+//! ai ドメイン層。AI プロバイダのポート（trait）と境界 DTO、ドメインエラー。
+//! 具体的な HTTP/プロバイダ実装には依存しない。
+
 use serde::Serialize;
-
-pub mod ollama;
-
-#[tauri::command]
-pub fn ai_has_key() -> Result<bool, String> {
-  Ok(ollama::OllamaProvider::available())
-}
-
-#[tauri::command]
-pub fn ai_list_ollama_models() -> Result<Vec<ollama::OllamaModel>, String> {
-  ollama::OllamaProvider::list_models().map_err(|e| e.to_string())
-}
 
 /// FTS で引いた関連既存条目の要約（title + excerpt）。
 #[derive(Clone, Debug)]

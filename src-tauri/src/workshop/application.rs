@@ -1,28 +1,14 @@
+//! workshop アプリケーション層。RAG 編成と条目確定のユースケース。
+//! kb（検索・索引・FS）と ai（プロバイダ）を編成する。AI は ai の trait の裏でのみ呼ぶ。
+
 use std::path::Path;
 
 use rusqlite::Connection;
-use tauri::Manager;
 
 use crate::ai::{AiError, AiProvider, EntrySummary, StructureRequest, StructureResult};
 use crate::kb::entry::{Entry, EntryMeta};
-use crate::kb::{index, material, store};
-
-/// 素材本文から検索候補語を取り出す（空白・句読点で分割、3 文字以上）。
-/// trigram FTS の制約上 3 文字未満は使えない。空白の無い CJK は recall が限られる（MVP の既知の制限）。
-fn candidate_terms(source: &str, max: usize) -> Vec<String> {
-  let mut seen = std::collections::HashSet::new();
-  let mut terms = Vec::new();
-  for raw in source.split(|c: char| c.is_whitespace() || c.is_ascii_punctuation()) {
-    let t = raw.trim();
-    if t.chars().count() >= 3 && seen.insert(t.to_string()) {
-      terms.push(t.to_string());
-      if terms.len() >= max {
-        break;
-      }
-    }
-  }
-  terms
-}
+use crate::kb::{index, store};
+use crate::workshop::domain::candidate_terms;
 
 /// 新素材に関連する既存条目を FTS で引く（RAG の検索段）。上位 n 件の title + excerpt。
 pub fn related_entries(
@@ -87,38 +73,6 @@ pub fn confirm(
   index::upsert_entry(conn, &rel, &entry)?;
   index::set_inbox_status(conn, inbox_rel, "processed")?;
   Ok(rel)
-}
-
-/// 受信箱素材 + 指示文から AI 構造化草稿を生成する。
-#[tauri::command]
-pub fn workshop_draft(
-  app: tauri::AppHandle,
-  inbox_path: String,
-  instruction: String,
-  model: String,
-) -> Result<StructureResult, String> {
-  let home = app.path().home_dir().map_err(|e| e.to_string())?;
-  let (root, conn) = crate::kb::open_active(&home)?;
-  let inbox_rel = crate::kb::checked_kb_markdown_path(&inbox_path, "inbox")?;
-  let raw = std::fs::read_to_string(root.join(inbox_rel)).map_err(|e| e.to_string())?;
-  let material = material::parse_material(&raw)?;
-  let provider = crate::ai::ollama::OllamaProvider::with_model(model);
-  draft(&provider, &conn, &material.body, &instruction).map_err(|e| e.to_string())
-}
-
-/// 承認内容を条目として確定する（UI で手編集済みの値を受け取る）。
-#[tauri::command]
-pub fn workshop_confirm(
-  app: tauri::AppHandle,
-  inbox_path: String,
-  title: String,
-  cat: String,
-  body: String,
-) -> Result<String, String> {
-  let home = app.path().home_dir().map_err(|e| e.to_string())?;
-  let (root, conn) = crate::kb::open_active(&home)?;
-  let inbox_rel = crate::kb::checked_kb_markdown_path(&inbox_path, "inbox")?;
-  confirm(&root, &conn, &title, &cat, &body, &inbox_rel.to_string_lossy())
 }
 
 #[cfg(test)]

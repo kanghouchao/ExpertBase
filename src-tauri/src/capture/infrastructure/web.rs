@@ -1,5 +1,18 @@
 use dom_smoothie::Readability;
 
+/// URL から HTML を取得する。取得は HTTPS、原始 HTML はクラウドへ送らない（抽出はローカル）。
+pub async fn fetch_html(url: &str) -> Result<String, String> {
+  reqwest::Client::new()
+    .get(url)
+    .header("User-Agent", "ExpertBase/0.1 (+local capture)")
+    .send()
+    .await
+    .map_err(|e| e.to_string())?
+    .text()
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// HTML から本文を抽出し、(タイトル, Markdown 本文) を返す。
 /// Readability（dom_smoothie）でナビ/フッタ等のノイズを除き、htmd で HTML→Markdown へ変換する。
 pub fn extract_readable(html: &str, url: &str) -> Result<(String, String), String> {
