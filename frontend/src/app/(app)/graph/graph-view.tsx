@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { Icon } from "@/components/eb/icon";
@@ -8,9 +8,11 @@ import { PageHead } from "@/components/eb/page-head";
 import { Panel } from "@/components/eb/panel";
 import { Tag } from "@/components/eb/tag";
 import { EmptyState } from "@/components/eb/empty-state";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { useI18n } from "@/components/providers";
-import { GRAPH_DATA } from "@/lib/data/store";
+import { graph as fetchGraph } from "@/lib/tauri/client";
+import { useKbStore } from "@/lib/kb/store";
+import type { GraphData, GraphNode } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
 
 // カテゴリへ順番に割り当てる配色（カテゴリ自体はユーザーデータ由来）。
@@ -23,28 +25,54 @@ const CAT_PALETTE = [
   "#7a5ae0",
 ];
 
+// 派生インデックスのノード（座標なし）に円環レイアウトを与える。x,y は 0..100 空間。
+function layout(nodes: { path: string; title: string; cat: string }[]): GraphNode[] {
+  const n = Math.max(nodes.length, 1);
+  return nodes.map((node, i) => {
+    const angle = (2 * Math.PI * i) / n - Math.PI / 2;
+    return {
+      id: node.path,
+      label: node.title,
+      cat: node.cat || "uncategorized",
+      x: 50 + 38 * Math.cos(angle),
+      y: 50 + 40 * Math.sin(angle),
+    };
+  });
+}
+
 export function GraphView() {
   const { t } = useI18n();
+  const { available } = useKbStore();
+  const [data, setData] = useState<GraphData>({ nodes: [], edges: [] });
   const [selected, setSelected] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!available) return;
+    void (async () => {
+      const g = await fetchGraph();
+      setData({ nodes: layout(g.nodes), edges: g.edges });
+    })();
+  }, [available]);
+
   const catColors = useMemo(() => {
-    const cats = [...new Set(GRAPH_DATA.nodes.map((node) => node.cat))];
+    const cats = [...new Set(data.nodes.map((node) => node.cat))];
     return Object.fromEntries(cats.map((cat, i) => [cat, CAT_PALETTE[i % CAT_PALETTE.length]]));
-  }, []);
-  const selectedNode = GRAPH_DATA.nodes.find((node) => node.id === selected);
+  }, [data]);
+  const selectedNode = data.nodes.find((node) => node.id === selected);
   const neighbours = useMemo(() => {
     if (!selected) return [];
-    return GRAPH_DATA.edges
+    return data.edges
       .filter(([a, b]) => a === selected || b === selected)
-      .map(([a, b]) => GRAPH_DATA.nodes.find((node) => node.id === (a === selected ? b : a)))
+      .map(([a, b]) => data.nodes.find((node) => node.id === (a === selected ? b : a)))
       .filter(Boolean);
-  }, [selected]);
+  }, [selected, data]);
 
   return (
     <div className="view-enter">
       <PageHead
         eyebrow={t("graph.eyebrow")}
         title={t("graph.title")}
-        sub={t("graph.sub", { nodes: GRAPH_DATA.nodes.length, edges: GRAPH_DATA.edges.length })}
+        sub={t("graph.sub", { nodes: data.nodes.length, edges: data.edges.length })}
         right={
           <Link
             href="/wiki"
@@ -55,7 +83,7 @@ export function GraphView() {
           </Link>
         }
       />
-      {GRAPH_DATA.nodes.length === 0 ? (
+      {data.nodes.length === 0 ? (
         <Panel pad={0}>
           <EmptyState icon="graph" title={t("empty.graph")} sub={t("empty.graph.sub")} />
         </Panel>
@@ -77,9 +105,10 @@ export function GraphView() {
               viewBox="0 0 1100 680"
               className="block w-full bg-[radial-gradient(circle_at_50%_40%,var(--surface),var(--surface-2))]"
             >
-              {GRAPH_DATA.edges.map(([a, b]) => {
-                const from = GRAPH_DATA.nodes.find((node) => node.id === a)!;
-                const to = GRAPH_DATA.nodes.find((node) => node.id === b)!;
+              {data.edges.map(([a, b]) => {
+                const from = data.nodes.find((node) => node.id === a);
+                const to = data.nodes.find((node) => node.id === b);
+                if (!from || !to) return null;
                 const active = selected && (a === selected || b === selected);
                 return (
                   <line
@@ -94,7 +123,7 @@ export function GraphView() {
                   />
                 );
               })}
-              {GRAPH_DATA.nodes.map((node) => {
+              {data.nodes.map((node) => {
                 const active = node.id === selected;
                 const color = catColors[node.cat];
                 return (
@@ -168,10 +197,6 @@ export function GraphView() {
                       )
                   )}
                 </div>
-                <Button className="mt-4 w-full">
-                  <Icon name="spark" size={15} />
-                  {t("graph.aiMore")}
-                </Button>
               </>
             )}
           </Panel>
