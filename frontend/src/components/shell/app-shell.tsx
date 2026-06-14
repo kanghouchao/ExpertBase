@@ -7,7 +7,7 @@ import { Sidebar } from "@/components/shell/sidebar";
 import { SettingsDialog } from "@/components/shell/settings-dialog";
 import { Onboarding } from "@/components/onboarding/onboarding";
 import { useI18n } from "@/shared/providers/providers";
-import { refreshKbs, useKbStore } from "@/lib/kb/store";
+import { refreshKbs, useKbStore } from "@/entities/knowledge-base";
 import { Button } from "@/shared/ui/button";
 import { Icon } from "@/shared/ui/icon";
 

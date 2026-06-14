@@ -11,7 +11,7 @@ import { Logo } from "@/shared/ui/logo";
 import { Button } from "@/shared/ui/button";
 import { useI18n } from "@/shared/providers/providers";
 import { LANGS } from "@/shared/i18n/dictionaries";
-import { createAndActivateKb, useKbStore } from "@/lib/kb/store";
+import { createAndActivateKb, useKbStore } from "@/entities/knowledge-base";
 
 const STEP_COUNT = 4;
 

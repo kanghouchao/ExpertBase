@@ -4,7 +4,7 @@ import { Menu } from "@base-ui/react/menu";
 
 import { Icon } from "@/shared/ui/icon";
 import { useI18n } from "@/shared/providers/providers";
-import { switchKb, useKbStore } from "@/lib/kb/store";
+import { switchKb, useKbStore } from "@/entities/knowledge-base";
 
 export function KbSwitcher({ onAdd }: { onAdd: () => void }) {
   const { t } = useI18n();

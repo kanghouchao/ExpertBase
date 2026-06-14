@@ -11,9 +11,9 @@ import { useI18n } from "@/shared/providers/providers";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { cn } from "@/shared/lib/utils";
 import { captureText, captureWeb, listInbox } from "@/shared/api/tauri/client";
-import { inboxToMaterial } from "@/lib/data/adapt";
-import { useKbStore } from "@/lib/kb/store";
-import type { RawMaterial } from "@/lib/data/types";
+import { inboxToMaterial } from "@/entities/material";
+import { useKbStore } from "@/entities/knowledge-base";
+import type { RawMaterial } from "@/entities/material";
 import { MaterialRow } from "../_components/material-row";
 import { SegTabs } from "@/shared/ui/seg-tabs";
 

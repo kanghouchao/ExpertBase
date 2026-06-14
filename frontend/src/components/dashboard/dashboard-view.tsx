@@ -12,7 +12,7 @@ import { useI18n } from "@/shared/providers/providers";
 import { RecentMaterials } from "@/components/dashboard/recent-materials";
 import { WikiHealth } from "@/components/dashboard/wiki-health";
 import { listInbox, stats as fetchStats } from "@/shared/api/tauri/client";
-import { useKbStore } from "@/lib/kb/store";
+import { useKbStore } from "@/entities/knowledge-base";
 
 type Tone = "accent" | "ai";
 

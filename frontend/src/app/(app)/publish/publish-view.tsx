@@ -11,8 +11,8 @@ import { Tag } from "@/shared/ui/tag";
 import { Logo } from "@/shared/ui/logo";
 import { cn } from "@/shared/lib/utils";
 import { useI18n } from "@/shared/providers/providers";
-import { useKbStore } from "@/lib/kb/store";
-import { WIKI } from "@/lib/data/store";
+import { useKbStore } from "@/entities/knowledge-base";
+import { WIKI } from "@/entities/wiki-entry";
 import { wikiCategoryLabel } from "@/shared/i18n/data";
 import { SegTabs } from "@/shared/ui/seg-tabs";
 
