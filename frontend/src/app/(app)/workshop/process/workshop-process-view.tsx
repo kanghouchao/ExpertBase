@@ -186,30 +186,19 @@ export function WorkshopProcessView() {
                   AI {t("workshop.assist")}
                 </span>
               </div>
-              <div className="grid flex-1 place-items-center px-8 text-center">
-                {body ? (
-                  <div className="w-full">
-                    <input
-                      value={cat}
-                      onChange={(event) => setCat(event.target.value)}
-                      placeholder={t("workshop.catField")}
-                      className="mb-3 w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 font-mono text-[13px] text-ink outline-none"
-                    />
-                    <textarea
-                      value={body}
-                      onChange={(event) => setBody(event.target.value)}
-                      className="min-h-[290px] w-full resize-y rounded-lg border border-line-strong bg-surface-2 p-3.5 font-mono text-[13.5px] leading-relaxed text-ink outline-none"
-                    />
-                  </div>
-                ) : (
-                  <div className="mx-auto max-w-78">
-                    <span className="mx-auto grid size-16 place-items-center rounded-[18px] bg-surface-2 text-ink-muted">
-                      <Icon name="book" size={28} />
-                    </span>
-                    <div className="mt-5 text-[17px] font-bold text-ink">{t("workshop.prepareTitle")}</div>
-                    <p className="mt-3 text-[14px] leading-relaxed text-ink-muted">{t("workshop.prepareSub")}</p>
-                  </div>
-                )}
+              <div className="flex-1 px-8 py-8">
+                <input
+                  value={cat}
+                  onChange={(event) => setCat(event.target.value)}
+                  placeholder={t("workshop.catField")}
+                  className="mb-3 w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 font-mono text-[13px] text-ink outline-none"
+                />
+                <textarea
+                  value={body}
+                  onChange={(event) => setBody(event.target.value)}
+                  placeholder={t("workshop.prepareSub")}
+                  className="min-h-[350px] w-full resize-y rounded-lg border border-line-strong bg-surface-2 p-3.5 font-mono text-[13.5px] leading-relaxed text-ink outline-none"
+                />
               </div>
               <div className="border-t border-line p-4">
                 <div className="mb-3 flex items-center gap-2">
@@ -254,14 +243,12 @@ export function WorkshopProcessView() {
                   <div className="mt-2 text-[12px] text-ink-faint">{t("workshop.noModelsHint")}</div>
                 )}
                 {error && <div className="mt-2 text-[12.5px] font-semibold text-brand">{error}</div>}
-                {body && (
-                  <div className="mt-3 flex justify-end">
-                    <Button disabled={!title.trim() || !body.trim() || busy} onClick={handleConfirm}>
-                      <Icon name="check" size={15} />
-                      {t("workshop.confirm")}
-                    </Button>
-                  </div>
-                )}
+                <div className="mt-3 flex justify-end">
+                  <Button disabled={!title.trim() || !body.trim() || busy} onClick={handleConfirm}>
+                    <Icon name="check" size={15} />
+                    {t("workshop.confirm")}
+                  </Button>
+                </div>
               </div>
             </div>
           </section>
