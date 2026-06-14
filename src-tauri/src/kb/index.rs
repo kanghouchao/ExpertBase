@@ -41,6 +41,18 @@ pub struct GraphData {
   pub edges: Vec<(String, String)>,
 }
 
+/// 受信箱素材の状態（一覧・ワークショップで使用）。
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxItem {
+  pub path: String,
+  #[serde(rename = "type")]
+  pub kind: String,
+  pub source: String,
+  pub status: String,
+  pub captured_at: String,
+}
+
 /// スキーマを作成する（存在すれば何もしない）。
 /// 全文検索は trigram トークナイザを使う。日本語/中国語を含む部分一致が効くが、
 /// クエリは 3 文字以上必要（trigram の仕様）。
@@ -231,6 +243,55 @@ pub fn graph(conn: &Connection) -> Result<GraphData, String> {
   Ok(GraphData { nodes, edges })
 }
 
+/// 受信箱素材をインデックスへ upsert する。
+pub fn upsert_inbox(
+  conn: &Connection,
+  rel_path: &str,
+  kind: &str,
+  source: &str,
+  status: &str,
+  captured_at: &str,
+) -> Result<(), String> {
+  conn
+    .execute(
+      "INSERT INTO inbox(path,type,source,status,captured_at) VALUES(?1,?2,?3,?4,?5)
+         ON CONFLICT(path) DO UPDATE SET type=?2,source=?3,status=?4,captured_at=?5",
+      rusqlite::params![rel_path, kind, source, status, captured_at],
+    )
+    .map_err(|e| e.to_string())?;
+  Ok(())
+}
+
+/// 受信箱の状態を更新する（pending → processed など）。
+pub fn set_inbox_status(conn: &Connection, rel_path: &str, status: &str) -> Result<(), String> {
+  conn
+    .execute(
+      "UPDATE inbox SET status=?2 WHERE path=?1",
+      rusqlite::params![rel_path, status],
+    )
+    .map_err(|e| e.to_string())?;
+  Ok(())
+}
+
+/// 受信箱の一覧（取り込み新しい順）。
+pub fn list_inbox(conn: &Connection) -> Result<Vec<InboxItem>, String> {
+  let mut stmt = conn
+    .prepare("SELECT path,type,source,status,captured_at FROM inbox ORDER BY captured_at DESC, path")
+    .map_err(|e| e.to_string())?;
+  let rows = stmt
+    .query_map([], |r| {
+      Ok(InboxItem {
+        path: r.get(0)?,
+        kind: r.get(1)?,
+        source: r.get(2)?,
+        status: r.get(3)?,
+        captured_at: r.get(4)?,
+      })
+    })
+    .map_err(|e| e.to_string())?;
+  rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -308,6 +369,18 @@ mod tests {
     assert_eq!(s.entries, 2);
     assert_eq!(s.links, 1);
     assert_eq!(s.orphans, 0); // A->B なので両者ともリンクに関与
+  }
+
+  #[test]
+  fn inbox_upsert_list_and_status() {
+    let conn = mem();
+    upsert_inbox(&conn, "inbox/a.md", "web", "https://x", "pending", "2026-06-14T00:00:00Z")
+      .unwrap();
+    let items = list_inbox(&conn).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].status, "pending");
+    set_inbox_status(&conn, "inbox/a.md", "processed").unwrap();
+    assert_eq!(list_inbox(&conn).unwrap()[0].status, "processed");
   }
 
   #[test]
