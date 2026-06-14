@@ -38,7 +38,7 @@ Use Domain-Driven Design (DDD) for Rust backend code in `src-tauri/`.
 - Interface code adapts the outside world to the application layer. Tauri commands are interface adapters only.
 - Domain code must not depend on Tauri, storage, filesystem, frontend DTOs, or other infrastructure details.
 
-Keep the current module layout lightweight until real code requires deeper structure. New feature modules may start as `src/<feature>.rs`, but split into `domain`, `application`, `infrastructure`, and interface modules when a feature accumulates real business rules or multiple use cases.
+Keep the current module layout lightweight until real code requires deeper structure. New feature modules may start as `src/<feature>.rs`, but split into feature-local `domain`, `application`, `infrastructure`, and interface modules when a feature accumulates real business rules or multiple use cases. Use top-level shared modules only when a cross-feature abstraction is justified by real reuse.
 
 ## IPC Command Practices
 

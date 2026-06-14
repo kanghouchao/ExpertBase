@@ -36,15 +36,16 @@ Create new folders only when the first real file needs them. Do not add empty ar
 Use Feature-Sliced Design (FSD) for frontend code organization, adapted to Next.js App Router.
 
 - `src/app/` remains the routing and composition layer. Route files read routing context, compose screens, and stay thin.
-- `features/` contains complete user scenarios, including scenario-specific UI, state, API calls, and logic.
-- `entities/` contains domain-facing client models, types, validation, and pure functions. It must not contain UI or HTTP client logic.
-- `shared/` contains reusable UI primitives, framework-neutral utilities, configuration, and typed clients that can be used by any layer.
+- `src/features/` contains complete user scenarios, including scenario-specific UI, state, API calls, and logic.
+- `src/entities/` contains domain-facing client models, types, validation, and pure functions. It must not contain UI or HTTP client logic.
+- `src/shared/` contains reusable UI primitives, framework-neutral utilities, configuration, and typed clients that can be used by any layer.
+- Existing `src/lib/` and `src/components/` locations remain valid current shared locations unless a deliberate migration is requested.
 - Add new FSD folders only when the first real file needs them. Do not create empty architecture folders.
 
 Dependencies must flow downward:
 
 ```text
-app -> features -> entities -> shared
+src/app -> src/features -> src/entities -> src/shared
 ```
 
 If `widgets/` or another FSD layer becomes necessary, document the boundary before introducing it. Cross-slice imports must go through a slice public API such as `index.ts`; do not import another slice's internals.
