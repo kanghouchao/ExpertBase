@@ -10,9 +10,9 @@ import { Icon } from "@/shared/ui/icon";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { useI18n } from "@/shared/providers/providers";
 import { listInbox } from "@/shared/api/tauri/client";
-import { inboxToMaterial } from "@/lib/data/adapt";
-import { useKbStore } from "@/lib/kb/store";
-import { RAW_TYPE, STATUS, type RawMaterial } from "@/lib/data/types";
+import { inboxToMaterial } from "@/entities/material";
+import { useKbStore } from "@/entities/knowledge-base";
+import { RAW_TYPE, STATUS, type RawMaterial } from "@/entities/material";
 
 export function RecentMaterials() {
   const { t } = useI18n();

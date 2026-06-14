@@ -18,11 +18,11 @@ import {
   searchEntries,
   type EntryRef,
 } from "@/shared/api/tauri/client";
-import { entryRefToWiki } from "@/lib/data/adapt";
-import type { WikiEntry } from "@/lib/data/types";
+import { entryRefToWiki } from "@/entities/wiki-entry";
+import type { WikiEntry } from "@/entities/wiki-entry";
 import { wikiCategoryLabel } from "@/shared/i18n/data";
 import { cn } from "@/shared/lib/utils";
-import { useKbStore } from "@/lib/kb/store";
+import { useKbStore } from "@/entities/knowledge-base";
 import { SegTabs } from "@/shared/ui/seg-tabs";
 
 // カテゴリはユーザーデータ由来。「全部」だけはセンチネルとして常に先頭に置く。

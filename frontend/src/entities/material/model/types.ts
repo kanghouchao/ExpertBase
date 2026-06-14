@@ -1,5 +1,5 @@
-// ナレッジベースのドメイン型と表示用マッピング。
-// 実データ層（store.ts）が実装されるまで、ビューはこの型に沿って空データを描画する。
+// 受信箱素材のドメイン向けクライアントモデルと表示用メタデータ。
+// UI コンポーネントは含まない（表示トークンのマッピングのみ）。
 
 import type { IconName } from "@/shared/ui/icon";
 import type { TagTone } from "@/shared/ui/tag";
@@ -33,32 +33,4 @@ export const STATUS: Record<RawStatus, { tone: TagTone }> = {
   pending: { tone: "muted" },
   transcribed: { tone: "ai" },
   processed: { tone: "accent" },
-};
-
-export type WikiEntry = {
-  id: string;
-  title: string;
-  en: string;
-  cat: string;
-  updated: string;
-  words: number;
-  links: number;
-  backlinks: number;
-  quality: number;
-  excerpt: string;
-  related: string[];
-  orphan: boolean;
-};
-
-export type GraphNode = {
-  id: string;
-  label: string;
-  cat: string;
-  x: number;
-  y: number;
-};
-
-export type GraphData = {
-  nodes: GraphNode[];
-  edges: [string, string][];
 };

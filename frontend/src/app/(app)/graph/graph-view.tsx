@@ -11,8 +11,8 @@ import { EmptyState } from "@/shared/ui/empty-state";
 import { buttonVariants } from "@/shared/ui/button";
 import { useI18n } from "@/shared/providers/providers";
 import { graph as fetchGraph } from "@/shared/api/tauri/client";
-import { useKbStore } from "@/lib/kb/store";
-import type { GraphData, GraphNode } from "@/lib/data/types";
+import { useKbStore } from "@/entities/knowledge-base";
+import type { GraphData, GraphNode } from "@/entities/wiki-entry";
 import { cn } from "@/shared/lib/utils";
 
 // カテゴリへ順番に割り当てる配色（カテゴリ自体はユーザーデータ由来）。

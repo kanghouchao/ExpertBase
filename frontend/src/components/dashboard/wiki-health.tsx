@@ -8,7 +8,7 @@ import { Icon } from "@/shared/ui/icon";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { useI18n } from "@/shared/providers/providers";
 import { orphans as fetchOrphans, type EntryRef } from "@/shared/api/tauri/client";
-import { useKbStore } from "@/lib/kb/store";
+import { useKbStore } from "@/entities/knowledge-base";
 
 // ナレッジベースの健全性診断。MVP では孤立条目（被リンク・発リンクともに無い条目）の検出のみ。
 export function WikiHealth() {

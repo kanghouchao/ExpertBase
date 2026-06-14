@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { Icon } from "@/shared/ui/icon";
 import { Tag } from "@/shared/ui/tag";
 import { useI18n } from "@/shared/providers/providers";
-import { RAW_TYPE, STATUS, type RawMaterial } from "@/lib/data/types";
+import { RAW_TYPE, STATUS, type RawMaterial } from "@/entities/material";
 
 export function MaterialRow({ material, action }: { material: RawMaterial; action?: ReactNode }) {
   const { t } = useI18n();

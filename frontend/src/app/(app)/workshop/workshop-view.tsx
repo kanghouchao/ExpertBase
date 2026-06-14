@@ -8,9 +8,9 @@ import { PageHead } from "@/shared/ui/page-head";
 import { buttonVariants } from "@/shared/ui/button";
 import { useI18n } from "@/shared/providers/providers";
 import { listInbox, type InboxItem } from "@/shared/api/tauri/client";
-import { inboxToMaterial } from "@/lib/data/adapt";
-import { RAW_TYPE, type RawMaterial } from "@/lib/data/types";
-import { useKbStore } from "@/lib/kb/store";
+import { inboxToMaterial } from "@/entities/material";
+import { RAW_TYPE, type RawMaterial } from "@/entities/material";
+import { useKbStore } from "@/entities/knowledge-base";
 
 const PREVIEW_MATERIALS: RawMaterial[] = [
   {
