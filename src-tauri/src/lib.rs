@@ -1,6 +1,7 @@
 mod ai;
 mod capture;
 mod kb;
+mod workshop;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -33,7 +34,9 @@ pub fn run() {
       capture::capture_file,
       capture::capture_web,
       ai::ai_set_key,
-      ai::ai_has_key
+      ai::ai_has_key,
+      workshop::workshop_draft,
+      workshop::workshop_confirm
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
