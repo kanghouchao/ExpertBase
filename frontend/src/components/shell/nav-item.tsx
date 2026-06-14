@@ -1,8 +1,8 @@
 import Link from "next/link";
 
-import { cn } from "@/lib/utils";
-import { Icon } from "@/components/eb/icon";
-import type { NavItem as NavItemData } from "@/lib/nav";
+import { cn } from "@/shared/lib/utils";
+import { Icon } from "@/shared/ui/icon";
+import type { NavItem as NavItemData } from "@/shared/config/nav";
 
 export function NavItem({
   item,

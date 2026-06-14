@@ -1,15 +1,15 @@
 "use client";
 
-import { cn } from "@/lib/utils";
+import { cn } from "@/shared/lib/utils";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Switch } from "@/components/ui/switch";
-import { ACCENTS, useI18n, useTheme } from "@/components/providers";
-import { LANGS } from "@/lib/i18n/dictionaries";
+} from "@/shared/ui/dialog";
+import { Switch } from "@/shared/ui/switch";
+import { ACCENTS, useI18n, useTheme } from "@/shared/providers/providers";
+import { LANGS } from "@/shared/i18n/dictionaries";
 
 // The product equivalent of the prototype's dev-only Tweaks panel + Profile
 // modal: appearance (dark + accent) and interface language.

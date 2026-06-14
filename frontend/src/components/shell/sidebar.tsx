@@ -2,11 +2,11 @@
 
 import { usePathname } from "next/navigation";
 
-import { Logo } from "@/components/eb/logo";
+import { Logo } from "@/shared/ui/logo";
 import { NavItem } from "@/components/shell/nav-item";
 import { KbSwitcher } from "@/components/shell/kb-switcher";
-import { useI18n } from "@/components/providers";
-import { NAV } from "@/lib/nav";
+import { useI18n } from "@/shared/providers/providers";
+import { NAV } from "@/shared/config/nav";
 
 export function Sidebar({ onAddKb }: { onAddKb: () => void }) {
   const { t } = useI18n();

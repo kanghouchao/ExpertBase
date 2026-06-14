@@ -6,10 +6,10 @@ import { TitleBar } from "@/components/shell/title-bar";
 import { Sidebar } from "@/components/shell/sidebar";
 import { SettingsDialog } from "@/components/shell/settings-dialog";
 import { Onboarding } from "@/components/onboarding/onboarding";
-import { useI18n } from "@/components/providers";
+import { useI18n } from "@/shared/providers/providers";
 import { refreshKbs, useKbStore } from "@/lib/kb/store";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/eb/icon";
+import { Button } from "@/shared/ui/button";
+import { Icon } from "@/shared/ui/icon";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { t } = useI18n();

@@ -2,9 +2,9 @@
 
 import type { ReactNode } from "react";
 
-import { Icon } from "@/components/eb/icon";
-import { Tag } from "@/components/eb/tag";
-import { useI18n } from "@/components/providers";
+import { Icon } from "@/shared/ui/icon";
+import { Tag } from "@/shared/ui/tag";
+import { useI18n } from "@/shared/providers/providers";
 import { RAW_TYPE, STATUS, type RawMaterial } from "@/lib/data/types";
 
 export function MaterialRow({ material, action }: { material: RawMaterial; action?: ReactNode }) {

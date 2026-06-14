@@ -1,6 +1,6 @@
 // アプリのナビゲーション構造（モックデータではなく固定の画面構成）。
 
-import type { IconName } from "@/components/eb/icon";
+import type { IconName } from "@/shared/ui/icon";
 
 export type RouteId =
   | "dash"

@@ -3,19 +3,19 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { Icon, type IconName } from "@/components/eb/icon";
-import { PageHead } from "@/components/eb/page-head";
-import { Panel } from "@/components/eb/panel";
-import { Button } from "@/components/ui/button";
-import { useI18n } from "@/components/providers";
-import { EmptyState } from "@/components/eb/empty-state";
-import { cn } from "@/lib/utils";
-import { captureText, captureWeb, listInbox } from "@/lib/tauri/client";
+import { Icon, type IconName } from "@/shared/ui/icon";
+import { PageHead } from "@/shared/ui/page-head";
+import { Panel } from "@/shared/ui/panel";
+import { Button } from "@/shared/ui/button";
+import { useI18n } from "@/shared/providers/providers";
+import { EmptyState } from "@/shared/ui/empty-state";
+import { cn } from "@/shared/lib/utils";
+import { captureText, captureWeb, listInbox } from "@/shared/api/tauri/client";
 import { inboxToMaterial } from "@/lib/data/adapt";
 import { useKbStore } from "@/lib/kb/store";
 import type { RawMaterial } from "@/lib/data/types";
 import { MaterialRow } from "../_components/material-row";
-import { SegTabs } from "../_components/seg-tabs";
+import { SegTabs } from "@/shared/ui/seg-tabs";
 
 const TABS = ["upload", "record", "manual", "web"] as const;
 type Tab = (typeof TABS)[number];

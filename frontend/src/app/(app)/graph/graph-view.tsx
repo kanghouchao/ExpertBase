@@ -3,17 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-import { Icon } from "@/components/eb/icon";
-import { PageHead } from "@/components/eb/page-head";
-import { Panel } from "@/components/eb/panel";
-import { Tag } from "@/components/eb/tag";
-import { EmptyState } from "@/components/eb/empty-state";
-import { buttonVariants } from "@/components/ui/button";
-import { useI18n } from "@/components/providers";
-import { graph as fetchGraph } from "@/lib/tauri/client";
+import { Icon } from "@/shared/ui/icon";
+import { PageHead } from "@/shared/ui/page-head";
+import { Panel } from "@/shared/ui/panel";
+import { Tag } from "@/shared/ui/tag";
+import { EmptyState } from "@/shared/ui/empty-state";
+import { buttonVariants } from "@/shared/ui/button";
+import { useI18n } from "@/shared/providers/providers";
+import { graph as fetchGraph } from "@/shared/api/tauri/client";
 import { useKbStore } from "@/lib/kb/store";
 import type { GraphData, GraphNode } from "@/lib/data/types";
-import { cn } from "@/lib/utils";
+import { cn } from "@/shared/lib/utils";
 
 // カテゴリへ順番に割り当てる配色（カテゴリ自体はユーザーデータ由来）。
 const CAT_PALETTE = [

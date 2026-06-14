@@ -3,13 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { cn } from "@/lib/utils";
-import { Panel } from "@/components/eb/panel";
-import { Tag } from "@/components/eb/tag";
-import { Icon } from "@/components/eb/icon";
-import { EmptyState } from "@/components/eb/empty-state";
-import { useI18n } from "@/components/providers";
-import { listInbox } from "@/lib/tauri/client";
+import { cn } from "@/shared/lib/utils";
+import { Panel } from "@/shared/ui/panel";
+import { Tag } from "@/shared/ui/tag";
+import { Icon } from "@/shared/ui/icon";
+import { EmptyState } from "@/shared/ui/empty-state";
+import { useI18n } from "@/shared/providers/providers";
+import { listInbox } from "@/shared/api/tauri/client";
 import { inboxToMaterial } from "@/lib/data/adapt";
 import { useKbStore } from "@/lib/kb/store";
 import { RAW_TYPE, STATUS, type RawMaterial } from "@/lib/data/types";

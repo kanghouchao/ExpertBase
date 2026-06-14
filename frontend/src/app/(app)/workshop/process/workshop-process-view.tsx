@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { EmptyState } from "@/components/eb/empty-state";
-import { Icon } from "@/components/eb/icon";
-import { PageHead } from "@/components/eb/page-head";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { useI18n } from "@/components/providers";
+import { EmptyState } from "@/shared/ui/empty-state";
+import { Icon } from "@/shared/ui/icon";
+import { PageHead } from "@/shared/ui/page-head";
+import { Button, buttonVariants } from "@/shared/ui/button";
+import { useI18n } from "@/shared/providers/providers";
 import {
   aiHasKey,
   listOllamaModels,
@@ -18,7 +18,7 @@ import {
   workshopDraft,
   type InboxItem,
   type OllamaModel,
-} from "@/lib/tauri/client";
+} from "@/shared/api/tauri/client";
 import { inboxToMaterial } from "@/lib/data/adapt";
 import { RAW_TYPE, type RawMaterial } from "@/lib/data/types";
 import { useKbStore } from "@/lib/kb/store";

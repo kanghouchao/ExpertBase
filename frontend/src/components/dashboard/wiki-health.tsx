@@ -3,11 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { Panel } from "@/components/eb/panel";
-import { Icon } from "@/components/eb/icon";
-import { EmptyState } from "@/components/eb/empty-state";
-import { useI18n } from "@/components/providers";
-import { orphans as fetchOrphans, type EntryRef } from "@/lib/tauri/client";
+import { Panel } from "@/shared/ui/panel";
+import { Icon } from "@/shared/ui/icon";
+import { EmptyState } from "@/shared/ui/empty-state";
+import { useI18n } from "@/shared/providers/providers";
+import { orphans as fetchOrphans, type EntryRef } from "@/shared/api/tauri/client";
 import { useKbStore } from "@/lib/kb/store";
 
 // ナレッジベースの健全性診断。MVP では孤立条目（被リンク・発リンクともに無い条目）の検出のみ。

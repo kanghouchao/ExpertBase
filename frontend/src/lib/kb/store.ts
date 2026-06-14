@@ -6,7 +6,7 @@
 
 import { useSyncExternalStore } from "react";
 
-import { createKb, listKbs, setActiveKb, type Kb } from "@/lib/tauri/client";
+import { createKb, listKbs, setActiveKb, type Kb } from "@/shared/api/tauri/client";
 
 export type KbState = {
   // 初回の読み込みが完了したか

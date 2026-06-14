@@ -3,11 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { Icon } from "@/components/eb/icon";
-import { PageHead } from "@/components/eb/page-head";
-import { buttonVariants } from "@/components/ui/button";
-import { useI18n } from "@/components/providers";
-import { listInbox, type InboxItem } from "@/lib/tauri/client";
+import { Icon } from "@/shared/ui/icon";
+import { PageHead } from "@/shared/ui/page-head";
+import { buttonVariants } from "@/shared/ui/button";
+import { useI18n } from "@/shared/providers/providers";
+import { listInbox, type InboxItem } from "@/shared/api/tauri/client";
 import { inboxToMaterial } from "@/lib/data/adapt";
 import { RAW_TYPE, type RawMaterial } from "@/lib/data/types";
 import { useKbStore } from "@/lib/kb/store";

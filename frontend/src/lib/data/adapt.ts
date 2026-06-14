@@ -1,7 +1,7 @@
 // バックエンド（Rust 派生インデックス）の型を、既存ビューが使う表示用型へ変換する薄い層。
 // ビューの JSX を保ったまま実データを流すためのアダプタ。
 
-import type { InboxItem, EntryRef } from "@/lib/tauri/client";
+import type { InboxItem, EntryRef } from "@/shared/api/tauri/client";
 import type { RawMaterial, RawType, RawStatus, WikiEntry } from "@/lib/data/types";
 
 // 受信箱の type（text/web/pdf/doc/audio/video/image）→ 表示用アイコン種別。

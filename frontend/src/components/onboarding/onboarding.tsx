@@ -6,11 +6,11 @@
 
 import { useState } from "react";
 
-import { Icon, type IconName } from "@/components/eb/icon";
-import { Logo } from "@/components/eb/logo";
-import { Button } from "@/components/ui/button";
-import { useI18n } from "@/components/providers";
-import { LANGS } from "@/lib/i18n/dictionaries";
+import { Icon, type IconName } from "@/shared/ui/icon";
+import { Logo } from "@/shared/ui/logo";
+import { Button } from "@/shared/ui/button";
+import { useI18n } from "@/shared/providers/providers";
+import { LANGS } from "@/shared/i18n/dictionaries";
 import { createAndActivateKb, useKbStore } from "@/lib/kb/store";
 
 const STEP_COUNT = 4;
