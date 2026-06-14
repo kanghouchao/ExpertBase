@@ -97,8 +97,10 @@ pub trait AiProvider {
 }
 
 /// テスト用の決定的プロバイダ（ネットワーク不要）。
+#[cfg(test)]
 pub struct FakeProvider;
 
+#[cfg(test)]
 impl AiProvider for FakeProvider {
   fn structure(&self, req: StructureRequest) -> Result<StructureResult, AiError> {
     let title = req.source_text.lines().next().unwrap_or("").trim().to_string();
