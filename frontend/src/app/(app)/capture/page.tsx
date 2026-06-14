@@ -1,4 +1,4 @@
-import { CaptureView } from "./capture-view";
+import { CaptureView } from "@/features/capture";
 
 export default function CapturePage() {
   return <CaptureView />;
