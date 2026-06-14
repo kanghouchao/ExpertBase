@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { Icon, type IconName } from "@/components/eb/icon";
@@ -10,7 +10,10 @@ import { Button } from "@/components/ui/button";
 import { useI18n } from "@/components/providers";
 import { EmptyState } from "@/components/eb/empty-state";
 import { cn } from "@/lib/utils";
-import { RAW_MATERIALS } from "@/lib/data/store";
+import { captureText, captureWeb, listInbox } from "@/lib/tauri/client";
+import { inboxToMaterial } from "@/lib/data/adapt";
+import { useKbStore } from "@/lib/kb/store";
+import type { RawMaterial } from "@/lib/data/types";
 import { MaterialRow } from "../_components/material-row";
 import { SegTabs } from "../_components/seg-tabs";
 
@@ -22,14 +25,64 @@ const WEB_EXAMPLES = ["example.com/article", "blog.example.com/post", "docs.exam
 
 export function CaptureView() {
   const { t } = useI18n();
-  const [tab, setTab] = useState<Tab>("upload");
+  const { available } = useKbStore();
+  const [tab, setTab] = useState<Tab>("manual");
   const [text, setText] = useState("");
   const [webUrl, setWebUrl] = useState("");
   const [depth, setDepth] = useState(1);
   const [readability, setReadability] = useState(true);
-  const items = RAW_MATERIALS;
+  const [items, setItems] = useState<RawMaterial[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    try {
+      const inbox = await listInbox();
+      setItems(inbox.map(inboxToMaterial));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  useEffect(() => {
+    if (!available) return;
+    void (async () => {
+      const inbox = await listInbox();
+      setItems(inbox.map(inboxToMaterial));
+    })();
+  }, [available]);
+
   const pending = items.filter((item) => item.status !== "processed");
-  const captureDisabled = true;
+
+  async function handleManualSave() {
+    if (!text.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await captureText(text, "manual");
+      setText("");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleWebCrawl() {
+    if (!webUrl.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await captureWeb(webUrl.trim());
+      setWebUrl("");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="view-enter mx-auto max-w-190">
@@ -42,7 +95,7 @@ export function CaptureView() {
         <div className="p-5.5">
           {tab === "upload" && (
             <button
-              disabled={captureDisabled}
+              disabled
               className="w-full cursor-not-allowed rounded-2xl border-2 border-dashed border-line-strong bg-surface-2 px-6 py-12 text-center opacity-70 transition"
             >
               <span className="mx-auto mb-4 grid size-14 place-items-center rounded-[15px] bg-surface text-brand shadow-(--shadow-sm)">
@@ -73,7 +126,7 @@ export function CaptureView() {
           {tab === "record" && (
             <div className="py-8 text-center">
               <button
-                disabled={captureDisabled}
+                disabled
                 className="mx-auto grid size-24 cursor-not-allowed place-items-center rounded-full bg-ink text-paper opacity-70 shadow-(--shadow-md)"
               >
                 <Icon name="mic" size={34} />
@@ -100,13 +153,10 @@ export function CaptureView() {
                 <span className="font-mono text-xs text-ink-faint">
                   {t("capture.manual.count", { count: text.length })}
                 </span>
-                <Button size="sm" disabled>
+                <Button size="sm" disabled={!available || !text.trim() || busy} onClick={handleManualSave}>
                   <Icon name="check" size={15} />
                   {t("capture.manual.save")}
                 </Button>
-              </div>
-              <div className="mt-2 text-[12.5px] font-semibold text-brand">
-                {t("capture.disabled")}
               </div>
             </div>
           )}
@@ -122,13 +172,13 @@ export function CaptureView() {
                   placeholder={t("capture.web.placeholder")}
                   className="min-w-0 flex-1 bg-transparent py-2.25 font-mono text-[14.5px] text-ink outline-none placeholder:text-ink-faint"
                 />
-                <Button size="sm" disabled>
+                <Button size="sm" disabled={!available || !webUrl.trim() || busy} onClick={handleWebCrawl}>
                   <Icon name="arrowR" size={15} />
                   {t("capture.web.crawl")}
                 </Button>
               </div>
 
-              {/* 抓取オプション */}
+              {/* 抓取オプション（MVP では深さ 1・本文抽出のみ。多階層クロールは未実装） */}
               <div className="mt-3.25 flex flex-wrap items-center gap-4 pl-0.5">
                 <div className="flex items-center gap-2">
                   <span className="text-[12.5px] text-ink-muted">{t("capture.web.depth")}</span>
@@ -193,11 +243,10 @@ export function CaptureView() {
                 <Icon name="plug" size={15} className="flex-none text-ai" />
                 <span className="text-[12.5px] text-ink-muted">{t("capture.web.hint")}</span>
               </div>
-              <div className="mt-2 text-[12.5px] font-semibold text-brand">
-                {t("capture.disabled")}
-              </div>
             </div>
           )}
+
+          {error && <div className="mt-3 text-[12.5px] font-semibold text-brand">{error}</div>}
         </div>
       </Panel>
 

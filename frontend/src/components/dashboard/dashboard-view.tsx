@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { cn } from "@/lib/utils";
@@ -10,7 +11,7 @@ import { Icon, type IconName } from "@/components/eb/icon";
 import { useI18n } from "@/components/providers";
 import { RecentMaterials } from "@/components/dashboard/recent-materials";
 import { WikiHealth } from "@/components/dashboard/wiki-health";
-import { PENDING, STATS } from "@/lib/data/store";
+import { listInbox, stats as fetchStats } from "@/lib/tauri/client";
 import { useKbStore } from "@/lib/kb/store";
 
 type Tone = "accent" | "ai";
@@ -93,7 +94,22 @@ function PipelineStep({
 
 export function DashboardView() {
   const { t, lang } = useI18n();
-  const { active } = useKbStore();
+  const { active, available } = useKbStore();
+  const [data, setData] = useState({ rawCount: 0, pending: 0, wikiCount: 0, links: 0 });
+
+  useEffect(() => {
+    if (!available) return;
+    void (async () => {
+      const [s, inbox] = await Promise.all([fetchStats(), listInbox()]);
+      setData({
+        rawCount: inbox.length,
+        pending: inbox.filter((item) => item.status !== "processed").length,
+        wikiCount: s?.entries ?? 0,
+        links: s?.links ?? 0,
+      });
+    })();
+  }, [available]);
+
   const nf = new Intl.NumberFormat(lang === "zh" ? "zh-CN" : lang);
   const count = (value: number, unitKey: string) => `${nf.format(value)} ${t(unitKey)}`;
 
@@ -133,31 +149,31 @@ export function DashboardView() {
           <PipelineStep
             icon="inbox"
             label={t("dash.p.collect")}
-            count={count(STATS.rawCount, "unit.materials")}
+            count={count(data.rawCount, "unit.materials")}
             tone="accent"
           />
           <PipelineStep
             icon="merge"
             label={t("dash.p.work")}
-            count={count(PENDING, "unit.pending")}
+            count={count(data.pending, "unit.pending")}
             tone="accent"
           />
           <PipelineStep
             icon="book"
             label={t("dash.p.kb")}
-            count={count(STATS.wikiCount, "unit.entries")}
+            count={count(data.wikiCount, "unit.entries")}
             tone="accent"
           />
           <PipelineStep
             icon="graph"
             label={t("dash.p.link")}
-            count={count(STATS.links, "unit.links")}
+            count={count(data.links, "unit.links")}
             tone="ai"
           />
           <PipelineStep
             icon="bot"
             label={t("dash.p.serve")}
-            count={count(STATS.members, "unit.members")}
+            count={count(0, "unit.members")}
             tone="accent"
             last
           />
@@ -168,28 +184,28 @@ export function DashboardView() {
         <StatTile
           icon="inbox"
           label={t("dash.t.inbox")}
-          value={nf.format(STATS.rawCount)}
+          value={nf.format(data.rawCount)}
           sub={t("dash.t.inbox.s")}
           tone="accent"
         />
         <StatTile
           icon="book"
           label={t("dash.t.wiki")}
-          value={nf.format(STATS.wikiCount)}
+          value={nf.format(data.wikiCount)}
           sub={t("dash.t.wiki.s")}
           tone="accent"
         />
         <StatTile
           icon="link"
           label={t("dash.t.links")}
-          value={nf.format(STATS.links)}
+          value={nf.format(data.links)}
           sub={t("dash.t.links.s")}
           tone="ai"
         />
         <StatTile
           icon="chat"
           label={t("dash.t.qa")}
-          value={nf.format(STATS.botMsgs)}
+          value={nf.format(0)}
           sub={t("dash.t.qa.s")}
           tone="ai"
         />

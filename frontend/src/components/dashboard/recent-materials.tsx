@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { cn } from "@/lib/utils";
@@ -8,11 +9,21 @@ import { Tag } from "@/components/eb/tag";
 import { Icon } from "@/components/eb/icon";
 import { EmptyState } from "@/components/eb/empty-state";
 import { useI18n } from "@/components/providers";
-import { RAW_MATERIALS } from "@/lib/data/store";
-import { RAW_TYPE, STATUS } from "@/lib/data/types";
+import { listInbox } from "@/lib/tauri/client";
+import { inboxToMaterial } from "@/lib/data/adapt";
+import { useKbStore } from "@/lib/kb/store";
+import { RAW_TYPE, STATUS, type RawMaterial } from "@/lib/data/types";
 
 export function RecentMaterials() {
   const { t } = useI18n();
+  const { available } = useKbStore();
+  const [items, setItems] = useState<RawMaterial[]>([]);
+
+  useEffect(() => {
+    if (!available) return;
+    void listInbox().then((inbox) => setItems(inbox.map(inboxToMaterial)));
+  }, [available]);
+
   return (
     <Panel pad={0} className="overflow-hidden">
       <div className="flex items-center justify-between border-b border-line px-5.5 py-4.5">
@@ -24,10 +35,10 @@ export function RecentMaterials() {
           {t("dash.viewAll")} <Icon name="chevR" size={13} />
         </Link>
       </div>
-      {RAW_MATERIALS.length === 0 && (
+      {items.length === 0 && (
         <EmptyState icon="inbox" title={t("empty.materials")} sub={t("empty.materials.sub")} />
       )}
-      {RAW_MATERIALS.slice(0, 4).map((r, i) => {
+      {items.slice(0, 4).map((r, i) => {
         const ty = RAW_TYPE[r.type];
         return (
           <Link
