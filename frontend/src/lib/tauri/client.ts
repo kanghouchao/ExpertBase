@@ -111,6 +111,11 @@ export async function readEntry(path: string): Promise<string> {
   return invoke<string>("kb_read_entry", { path });
 }
 
+/** 受信箱素材の生 Markdown を読む。 */
+export async function readInboxMaterial(path: string): Promise<string> {
+  return invoke<string>("kb_read_inbox_material", { path });
+}
+
 /** 条目を上書き保存する（frontmatter 検証付き）。 */
 export async function saveEntry(path: string, content: string): Promise<void> {
   await invoke("kb_save_entry", { path, content });

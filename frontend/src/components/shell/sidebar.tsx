@@ -11,7 +11,9 @@ import { NAV } from "@/lib/nav";
 export function Sidebar({ onAddKb }: { onAddKb: () => void }) {
   const { t } = useI18n();
   const pathname = usePathname();
-  const activeId = NAV.find((n) => n.href === pathname)?.id ?? "dash";
+  const activeId =
+    NAV.find((n) => pathname === n.href || (n.href !== "/" && pathname.startsWith(`${n.href}/`)))
+      ?.id ?? "dash";
 
   const renderItem = (item: (typeof NAV)[number]) => (
     <NavItem

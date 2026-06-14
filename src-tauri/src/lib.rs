@@ -28,6 +28,7 @@ pub fn run() {
       kb::kb_graph,
       kb::kb_orphans,
       kb::kb_read_entry,
+      kb::kb_read_inbox_material,
       kb::kb_save_entry,
       kb::kb_list_inbox,
       capture::capture_text,
