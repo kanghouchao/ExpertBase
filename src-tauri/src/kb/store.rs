@@ -3,7 +3,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::entry::{parse_entry, serialize_entry, split_frontmatter, Entry};
+#[cfg(test)]
+use super::entry::parse_entry;
+use super::entry::{serialize_entry, split_frontmatter, Entry};
 
 /// タイトルから安全なファイル名(slug)を作る。日本語等はそのまま、パス区切り等のみ除去。
 fn slug(title: &str) -> String {
@@ -35,12 +37,14 @@ pub fn write_entry(root: &Path, entry: &Entry) -> Result<String, String> {
 }
 
 /// 既存条目を相対パスから読む。
+#[cfg(test)]
 pub fn read_entry(root: &Path, rel_path: &str) -> Result<Entry, String> {
   let text = fs::read_to_string(root.join(rel_path)).map_err(|e| e.to_string())?;
   parse_entry(&text)
 }
 
 /// 既存条目を上書き保存する（相対パス指定）。
+#[cfg(test)]
 pub fn save_entry(root: &Path, rel_path: &str, entry: &Entry) -> Result<(), String> {
   fs::write(root.join(rel_path), serialize_entry(entry)?).map_err(|e| e.to_string())
 }
@@ -150,6 +154,19 @@ mod tests {
     let rel = write_entry(root, &entry).unwrap();
     let read = read_entry(root, &rel).unwrap();
     assert_eq!(read.meta.title, "緑茶");
+  }
+
+  #[test]
+  fn save_entry_overwrites_existing_entry() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let original = Entry { meta: meta("緑茶"), body: "本文".into() };
+    let rel = write_entry(root, &original).unwrap();
+    let updated = Entry { meta: meta("緑茶"), body: "更新後".into() };
+
+    save_entry(root, &rel, &updated).unwrap();
+
+    assert_eq!(read_entry(root, &rel).unwrap().body, "更新後");
   }
 
   #[test]
