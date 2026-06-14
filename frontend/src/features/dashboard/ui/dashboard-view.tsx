@@ -9,8 +9,8 @@ import { Panel } from "@/shared/ui/panel";
 import { PageHead } from "@/shared/ui/page-head";
 import { Icon, type IconName } from "@/shared/ui/icon";
 import { useI18n } from "@/shared/providers/providers";
-import { RecentMaterials } from "@/components/dashboard/recent-materials";
-import { WikiHealth } from "@/components/dashboard/wiki-health";
+import { RecentMaterials } from "./recent-materials";
+import { WikiHealth } from "./wiki-health";
 import { listInbox, stats as fetchStats } from "@/shared/api/tauri/client";
 import { useKbStore } from "@/entities/knowledge-base";
 

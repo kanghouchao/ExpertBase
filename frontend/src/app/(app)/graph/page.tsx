@@ -1,4 +1,4 @@
-import { GraphView } from "./graph-view";
+import { GraphView } from "@/features/graph";
 
 export default function GraphPage() {
   return <GraphView />;

@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 
-import { TitleBar } from "@/components/shell/title-bar";
-import { Sidebar } from "@/components/shell/sidebar";
-import { SettingsDialog } from "@/components/shell/settings-dialog";
-import { Onboarding } from "@/components/onboarding/onboarding";
+import { TitleBar } from "./title-bar";
+import { Sidebar } from "./sidebar";
+import { SettingsDialog } from "./settings-dialog";
+import { Onboarding } from "@/features/onboarding";
 import { useI18n } from "@/shared/providers/providers";
 import { refreshKbs, useKbStore } from "@/entities/knowledge-base";
 import { Button } from "@/shared/ui/button";

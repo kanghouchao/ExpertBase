@@ -1,4 +1,4 @@
-import { WorkshopView } from "./workshop-view";
+import { WorkshopView } from "@/features/workshop";
 
 export default function WorkshopPage() {
   return <WorkshopView />;

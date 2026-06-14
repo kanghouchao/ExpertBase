@@ -14,7 +14,7 @@ import { captureText, captureWeb, listInbox } from "@/shared/api/tauri/client";
 import { inboxToMaterial } from "@/entities/material";
 import { useKbStore } from "@/entities/knowledge-base";
 import type { RawMaterial } from "@/entities/material";
-import { MaterialRow } from "../_components/material-row";
+import { MaterialRow } from "./material-row";
 import { SegTabs } from "@/shared/ui/seg-tabs";
 
 const TABS = ["upload", "record", "manual", "web"] as const;
