@@ -25,9 +25,12 @@ When working under `frontend/`, follow this file in addition to the repository-l
 
 ## Directory Rules
 
-- `src/app/`: routes, layouts, pages, route groups, and app-level loading/error files.
-- `src/components/ui/`: shadcn/ui generated primitives. Do not edit casually; treat changes as local forks of upstream components.
-- `src/lib/`: framework-neutral utilities, API clients, and configuration helpers.
+- `src/app/`: routes, layouts, pages, route groups, and app-level loading/error files. Pages stay thin and compose feature screens through their public API.
+- `src/widgets/`: app-shell composition that binds features, entities, and shared.
+- `src/features/`: complete user scenarios (UI under `ui/`), exposed through a slice `index.ts`.
+- `src/entities/`: domain-facing client models, types, and adapters under `model/` (no UI), exposed through a slice `index.ts`.
+- `src/shared/`: reusable primitives and framework-neutral helpers — `shared/ui` (shadcn + custom primitives), `shared/api/tauri` (typed IPC client), `shared/config`, `shared/i18n`, `shared/lib`, `shared/providers`.
+- `src/shared/ui/`: shadcn/ui generated primitives and shared custom primitives. Do not edit shadcn primitives casually; treat changes as local forks of upstream components.
 
 Create new folders only when the first real file needs them. Do not add empty architecture folders.
 
@@ -39,7 +42,7 @@ Use Feature-Sliced Design (FSD) for frontend code organization, adapted to Next.
 - `src/features/` contains complete user scenarios, including scenario-specific UI, state, API calls, and logic.
 - `src/entities/` contains domain-facing client models, types, validation, and pure functions. It must not contain UI or HTTP client logic.
 - `src/shared/` contains reusable UI primitives, framework-neutral utilities, configuration, and typed clients that can be used by any layer.
-- Existing `src/lib/` and `src/components/` locations remain valid current shared locations unless a deliberate migration is requested.
+- The codebase has migrated to FSD layers; `src/lib/` and `src/components/` no longer exist. Shared code lives under `src/shared/`, and shadcn primitives under `src/shared/ui/`.
 - Add new FSD folders only when the first real file needs them. Do not create empty architecture folders.
 
 Dependencies must flow downward:
@@ -57,7 +60,7 @@ If `widgets/` or another FSD layer becomes necessary, document the boundary befo
 - Avoid request waterfalls. Start independent async work early and await it together.
 - Do not pass large server objects into Client Components. Pass minimal serialized props.
 - Use route-level `loading.tsx`, `error.tsx`, and `not-found.tsx` only when the route needs them.
-- Keep Tauri IPC calls behind the typed client in `src/lib/tauri` instead of scattering `invoke` calls through UI components.
+- Keep Tauri IPC calls behind the typed client in `src/shared/api/tauri` instead of scattering `invoke` calls through UI components.
 
 ## shadcn/ui Practices
 
@@ -65,7 +68,7 @@ If `widgets/` or another FSD layer becomes necessary, document the boundary befo
 - Add components with `bunx shadcn add <component>`.
 - Check installed components before importing them.
 - Use semantic tokens such as `bg-background`, `text-foreground`, `text-muted-foreground`, `border-border`, and `bg-card`.
-- Use `cn()` from `src/lib/utils.ts` for conditional classes.
+- Use `cn()` from `src/shared/lib/utils.ts` for conditional classes.
 - Use `gap-*` for spacing. Do not use `space-x-*` or `space-y-*`.
 - Use `size-*` when width and height are equal.
 - Use lucide icons in buttons when an icon exists. Put the icon inside the `Button` instead of hand-writing SVG.
@@ -75,7 +78,7 @@ If `widgets/` or another FSD layer becomes necessary, document the boundary befo
 - Keep global design tokens in `src/app/globals.css`.
 - Do not create additional global CSS files unless the need is project-wide.
 - Prefer layout utilities and design tokens over raw color classes.
-- Avoid one-off visual systems inside feature components. If a pattern repeats, promote it to `src/components`.
+- Avoid one-off visual systems inside feature components. If a pattern repeats, promote it to `src/shared/ui`.
 - Do not introduce CSS-in-JS unless explicitly required.
 
 ## State and Data
