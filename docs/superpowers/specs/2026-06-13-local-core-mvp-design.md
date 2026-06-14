@@ -64,6 +64,7 @@
 - **条目（entries/*.md）** の frontmatter: `type`, `title`, `description`, `cat`, `tags`, `created`, `updated`。
   `type` は OKF 互換の必須フィールドとして扱い、通常条目の既定値は `Entry` とする。
   本文中の `[[タイトル]]` がリンク。バックリンクは派生（保存しない）。
+  MVP ではリンク解決を曖昧にしないため、`title` は KB 内で一意とする。
 - **受信箱の素材（inbox/*.md）** も Markdown で表現する。frontmatter: `type`(text/web/pdf/doc/audio/video/image),
   `source`, `status`(pending/processed), `attachment`(任意, 添付への相対パス), `captured_at`。
   本文は抽出テキスト（文字を持つ素材）またはユーザー説明文（任意, メディア）。
@@ -98,9 +99,9 @@ Google Cloud の Open Knowledge Format（OKF）は、知識を「ディレクト
 
 | テーブル | 役割 |
 |------|------|
-| `entries(path, type, title, description, cat, tags, updated, words)` | 条目メタデータ |
+| `entries(path, type, title, description, cat, tags, updated, words)` | 条目メタデータ。`title` は一意 |
 | `links(src_path, dst_title)` | リンク辺（バックリンク・孤立・グラフの元） |
-| `entries_fts`（FTS5: title + body） | 全文検索 |
+| `entries_fts`（FTS5 trigram: title + body） | 全文検索。日本語/中国語の 3 文字以上の部分一致を MVP の基準にする |
 | `inbox(path, type, source, status, captured_at)` | 受信箱の状態 |
 
 真実のソースは常に Markdown。インデックスが壊れたらファイルから再構築する。
@@ -143,7 +144,8 @@ pub trait AiProvider {
 
 1. **kb データ層** (`src-tauri/src/kb/`): ファイル I/O、frontmatter 解析、`[[リンク]]` 抽出、
    インデックスの構築・更新・再構築。純関数（パスと値を受け取る）として実装し、コマンドは薄いラッパー。
-   依存: `comrak`/`pulldown-cmark`, `gray_matter`, `rusqlite`。
+   MVP では `serde_yaml` で frontmatter を扱い、`regex` で `[[リンク]]` を抽出する。完全な Markdown AST は後続段階で検討する。
+   依存: `serde_yaml`, `regex`, `rusqlite`。
 2. **capture** (`src-tauri/src/capture/`): 各取り込み元 → `inbox/` の Markdown 素材へ正規化。
    依存: `dom_smoothie`+`htmd`（Web）, `pdf-extract`/`docx-rs`（文書）, ファイルコピー（メディア）。
 3. **workshop** (`src-tauri/src/workshop/`): 素材 + 関連条目 → `AiProvider` を呼ぶ編成、結果を `entries/` へ確定。
@@ -158,8 +160,8 @@ pub trait AiProvider {
 
 | 用途 | 候補 |
 |------|------|
-| Markdown 解析 / frontmatter | `comrak` または `pulldown-cmark` + `gray_matter` |
-| 全文検索 | SQLite **FTS5**（既存 SQLite, 追加依存ゼロ） |
+| Markdown 解析 / frontmatter | MVP は `serde_yaml` + `regex`。Markdown AST が必要になった段階で `comrak`/`pulldown-cmark` を検討 |
+| 全文検索 | SQLite **FTS5 trigram**（CJK 部分一致を優先） |
 | Web 本文抽出 | `dom_smoothie`（Readability 移植）+ `htmd`（HTML→MD） |
 | PDF/Word テキスト抽出 | `pdf-extract` / `docx-rs` |
 | Markdown エディタ（フロント） | CodeMirror 6（Obsidian と同系）または Milkdown |
@@ -171,6 +173,8 @@ pub trait AiProvider {
 ## エラーハンドリング
 
 - Tauri コマンドは `Result<T, String>` を返し、UI 側の typed クライアントで型付きエラーに変換する。
+- UI から渡される KB 内パスは `entries/*.md` / `inbox/*.md` などの許可された相対 Markdown パスに限定し、
+  絶対パス・`..`・ネストした未知パスを拒否する。
 - AI エラー（API キー未設定・ネットワーク・レート制限）は UI で区別して表示し、手動パスへ退避できる。
 - インデックス破損時はファイルから再構築する。ファイル I/O 失敗はそのまま表面化させる。
 

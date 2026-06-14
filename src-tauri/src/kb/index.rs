@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 
 use super::entry::{extract_links, word_count, Entry};
@@ -75,6 +75,7 @@ pub fn ensure_schema(conn: &Connection) -> Result<(), String> {
        );
        CREATE INDEX IF NOT EXISTS idx_links_dst ON links(dst_title);
        CREATE INDEX IF NOT EXISTS idx_links_src ON links(src_path);
+       CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_title ON entries(title);
        CREATE TABLE IF NOT EXISTS inbox(
          path TEXT PRIMARY KEY,
          type TEXT NOT NULL,
@@ -138,6 +139,18 @@ pub fn rebuild(conn: &Connection, root: &Path) -> Result<(), String> {
 
 /// 条目をインデックスへ upsert する（メタ + リンク + FTS）。
 pub fn upsert_entry(conn: &Connection, rel_path: &str, entry: &Entry) -> Result<(), String> {
+  let duplicate_path = conn
+    .query_row(
+      "SELECT path FROM entries WHERE title=?1 AND path<>?2 LIMIT 1",
+      rusqlite::params![entry.meta.title, rel_path],
+      |r| r.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())?;
+  if let Some(path) = duplicate_path {
+    return Err(format!("同名の条目が既に存在します: {}", path));
+  }
+
   delete_entry(conn, rel_path)?;
   let tags = entry.meta.tags.join(",");
   conn
@@ -362,6 +375,34 @@ mod tests {
     let hits = search(&conn, "湯温は").unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "entries/green.md");
+  }
+
+  #[test]
+  fn search_supports_cjk_trigram_and_english_terms() {
+    let conn = mem();
+    upsert_entry(
+      &conn,
+      "entries/green.md",
+      &Entry { meta: meta("緑茶", "tea"), body: "湯温は70度。oxidation is low.".into() },
+    )
+    .unwrap();
+
+    assert_eq!(search(&conn, "湯温は").unwrap()[0].path, "entries/green.md");
+    assert_eq!(search(&conn, "oxidation").unwrap()[0].path, "entries/green.md");
+    assert!(search(&conn, "  ").unwrap().is_empty());
+  }
+
+  #[test]
+  fn upsert_rejects_duplicate_titles_on_different_paths() {
+    let conn = mem();
+    let first = Entry { meta: meta("緑茶", "tea"), body: "a".into() };
+    let second = Entry { meta: meta("緑茶", "tea"), body: "b".into() };
+    upsert_entry(&conn, "entries/a.md", &first).unwrap();
+
+    let err = upsert_entry(&conn, "entries/b.md", &second).unwrap_err();
+
+    assert!(err.contains("同名の条目"));
+    assert_eq!(list_entries(&conn).unwrap().len(), 1);
   }
 
   #[test]

@@ -98,7 +98,8 @@ pub fn workshop_draft(
 ) -> Result<StructureResult, String> {
   let home = app.path().home_dir().map_err(|e| e.to_string())?;
   let (root, conn) = crate::kb::open_active(&home)?;
-  let raw = std::fs::read_to_string(root.join(&inbox_path)).map_err(|e| e.to_string())?;
+  let inbox_rel = crate::kb::checked_kb_markdown_path(&inbox_path, "inbox")?;
+  let raw = std::fs::read_to_string(root.join(inbox_rel)).map_err(|e| e.to_string())?;
   let material = store::parse_material(&raw)?;
   let key = crate::ai::get_api_key(&home).ok_or_else(|| AiError::NoKey.to_string())?;
   let provider = crate::ai::claude::ClaudeProvider::new(key);
@@ -116,7 +117,8 @@ pub fn workshop_confirm(
 ) -> Result<String, String> {
   let home = app.path().home_dir().map_err(|e| e.to_string())?;
   let (root, conn) = crate::kb::open_active(&home)?;
-  confirm(&root, &conn, &title, &cat, &body, &inbox_path)
+  let inbox_rel = crate::kb::checked_kb_markdown_path(&inbox_path, "inbox")?;
+  confirm(&root, &conn, &title, &cat, &body, &inbox_rel.to_string_lossy())
 }
 
 #[cfg(test)]
