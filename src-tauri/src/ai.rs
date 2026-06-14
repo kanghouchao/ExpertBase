@@ -1,6 +1,41 @@
+use std::path::Path;
+
 use serde::Serialize;
+use tauri::Manager;
 
 pub mod claude;
+
+/// API キーの保存場所（ユーザーホーム直下、ドット始まりの設定ディレクトリ内）。
+fn key_path(home: &Path) -> std::path::PathBuf {
+  home.join(".expertBase").join("anthropic.key")
+}
+
+/// BYO API キーを保存する。UI はキーを保持せず、Rust 側にのみ置く。
+pub fn set_api_key(home: &Path, key: &str) -> Result<(), String> {
+  let path = key_path(home);
+  std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+  std::fs::write(path, key.trim()).map_err(|e| e.to_string())
+}
+
+/// 保存済み API キーを読む。未設定・空なら None。
+pub fn get_api_key(home: &Path) -> Option<String> {
+  std::fs::read_to_string(key_path(home))
+    .ok()
+    .map(|s| s.trim().to_string())
+    .filter(|s| !s.is_empty())
+}
+
+#[tauri::command]
+pub fn ai_set_key(app: tauri::AppHandle, key: String) -> Result<(), String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  set_api_key(&home, &key)
+}
+
+#[tauri::command]
+pub fn ai_has_key(app: tauri::AppHandle) -> Result<bool, String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  Ok(get_api_key(&home).is_some())
+}
 
 /// FTS で引いた関連既存条目の要約（title + excerpt）。
 #[derive(Clone, Debug)]
