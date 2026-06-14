@@ -2,9 +2,9 @@
 
 import { usePathname } from "next/navigation";
 
-import { Icon } from "@/components/eb/icon";
-import { useI18n } from "@/components/providers";
-import { NAV } from "@/lib/nav";
+import { Icon } from "@/shared/ui/icon";
+import { useI18n } from "@/shared/providers/providers";
+import { NAV } from "@/shared/config/nav";
 
 export function TitleBar({ kbLabel, onSettings }: { kbLabel: string; onSettings: () => void }) {
   const { t } = useI18n();

@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "@/shared/lib/utils";
 
 // The design's core surface: a bordered "paper" card with a soft shadow. shadcn's
 // Card uses a ring + different radius, so this thin primitive matches the

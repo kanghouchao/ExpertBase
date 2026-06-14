@@ -1,7 +1,8 @@
 // ナレッジベースのドメイン型と表示用マッピング。
 // 実データ層（store.ts）が実装されるまで、ビューはこの型に沿って空データを描画する。
 
-import type { IconName } from "@/components/eb/icon";
+import type { IconName } from "@/shared/ui/icon";
+import type { TagTone } from "@/shared/ui/tag";
 
 export type RawType = "audio" | "video" | "pdf" | "doc" | "note";
 export type RawStatus = "pending" | "transcribed" | "processed";
@@ -27,8 +28,6 @@ export const RAW_TYPE: Record<RawType, { icon: IconName; color: string }> = {
   doc: { icon: "doc", color: "#5566b0" },
   note: { icon: "note", color: "var(--ai)" },
 };
-
-export type TagTone = "line" | "accent" | "ai" | "muted" | "gold";
 
 export const STATUS: Record<RawStatus, { tone: TagTone }> = {
   pending: { tone: "muted" },

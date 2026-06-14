@@ -3,18 +3,18 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 
-import { Icon, type IconName } from "@/components/eb/icon";
-import { PageHead } from "@/components/eb/page-head";
-import { Panel } from "@/components/eb/panel";
-import { EmptyState } from "@/components/eb/empty-state";
-import { Tag } from "@/components/eb/tag";
-import { Logo } from "@/components/eb/logo";
-import { cn } from "@/lib/utils";
-import { useI18n } from "@/components/providers";
+import { Icon, type IconName } from "@/shared/ui/icon";
+import { PageHead } from "@/shared/ui/page-head";
+import { Panel } from "@/shared/ui/panel";
+import { EmptyState } from "@/shared/ui/empty-state";
+import { Tag } from "@/shared/ui/tag";
+import { Logo } from "@/shared/ui/logo";
+import { cn } from "@/shared/lib/utils";
+import { useI18n } from "@/shared/providers/providers";
 import { useKbStore } from "@/lib/kb/store";
 import { WIKI } from "@/lib/data/store";
-import { wikiCategoryLabel } from "@/lib/i18n/data";
-import { SegTabs } from "../_components/seg-tabs";
+import { wikiCategoryLabel } from "@/shared/i18n/data";
+import { SegTabs } from "@/shared/ui/seg-tabs";
 
 // 発行コンソールの固定オプション（プロダクト構成であってモックデータではない）。
 type CloudTarget = { id: string; name?: string; icon: IconName; accent: string; recommended?: boolean };

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { Icon, type IconName } from "@/components/eb/icon";
+import { Icon, type IconName } from "@/shared/ui/icon";
 
 // データが空のときに各ビューへ表示する共通プレースホルダー。
 export function EmptyState({

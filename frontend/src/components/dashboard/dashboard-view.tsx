@@ -3,15 +3,15 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { cn } from "@/lib/utils";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Panel } from "@/components/eb/panel";
-import { PageHead } from "@/components/eb/page-head";
-import { Icon, type IconName } from "@/components/eb/icon";
-import { useI18n } from "@/components/providers";
+import { cn } from "@/shared/lib/utils";
+import { Button, buttonVariants } from "@/shared/ui/button";
+import { Panel } from "@/shared/ui/panel";
+import { PageHead } from "@/shared/ui/page-head";
+import { Icon, type IconName } from "@/shared/ui/icon";
+import { useI18n } from "@/shared/providers/providers";
 import { RecentMaterials } from "@/components/dashboard/recent-materials";
 import { WikiHealth } from "@/components/dashboard/wiki-health";
-import { listInbox, stats as fetchStats } from "@/lib/tauri/client";
+import { listInbox, stats as fetchStats } from "@/shared/api/tauri/client";
 import { useKbStore } from "@/lib/kb/store";
 
 type Tone = "accent" | "ai";

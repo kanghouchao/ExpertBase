@@ -1,5 +1,7 @@
-import { cn } from "@/lib/utils";
-import type { TagTone } from "@/lib/data/types";
+import { cn } from "@/shared/lib/utils";
+
+// Tag コンポーネントの色トーン語彙（UI プリミティブ固有の見た目）。
+export type TagTone = "line" | "accent" | "ai" | "muted" | "gold";
 
 const TONES: Record<TagTone, string> = {
   line: "bg-transparent text-ink-muted border-line-strong",

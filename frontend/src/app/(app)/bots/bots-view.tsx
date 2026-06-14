@@ -1,9 +1,9 @@
 "use client";
 
-import { PageHead } from "@/components/eb/page-head";
-import { Panel } from "@/components/eb/panel";
-import { EmptyState } from "@/components/eb/empty-state";
-import { useI18n } from "@/components/providers";
+import { PageHead } from "@/shared/ui/page-head";
+import { Panel } from "@/shared/ui/panel";
+import { EmptyState } from "@/shared/ui/empty-state";
+import { useI18n } from "@/shared/providers/providers";
 
 // ボットはまだ作成できない（チャネルプラグインの実装待ち）。
 export function BotsView() {

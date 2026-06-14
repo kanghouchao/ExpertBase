@@ -3,13 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { Icon } from "@/components/eb/icon";
-import { PageHead } from "@/components/eb/page-head";
-import { Panel } from "@/components/eb/panel";
-import { Tag } from "@/components/eb/tag";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { useI18n } from "@/components/providers";
-import { EmptyState } from "@/components/eb/empty-state";
+import { Icon } from "@/shared/ui/icon";
+import { PageHead } from "@/shared/ui/page-head";
+import { Panel } from "@/shared/ui/panel";
+import { Tag } from "@/shared/ui/tag";
+import { Button, buttonVariants } from "@/shared/ui/button";
+import { useI18n } from "@/shared/providers/providers";
+import { EmptyState } from "@/shared/ui/empty-state";
 import {
   backlinks as fetchBacklinks,
   listEntries,
@@ -17,13 +17,13 @@ import {
   saveEntry,
   searchEntries,
   type EntryRef,
-} from "@/lib/tauri/client";
+} from "@/shared/api/tauri/client";
 import { entryRefToWiki } from "@/lib/data/adapt";
 import type { WikiEntry } from "@/lib/data/types";
-import { wikiCategoryLabel } from "@/lib/i18n/data";
-import { cn } from "@/lib/utils";
+import { wikiCategoryLabel } from "@/shared/i18n/data";
+import { cn } from "@/shared/lib/utils";
 import { useKbStore } from "@/lib/kb/store";
-import { SegTabs } from "../_components/seg-tabs";
+import { SegTabs } from "@/shared/ui/seg-tabs";
 
 // カテゴリはユーザーデータ由来。「全部」だけはセンチネルとして常に先頭に置く。
 const ALL_CAT = "全部";

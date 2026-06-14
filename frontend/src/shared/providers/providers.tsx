@@ -2,8 +2,8 @@
 
 import { useMemo, useSyncExternalStore } from "react";
 
-import { createT } from "@/lib/i18n/translate";
-import type { Lang } from "@/lib/i18n/dictionaries";
+import { createT } from "@/shared/i18n/translate";
+import type { Lang } from "@/shared/i18n/dictionaries";
 
 export type Accent = "terracotta" | "amber" | "plum" | "indigo";
 
