@@ -97,6 +97,45 @@ pub fn open_index(root: &Path) -> Result<Connection, String> {
   Ok(conn)
 }
 
+/// ディスクの entries/ と inbox/ を走査してインデックスを再構築する。
+/// 真実のソースは常に Markdown。壊れたインデックスはこれで作り直せる。
+pub fn rebuild(conn: &Connection, root: &Path) -> Result<(), String> {
+  conn
+    .execute_batch(
+      "DELETE FROM entries; DELETE FROM links; DELETE FROM entries_fts; DELETE FROM inbox;",
+    )
+    .map_err(|e| e.to_string())?;
+
+  let entries_dir = root.join("entries");
+  if entries_dir.is_dir() {
+    for ent in std::fs::read_dir(&entries_dir).map_err(|e| e.to_string())? {
+      let path = ent.map_err(|e| e.to_string())?.path();
+      if path.extension().and_then(|s| s.to_str()) != Some("md") {
+        continue;
+      }
+      let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+      let entry = super::entry::parse_entry(&text)?;
+      let rel = format!("entries/{}", path.file_name().unwrap().to_string_lossy());
+      upsert_entry(conn, &rel, &entry)?;
+    }
+  }
+
+  let inbox_dir = root.join("inbox");
+  if inbox_dir.is_dir() {
+    for ent in std::fs::read_dir(&inbox_dir).map_err(|e| e.to_string())? {
+      let path = ent.map_err(|e| e.to_string())?.path();
+      if path.extension().and_then(|s| s.to_str()) != Some("md") {
+        continue;
+      }
+      let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+      let m = super::store::parse_material(&text)?;
+      let rel = format!("inbox/{}", path.file_name().unwrap().to_string_lossy());
+      upsert_inbox(conn, &rel, &m.meta.kind, &m.meta.source, &m.meta.status, &m.meta.captured_at)?;
+    }
+  }
+  Ok(())
+}
+
 /// 条目をインデックスへ upsert する（メタ + リンク + FTS）。
 pub fn upsert_entry(conn: &Connection, rel_path: &str, entry: &Entry) -> Result<(), String> {
   delete_entry(conn, rel_path)?;
