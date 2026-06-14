@@ -37,7 +37,7 @@
 ### 含む
 
 - フロント `src/` を FSD レイヤ（`app / widgets / features / entities / shared`）へ再配置。
-- バック `src-tauri/src/` の `kb` 機能を DDD レイヤへ分割し、`ai / capture / workshop` の内部レイヤ境界を明確化。
+- バック `src-tauri/src/` の全機能（`kb / ai / capture / workshop`）を DDD レイヤ（domain/application/infrastructure/interface のうち実在するもの）へ分割。
 - スライス公開 API（`index.ts`）の導入と、内部実装への直接 import の解消。
 - import パスの一括更新、`AGENTS.md` の該当記述の追従更新（必要時）。
 
@@ -47,16 +47,24 @@
 - shadcn 生成物（`components/ui`）の中身改変。
 - ルーティング構成（URL）の変更。
 
-## 採用案と代替案
+## 採用方針（ベストプラクティス・妥協なし）
 
-| 案 | 内容 | トレードオフ | 採否 |
-|----|------|--------------|------|
-| A. 全量強制再排 | 4 つのバック機能すべてを `domain/application/infrastructure/interface` に割る | 形式的に最も「教科書 DDD」。ただし `ai/capture/workshop` は薄く、空殻に近い層を生み文書の「軽量に保つ」に反する | 不採用（文書違反リスク） |
-| **B. 文書忠実移行（推奨）** | フロントは全スライス実ファイルで充填。バックは実ルールを持つ `kb` のみ完全分割、`ai/capture/workshop` は機能内のレイヤを明確化（実分離のある所だけ submodule 化） | 文書の「空殻禁止 / 軽量維持」と「DDD/FSD」を両立。差分は機械的で回帰安全 | **採用** |
-| C. フロントのみ先行 | フロント FSD だけ実施しバックは据え置き | 範囲は小さいが「前後端の架構を揃える」目的を半分しか満たさない | 不採用 |
+ユーザー決定: **「やるなら最善で、妥協しない」**。よって全機能を DDD の実在レイヤへ分割し、
+フロントは全スライスを実ファイルで充填する。
 
-以降は **案 B** を前提に詳細を定義する。`ai/capture/workshop` を完全 4 層へ昇格するか（案 A 寄り）は
-レビュー時の決定ポイントとして残す（「決定ポイント」節）。
+「空殻禁止」との両立: `ai/capture/workshop` も含め、各機能を分割しても**生成される全レイヤに実コードが入る**
+（ai = domain trait + infrastructure アダプタ + interface、capture = application + infrastructure 抽出器 + interface、
+workshop = domain + application + interface）。実体のないレイヤは作らない。これにより
+「ベストプラクティス（明示的な層境界）」と AGENTS.md の「空フォルダ禁止」を同時に満たす。
+
+| 検討案 | 採否 |
+|--------|------|
+| 全機能を実在レイヤへ DDD 分割 + フロント全 FSD | **採用** |
+| `kb` のみ分割し他は軽量据え置き | 不採用（妥協のため） |
+| フロントのみ先行 | 不採用（目的の半分） |
+
+レイヤ規約: レイヤは**複数ファイルなら同名ディレクトリ**（`domain/`）、**単一ファイルならレイヤ名 `.rs`**
+（`application.rs`）。実コードのないレイヤファイル/ディレクトリは作らない。
 
 ---
 
@@ -235,16 +243,59 @@ src/kb/
 注: `create_kb` は `fs::create_dir_all` / `fs::write` を直接呼ぶ。厳密 DDD では domain は FS 非依存のため、
 **検証規則（domain/registry）と書き込み（infra/config_store）を分離**する。分離は移送と同時に行う最小限の調整に留める。
 
-### `ai / capture / workshop`（軽量整理。文書の「軽量維持」に従う）
+### `ai / capture / workshop`（各機能を実在レイヤへ分割）
 
-これらは薄く、空殻層を生むため**ファイル分割は行わず**、各モジュール内のレイヤ責務を
-コメント区画と関数配置で明確化するに留める（決定ポイントで完全分割へ昇格可）。
+空殻を作らず、各機能が**実際に持つ**レイヤへ分割する。
 
-- `ai.rs`: 既に「domain（`AiProvider` trait, DTO, `AiError`）+ interface（2 コマンド）」、`ai/ollama.rs` は infra アダプタ。
-  → 現状維持。`ai/ollama.rs` が infrastructure であることを doc コメントで明示。
-- `capture.rs`: application（`write_material`/`copy_attachment`/`kind_for_ext` + 3 コマンド）、`capture/{doc,web}.rs` は
-  infra（PDF/Word 抽出・readability）。→ 現状維持、責務を明示。
-- `workshop.rs`: application（`related_entries`/`draft`/`confirm` + 2 コマンド）。kb・ai を編成するユースケース層。→ 現状維持。
+**`ai`**（domain ポート + infra アダプタ + interface）:
+```
+src/ai/
+  mod.rs            # レイヤ宣言 + pub(crate) 再公開
+  domain.rs         # AiProvider trait / StructureRequest / StructureResult / EntrySummary / AiError / FakeProvider(cfg test)
+  infrastructure/
+    mod.rs          # pub mod ollama
+    ollama.rs       # 旧 ai/ollama.rs（OllamaProvider）
+  interface.rs      # ai_has_key / ai_list_ollama_models コマンド
+```
+
+**`capture`**（domain 分類 + application ユースケース + infra 抽出 + interface）:
+```
+src/capture/
+  mod.rs
+  domain.rs         # kind_for_ext / split_name（素材タイプ判定の純ロジック）
+  application.rs    # write_material / copy_attachment + capture_text/file/web のユースケース本体
+  infrastructure/
+    mod.rs          # pub mod doc; pub mod web
+    doc.rs          # 旧 capture/doc.rs（PDF/Word 抽出）
+    web.rs          # 旧 capture/web.rs（readability 抽出）
+  interface.rs      # capture_text / capture_file / capture_web コマンド
+```
+
+**`workshop`**（domain 検索語抽出 + application RAG 編成 + interface）:
+```
+src/workshop/
+  mod.rs
+  domain.rs         # candidate_terms（FTS 検索候補語の抽出規則）
+  application.rs    # related_entries / draft / confirm（kb・ai を編成するユースケース）
+  interface.rs      # workshop_draft / workshop_confirm コマンド
+```
+
+| 旧 | 新 | レイヤ |
+|----|----|--------|
+| `ai.rs`（trait/DTO/AiError/FakeProvider） | `ai/domain.rs` | domain |
+| `ai/ollama.rs` | `ai/infrastructure/ollama.rs` | infra |
+| `ai.rs`（2 コマンド） | `ai/interface.rs` | interface |
+| `capture.rs`（kind_for_ext/split_name） | `capture/domain.rs` | domain |
+| `capture.rs`（write_material/copy_attachment + 取込ロジック） | `capture/application.rs` | application |
+| `capture/doc.rs`・`capture/web.rs` | `capture/infrastructure/{doc,web}.rs` | infra |
+| `capture.rs`（3 コマンド） | `capture/interface.rs` | interface |
+| `workshop.rs`（candidate_terms） | `workshop/domain.rs` | domain |
+| `workshop.rs`（related_entries/draft/confirm） | `workshop/application.rs` | application |
+| `workshop.rs`（2 コマンド） | `workshop/interface.rs` | interface |
+
+注: `capture/application.rs` は infra（doc/web/FS）と domain（kind_for_ext）に依存し、
+コマンドからは呼ばれる側。`workshop/application.rs` は `crate::ai`・`crate::kb` を編成する。
+domain（candidate_terms 等）は外部依存を持たない純関数のみ。
 
 ### `lib.rs`（合成ルート / interface 登録）
 
@@ -276,23 +327,23 @@ src/kb/
 各段階は独立してビルド/テスト緑を保ち、レビュー可能な単位でコミットする。
 
 1. **バック: `kb` を DDD 分割**（ファイル移送 + 可視性調整 + import 更新）。 → 検証: `bun run test` 緑、IPC 名差分ゼロ
-2. **バック: `ai/capture/workshop` 責務明示**（doc コメント区画のみ、構造変更なし）。 → 検証: `bun run test` 緑
+2. **バック: `ai/capture/workshop` を DDD 分割**（実在レイヤへ分割、テスト移送）。 → 検証: `bun run test` 緑、IPC 名差分ゼロ
 3. **フロント: `shared/` 確立**（ui/eb/seg-tabs, api/tauri, config/nav, i18n, lib/utils, providers の移送 + import 更新）。 → 検証: `bun run lint` + `bun run build` 緑
 4. **フロント: `entities/` 確立**（knowledge-base / material / wiki-entry の model + adapt + 公開 API）。 → 検証: build 緑
 5. **フロント: `features/` 確立**（全 `*-view` + dashboard 子 + onboarding を移送、公開 API 化）。 → 検証: build 緑
 6. **フロント: `widgets/` 確立**（app-shell, material-row）と `app/` を薄い page に整理。 → 検証: build 緑、URL 不変
 7. **ドキュメント追従**（必要なら `AGENTS.md` の現行配置記述を実態へ更新）。 → 検証: 記述と実態一致
 
-## 決定ポイント（レビューで確認したい点）
+## 決定事項（ユーザー確定: 妥協なし・ベストプラクティス）
 
-1. `ai/capture/workshop` を **案 A（完全 4 層分割）へ昇格**するか、**案 B（軽量整理）**で止めるか。推奨は B。
-2. フロントの IPC DTO 型を **`shared/api/tauri` に契約として集約**（推奨）するか、entities 側へ移すか。
-3. `widgets/` 層の導入可否（本設計は導入前提で境界を文書化済み）。
-4. `lib/data/store.ts` の空プレースホルダを entities へ集約するか、未使用分を削除するか。
+1. `ai/capture/workshop` も **完全に DDD レイヤ分割**する（実在レイヤのみ、空殻なし）。
+2. フロントの IPC DTO 型は **`shared/api/tauri` に契約として集約**（バック契約の単一ソース、AGENTS.md「型を集約」に整合）。
+3. `widgets/` 層を **導入**する（境界は本設計で文書化済み）。
+4. `lib/data/store.ts` の空プレースホルダは **使用点に応じ entities へ集約し、未使用分は削除**する。
 
 ## リスクと対策
 
 - **大量 import 書き換えによる解決漏れ** → 各段階で `bun run build` / `cargo test` を必ず通し、段階間で緑を維持。
 - **可視性（pub/pub(crate)）変更で他機能が壊れる** → `kb/mod.rs` で旧シンボルを再公開し外部参照を温存。
-- **「空殻フォルダ」化** → 実ファイルを持つレイヤのみ作成。`ai/capture/workshop` は薄いまま据え置き。
+- **「空殻フォルダ」化** → 実コードを持つレイヤのみ作成。各機能で実体のない層（例: ai に application は無い）は作らない。
 - **IPC 契約の意図しない変化** → コマンド名・serde 属性・登録順を grep 差分で監視。
