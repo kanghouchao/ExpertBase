@@ -29,6 +29,14 @@ pub fn ai_has_key(app: tauri::AppHandle) -> Result<bool, String> {
   Ok(ollama::OllamaProvider::available())
 }
 
+#[tauri::command]
+pub fn ai_list_ollama_models(
+  app: tauri::AppHandle,
+) -> Result<Vec<ollama::OllamaModel>, String> {
+  let _home = app.path().home_dir().map_err(|e| e.to_string())?;
+  ollama::OllamaProvider::list_models().map_err(|e| e.to_string())
+}
+
 /// FTS で引いた関連既存条目の要約（title + excerpt）。
 #[derive(Clone, Debug)]
 pub struct EntrySummary {

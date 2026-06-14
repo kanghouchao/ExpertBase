@@ -11,11 +11,13 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { useI18n } from "@/components/providers";
 import {
   aiHasKey,
+  listOllamaModels,
   listInbox,
   readInboxMaterial,
   workshopConfirm,
   workshopDraft,
   type InboxItem,
+  type OllamaModel,
 } from "@/lib/tauri/client";
 import { inboxToMaterial } from "@/lib/data/adapt";
 import { RAW_TYPE, type RawMaterial } from "@/lib/data/types";
@@ -43,6 +45,8 @@ captured_at: 2026-06-14T02:14:50Z
 
 ……所以你看，杀青的温度其实没有一个死数字，要看茶青的含水量。手摸下去，第一遍要“高温杀透”，让它快速失水；第二遍才看香气和叶色。`;
 
+const PREVIEW_MODELS: OllamaModel[] = [{ name: "qwen3:8b" }, { name: "llama3.1:8b" }];
+
 export function WorkshopProcessView() {
   const { t } = useI18n();
   const router = useRouter();
@@ -56,6 +60,8 @@ export function WorkshopProcessView() {
   const [cat, setCat] = useState("");
   const [body, setBody] = useState("");
   const [hasOllama, setHasOllama] = useState(false);
+  const [models, setModels] = useState<OllamaModel[]>([]);
+  const [selectedModel, setSelectedModel] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,14 +70,17 @@ export function WorkshopProcessView() {
     void (async () => {
       setError(null);
       try {
-        const [inbox, ollama, raw] = await Promise.all([
+        const [inbox, ollama, modelList, raw] = await Promise.all([
           listInbox(),
           aiHasKey(),
+          listOllamaModels(),
           readInboxMaterial(inboxPath),
         ]);
         const found = inbox.find((candidate) => candidate.path === inboxPath) ?? null;
         setItem(found ? materialFromInbox(found) : null);
         setHasOllama(ollama);
+        setModels(modelList);
+        setSelectedModel((current) => current || modelList[0]?.name || "");
         setSource(raw);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -82,13 +91,15 @@ export function WorkshopProcessView() {
   const visibleItem = available ? item : PREVIEW_SOURCE;
   const visibleSource = available ? source : PREVIEW_RAW;
   const visibleHasOllama = available ? hasOllama : true;
+  const visibleModels = available ? models : PREVIEW_MODELS;
+  const visibleSelectedModel = available ? selectedModel : (selectedModel || PREVIEW_MODELS[0].name);
 
   async function handleGenerate() {
     if (!inboxPath) return;
     setBusy(true);
     setError(null);
     try {
-      const result = await workshopDraft(inboxPath, instruction);
+      const result = await workshopDraft(inboxPath, instruction, visibleSelectedModel);
       setTitle(result.title);
       setCat(result.cat);
       setBody(result.bodyMarkdown);
@@ -122,7 +133,7 @@ export function WorkshopProcessView() {
         </Link>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-ai-wash px-4 py-2 font-mono text-[12px] font-bold tracking-[0.08em] text-ai">
           <Icon name="spark" size={13} />
-          AI {t("workshop.assist")} · Ollama
+          AI {t("workshop.assist")} · {visibleSelectedModel || "Ollama"}
         </span>
       </div>
 
@@ -189,6 +200,27 @@ export function WorkshopProcessView() {
                 )}
               </div>
               <div className="border-t border-line p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <label className="font-mono text-[12px] font-bold tracking-[0.06em] text-ink-muted">
+                    {t("workshop.model")}
+                  </label>
+                  <select
+                    value={visibleSelectedModel}
+                    onChange={(event) => setSelectedModel(event.target.value)}
+                    disabled={!visibleHasOllama || visibleModels.length === 0 || busy}
+                    className="h-8 min-w-44 rounded-lg border border-line-strong bg-surface px-2.5 font-mono text-[12px] font-semibold text-ink outline-none disabled:opacity-50"
+                  >
+                    {visibleModels.length === 0 ? (
+                      <option value="">{t("workshop.noModels")}</option>
+                    ) : (
+                      visibleModels.map((model) => (
+                        <option key={model.name} value={model.name}>
+                          {model.name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
                 <div className="flex items-center gap-3 max-sm:flex-col max-sm:items-stretch">
                   <input
                     value={instruction}
@@ -198,7 +230,7 @@ export function WorkshopProcessView() {
                   />
                   <Button
                     className="h-11 bg-ai px-5 text-white hover:bg-ai/85"
-                    disabled={!visibleHasOllama || busy}
+                    disabled={!visibleHasOllama || !visibleSelectedModel || busy}
                     onClick={handleGenerate}
                   >
                     <Icon name="spark" size={15} />
@@ -206,6 +238,9 @@ export function WorkshopProcessView() {
                   </Button>
                 </div>
                 {!visibleHasOllama && <div className="mt-2 text-[12px] text-ink-faint">{t("workshop.noKey")}</div>}
+                {visibleHasOllama && visibleModels.length === 0 && (
+                  <div className="mt-2 text-[12px] text-ink-faint">{t("workshop.noModelsHint")}</div>
+                )}
                 {error && <div className="mt-2 text-[12.5px] font-semibold text-brand">{error}</div>}
                 {body && (
                   <div className="mt-3 flex justify-end">

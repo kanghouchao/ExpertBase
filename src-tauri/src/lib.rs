@@ -36,6 +36,7 @@ pub fn run() {
       capture::capture_web,
       ai::ai_set_key,
       ai::ai_has_key,
+      ai::ai_list_ollama_models,
       workshop::workshop_draft,
       workshop::workshop_confirm
     ])

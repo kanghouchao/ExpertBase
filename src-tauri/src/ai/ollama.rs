@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{AiError, AiProvider, StructureRequest, StructureResult};
@@ -14,6 +14,12 @@ const SYSTEM_PROMPT: &str = "あなたはナレッジベースの編集者です
 title は簡潔な見出し、cat はカテゴリ（短い英小文字の単語）、\
 body_markdown は整理された本文、suggested_links は『既存の関連条目』一覧に実在するタイトルのみから選びます。\
 必ず JSON のみを返してください。";
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OllamaModel {
+  pub name: String,
+}
 
 pub struct OllamaProvider {
   model: String,
@@ -29,6 +35,15 @@ impl OllamaProvider {
     Self { model, base_url: API_BASE.to_string() }
   }
 
+  pub fn with_model(model: String) -> Self {
+    let selected = model.trim();
+    if selected.is_empty() {
+      Self::new()
+    } else {
+      Self { model: selected.to_string(), base_url: API_BASE.to_string() }
+    }
+  }
+
   pub fn available() -> bool {
     reqwest::blocking::Client::builder()
       .timeout(Duration::from_millis(800))
@@ -36,6 +51,27 @@ impl OllamaProvider {
       .and_then(|client| client.get(format!("{API_BASE}/api/version")).send())
       .map(|resp| resp.status().is_success())
       .unwrap_or(false)
+  }
+
+  pub fn list_models() -> Result<Vec<OllamaModel>, AiError> {
+    let client = reqwest::blocking::Client::builder()
+      .timeout(Duration::from_secs(3))
+      .build()
+      .map_err(|e| AiError::Network(e.to_string()))?;
+    let resp = client
+      .get(format!("{API_BASE}/api/tags"))
+      .send()
+      .map_err(|e| AiError::Network(e.to_string()))?;
+    let status = resp.status();
+    let text = resp.text().map_err(|e| AiError::Network(e.to_string()))?;
+    match status.as_u16() {
+      200 => parse_models_response(&text),
+      _ => Err(AiError::Other(format!("Ollama 模型列表读取失败({status}): {text}"))),
+    }
+  }
+
+  pub fn first_local_model() -> Result<Option<String>, AiError> {
+    Ok(Self::list_models()?.into_iter().next().map(|model| model.name))
   }
 }
 
@@ -86,6 +122,26 @@ fn build_body(model: &str, req: &StructureRequest) -> Value {
 }
 
 #[derive(Deserialize)]
+struct TagsResponse {
+  models: Vec<TagModel>,
+}
+
+#[derive(Deserialize)]
+struct TagModel {
+  name: String,
+}
+
+fn parse_models_response(body: &str) -> Result<Vec<OllamaModel>, AiError> {
+  let tags: TagsResponse = serde_json::from_str(body).map_err(|e| AiError::Other(e.to_string()))?;
+  Ok(tags
+    .models
+    .into_iter()
+    .filter(|model| !model.name.trim().is_empty())
+    .map(|model| OllamaModel { name: model.name })
+    .collect())
+}
+
+#[derive(Deserialize)]
 struct GenerateResponse {
   response: String,
 }
@@ -113,7 +169,15 @@ fn parse_response(body: &str) -> Result<StructureResult, AiError> {
 
 impl AiProvider for OllamaProvider {
   fn structure(&self, req: StructureRequest) -> Result<StructureResult, AiError> {
-    let body = build_body(&self.model, &req);
+    let model = if self.model.trim().is_empty() || self.model == DEFAULT_MODEL {
+      Self::first_local_model()?.unwrap_or_else(|| self.model.clone())
+    } else {
+      self.model.clone()
+    };
+    if model.trim().is_empty() {
+      return Err(AiError::Other("Ollama 没有可用模型，请先下载模型".into()));
+    }
+    let body = build_body(&model, &req);
     let client = reqwest::blocking::Client::builder()
       .timeout(Duration::from_secs(120))
       .build()
@@ -129,7 +193,7 @@ impl AiProvider for OllamaProvider {
     let text = resp.text().map_err(|e| AiError::Network(e.to_string()))?;
     match status.as_u16() {
       200 => parse_response(&text),
-      404 => Err(AiError::Other(format!("Ollama 模型未找到: {}", self.model))),
+      404 => Err(AiError::Other(format!("Ollama 模型未找到: {model}"))),
       _ => Err(AiError::Other(format!("Ollama API 错误({status}): {text}"))),
     }
   }
@@ -163,5 +227,23 @@ mod tests {
     let result = parse_response(sample).unwrap();
     assert_eq!(result.title, "緑茶");
     assert_eq!(result.suggested_links, vec!["煎茶".to_string()]);
+  }
+
+  #[test]
+  fn parse_models_response_returns_downloaded_model_names() {
+    let sample = r#"{
+      "models": [
+        {"name": "qwen3:8b", "modified_at": "2026-06-14T00:00:00Z"},
+        {"name": "llama3.1:8b", "modified_at": "2026-06-14T00:00:00Z"}
+      ]
+    }"#;
+    let models = parse_models_response(sample).unwrap();
+    assert_eq!(
+      models,
+      vec![
+        OllamaModel { name: "qwen3:8b".into() },
+        OllamaModel { name: "llama3.1:8b".into() },
+      ]
+    );
   }
 }
