@@ -95,14 +95,14 @@ pub fn workshop_draft(
   app: tauri::AppHandle,
   inbox_path: String,
   instruction: String,
+  model: String,
 ) -> Result<StructureResult, String> {
   let home = app.path().home_dir().map_err(|e| e.to_string())?;
   let (root, conn) = crate::kb::open_active(&home)?;
   let inbox_rel = crate::kb::checked_kb_markdown_path(&inbox_path, "inbox")?;
   let raw = std::fs::read_to_string(root.join(inbox_rel)).map_err(|e| e.to_string())?;
   let material = store::parse_material(&raw)?;
-  let key = crate::ai::get_api_key(&home).ok_or_else(|| AiError::NoKey.to_string())?;
-  let provider = crate::ai::claude::ClaudeProvider::new(key);
+  let provider = crate::ai::ollama::OllamaProvider::with_model(model);
   draft(&provider, &conn, &material.body, &instruction).map_err(|e| e.to_string())
 }
 

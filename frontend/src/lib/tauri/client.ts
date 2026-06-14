@@ -64,6 +64,10 @@ export type StructureResult = {
   suggestedLinks: string[];
 };
 
+export type OllamaModel = {
+  name: string;
+};
+
 /** インデックスをファイルから再構築する。 */
 export async function rebuildIndex(): Promise<void> {
   if (!isTauri()) return;
@@ -111,6 +115,11 @@ export async function readEntry(path: string): Promise<string> {
   return invoke<string>("kb_read_entry", { path });
 }
 
+/** 受信箱素材の生 Markdown を読む。 */
+export async function readInboxMaterial(path: string): Promise<string> {
+  return invoke<string>("kb_read_inbox_material", { path });
+}
+
 /** 条目を上書き保存する（frontmatter 検証付き）。 */
 export async function saveEntry(path: string, content: string): Promise<void> {
   await invoke("kb_save_entry", { path, content });
@@ -137,23 +146,25 @@ export async function captureWeb(url: string): Promise<string> {
   return invoke<string>("capture_web", { url });
 }
 
-/** Anthropic API キーを保存する（Rust 側にのみ保存、UI は保持しない）。 */
-export async function aiSetKey(key: string): Promise<void> {
-  await invoke("ai_set_key", { key });
-}
-
-/** API キーが設定済みか。 */
+/** ローカル Ollama が応答するか。 */
 export async function aiHasKey(): Promise<boolean> {
   if (!isTauri()) return false;
   return invoke<boolean>("ai_has_key");
 }
 
+/** ローカル Ollama に存在するモデル一覧。 */
+export async function listOllamaModels(): Promise<OllamaModel[]> {
+  if (!isTauri()) return [];
+  return invoke<OllamaModel[]>("ai_list_ollama_models");
+}
+
 /** 受信箱素材から AI 構造化草稿を生成する。 */
 export async function workshopDraft(
   inboxPath: string,
-  instruction: string
+  instruction: string,
+  model: string
 ): Promise<StructureResult> {
-  return invoke<StructureResult>("workshop_draft", { inboxPath, instruction });
+  return invoke<StructureResult>("workshop_draft", { inboxPath, instruction, model });
 }
 
 /** 承認内容を条目として確定する。確定した条目の相対パスを返す。 */

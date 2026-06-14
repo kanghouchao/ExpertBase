@@ -1,202 +1,204 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import { Icon } from "@/components/eb/icon";
 import { PageHead } from "@/components/eb/page-head";
-import { Panel } from "@/components/eb/panel";
-import { EmptyState } from "@/components/eb/empty-state";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { useI18n } from "@/components/providers";
-import {
-  aiHasKey,
-  listInbox,
-  readEntry,
-  workshopConfirm,
-  workshopDraft,
-  type InboxItem,
-} from "@/lib/tauri/client";
+import { listInbox, type InboxItem } from "@/lib/tauri/client";
 import { inboxToMaterial } from "@/lib/data/adapt";
+import { RAW_TYPE, type RawMaterial } from "@/lib/data/types";
 import { useKbStore } from "@/lib/kb/store";
-import { MaterialRow } from "../_components/material-row";
+
+const PREVIEW_MATERIALS: RawMaterial[] = [
+  {
+    id: "inbox/tea-master.md",
+    type: "audio",
+    title: "与制茶师傅的访谈录音",
+    source: "录音",
+    date: "02:14:50 · 2 小时前",
+    status: "transcribed",
+    size: "",
+    preview: "……所以你看，杀青的温度其实没有一个死数字，要看茶青的含水量。手摸下去，第一遍要“高温杀透”，让它...",
+    words: 0,
+    tags: ["制茶", "杀青"],
+  },
+  {
+    id: "inbox/whitepaper.md",
+    type: "pdf",
+    title: "2024 普洱仓储白皮书.pdf",
+    source: "PDF",
+    date: "42 页 · 昨天",
+    status: "pending",
+    size: "",
+    preview: "本白皮书梳理了干仓与湿仓的温湿度区间、霉变风险阈值，以及不同年份饼茶的转化曲线对照...",
+    words: 0,
+    tags: ["仓储", "普洱"],
+  },
+  {
+    id: "inbox/gaiwan.md",
+    type: "video",
+    title: "盖碗冲泡手法教学.mov",
+    source: "视频",
+    date: "11:38 · 3 天前",
+    status: "pending",
+    size: "",
+    preview: "关键帧：注水高度、出汤角度、留根与否的对比演示...",
+    words: 0,
+    tags: ["冲泡", "盖碗"],
+  },
+  {
+    id: "inbox/mountain.md",
+    type: "audio",
+    title: "语音备忘：勐海茶山见闻",
+    source: "录音",
+    date: "08:31 · 上周",
+    status: "transcribed",
+    size: "",
+    preview: "老班章和老曼峨的距离其实很近，但口感差异巨大，苦底化得快不快是关键...",
+    words: 0,
+    tags: ["茶山", "普洱"],
+  },
+];
 
 export function WorkshopView() {
   const { t } = useI18n();
   const { available } = useKbStore();
-  const [pending, setPending] = useState<InboxItem[]>([]);
-  const [selected, setSelected] = useState<InboxItem | null>(null);
-  const [source, setSource] = useState("");
-  const [instruction, setInstruction] = useState("");
-  const [title, setTitle] = useState("");
-  const [cat, setCat] = useState("");
-  const [body, setBody] = useState("");
-  const [hasKey, setHasKey] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<RawMaterial[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!available) return;
     void (async () => {
-      const [inbox, key] = await Promise.all([listInbox(), aiHasKey()]);
-      setPending(inbox.filter((item) => item.status !== "processed"));
-      setHasKey(key);
+      try {
+        const inbox = await listInbox();
+        setPending(
+          inbox
+            .filter((item) => item.status !== "processed")
+            .map((item) => materialFromInbox(item))
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     })();
   }, [available]);
 
-  async function refreshPending() {
-    const inbox = await listInbox();
-    setPending(inbox.filter((item) => item.status !== "processed"));
-  }
-
-  async function select(item: InboxItem) {
-    setSelected(item);
-    setError(null);
-    setTitle("");
-    setCat("");
-    setBody("");
-    setInstruction("");
-    setSource("");
-    const raw = await readEntry(item.path);
-    setSource(raw);
-  }
-
-  async function handleGenerate() {
-    if (!selected) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await workshopDraft(selected.path, instruction);
-      setTitle(result.title);
-      setCat(result.cat);
-      setBody(result.bodyMarkdown);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleConfirm() {
-    if (!selected || !title.trim() || !body.trim()) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await workshopConfirm({ inboxPath: selected.path, title, cat, body });
-      setSelected(null);
-      await refreshPending();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const visibleMaterials = available ? pending : PREVIEW_MATERIALS;
+  const pendingCount = visibleMaterials.length;
+  const transcribedCount = visibleMaterials.filter((item) => item.status === "transcribed").length;
+  const health = available
+    ? pendingCount === 0
+      ? 100
+      : Math.max(50, 90 - pendingCount * 3 + transcribedCount)
+    : 78;
 
   return (
-    <div className="view-enter">
-      <PageHead eyebrow={t("workshop.eyebrow")} title={t("workshop.title")} sub={t("workshop.sub")} />
-
-      <div className="grid grid-cols-[1fr_1.4fr] gap-5">
-        <div>
-          <h2 className="mb-3 font-mono text-[12px] font-bold tracking-[0.12em] text-ink-muted uppercase">
-            {t("workshop.pendingMaterials")}
-          </h2>
-          <Panel pad={0}>
-            {pending.length === 0 && (
-              <EmptyState icon="merge" title={t("empty.materials")} sub={t("empty.materials.sub")} />
-            )}
-            {pending.map((item) => (
-              <MaterialRow
-                key={item.path}
-                material={inboxToMaterial(item)}
-                action={
-                  <Button
-                    size="sm"
-                    variant={selected?.path === item.path ? "default" : "outline"}
-                    onClick={() => void select(item)}
-                  >
-                    {t("workshop.process")}
-                  </Button>
-                }
-              />
-            ))}
-          </Panel>
-        </div>
-
-        <div>
-          <h2 className="mb-3 font-mono text-[12px] font-bold tracking-[0.12em] text-ink-muted uppercase">
-            {t("workshop.result")}
-          </h2>
-          {!selected ? (
-            <Panel pad={0}>
-              <EmptyState icon="shield" title={t("workshop.selectHint")} sub={t("workshop.sub")} />
-            </Panel>
-          ) : (
-            <Panel className="flex flex-col gap-4">
-              {/* ソース（読み取り専用） */}
-              <div>
-                <div className="mb-1.5 font-mono text-[11.5px] font-bold tracking-widest text-ink-muted uppercase">
-                  {t("workshop.source")}
-                </div>
-                <div className="max-h-40 overflow-auto rounded-lg border border-line bg-surface-2 p-3 text-[13px] leading-relaxed whitespace-pre-wrap text-ink-soft">
-                  {source}
-                </div>
-              </div>
-
-              {/* 指示 + AI 生成 */}
-              <div>
-                <div className="mb-1.5 font-mono text-[11.5px] font-bold tracking-widest text-ink-muted uppercase">
-                  {t("workshop.instruction")}
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    value={instruction}
-                    onChange={(event) => setInstruction(event.target.value)}
-                    placeholder={t("workshop.instruction.ph")}
-                    className="min-w-0 flex-1 rounded-lg border border-line-strong bg-surface px-3 py-2 text-[13.5px] text-ink outline-none"
-                  />
-                  <Button size="sm" disabled={!hasKey || busy} onClick={handleGenerate}>
-                    <Icon name="spark" size={15} />
-                    {t("workshop.generate")}
-                  </Button>
-                </div>
-                {!hasKey && (
-                  <div className="mt-1.5 text-[12px] text-ink-faint">{t("workshop.noKey")}</div>
-                )}
-              </div>
-
-              {/* 結果（編集可能・手動パスもここで書ける） */}
-              <div className="grid gap-2">
-                <input
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  placeholder={t("workshop.titleField")}
-                  className="w-full rounded-lg border border-line-strong bg-surface px-3 py-2 font-serif text-[18px] font-semibold text-ink outline-none"
-                />
-                <input
-                  value={cat}
-                  onChange={(event) => setCat(event.target.value)}
-                  placeholder={t("workshop.catField")}
-                  className="w-full rounded-lg border border-line-strong bg-surface px-3 py-2 font-mono text-[13px] text-ink outline-none"
-                />
-                <textarea
-                  value={body}
-                  onChange={(event) => setBody(event.target.value)}
-                  className="min-h-60 w-full resize-y rounded-lg border border-line-strong bg-surface-2 p-3.5 font-mono text-[13.5px] leading-relaxed text-ink outline-none"
-                />
-              </div>
-
-              {error && <div className="text-[12.5px] font-semibold text-brand">{error}</div>}
-
-              <div className="flex justify-end">
-                <Button disabled={!title.trim() || !body.trim() || busy} onClick={handleConfirm}>
-                  <Icon name="check" size={15} />
-                  {t("workshop.confirm")}
-                </Button>
-              </div>
-            </Panel>
-          )}
-        </div>
+    <div className="view-enter pb-10">
+      <div className="flex items-start justify-between gap-4">
+        <PageHead eyebrow={t("workshop.eyebrow")} title={t("workshop.title")} sub={t("workshop.listSub")} />
+        <button className="mt-20 inline-flex h-11 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-[14px] font-bold text-ink shadow-(--shadow-sm) max-lg:hidden">
+          <Icon name="shield" size={17} />
+          {t("workshop.recheck")}
+        </button>
       </div>
+
+      <section className="mb-6 flex min-h-28 items-center justify-between gap-5 rounded-xl border border-ai-soft bg-surface px-7 py-5 shadow-(--shadow-md)">
+        <div className="flex items-center gap-6">
+          <div className="grid size-16 place-items-center rounded-full border-[6px] border-gold text-[22px] font-bold text-gold">
+            {health}
+          </div>
+          <div>
+            <div className="text-[17px] font-bold text-ink">{t("workshop.healthGood")}</div>
+            <div className="mt-1 text-[13.5px] text-ink-muted">{t("workshop.healthSub")}</div>
+          </div>
+        </div>
+        <div className="flex gap-10 pr-3">
+          <Metric value={pendingCount} label={t("workshop.waitingMaterials")} />
+          <Metric value={4} label={t("workshop.waitingKnowledge")} gold />
+        </div>
+      </section>
+
+      <div className="mb-5 inline-flex rounded-lg border border-line bg-surface-2 p-1">
+        <button className="rounded-md bg-surface px-3 py-1.5 text-[14px] font-bold text-ink shadow-(--shadow-sm)">
+          {t("workshop.pendingMaterials")} · {pendingCount}
+        </button>
+        <button className="rounded-md px-3 py-1.5 text-[14px] font-bold text-ink-muted">
+          {t("workshop.pendingKnowledge")} · 4
+        </button>
+      </div>
+
+      <div className="grid gap-4">
+        {visibleMaterials.map((item) => (
+          <WorkshopQueueCard key={item.id} material={item} />
+        ))}
+      </div>
+      {error && <div className="mt-3 text-[12.5px] font-semibold text-brand">{error}</div>}
     </div>
+  );
+}
+
+function materialFromInbox(item: InboxItem): RawMaterial {
+  const material = inboxToMaterial(item);
+  return {
+    ...material,
+    status: item.type === "audio" || item.type === "video" ? "transcribed" : material.status,
+    preview: item.source || material.title,
+    tags: [],
+  };
+}
+
+function Metric({ value, label, gold = false }: { value: number; label: string; gold?: boolean }) {
+  return (
+    <div className="text-center">
+      <div className={gold ? "text-[34px] font-bold text-gold" : "text-[34px] font-bold text-brand"}>
+        {value}
+      </div>
+      <div className="mt-0.5 text-[12px] text-ink-muted">{label}</div>
+    </div>
+  );
+}
+
+function WorkshopQueueCard({ material }: { material: RawMaterial }) {
+  const { t } = useI18n();
+  const type = RAW_TYPE[material.type];
+  const isTranscribed = material.status === "transcribed";
+  return (
+    <article className="relative min-h-39 overflow-hidden rounded-xl border border-line bg-surface px-7 py-5 shadow-(--shadow-md)">
+      <div
+        className="absolute top-0 bottom-0 left-0 w-1.5"
+        style={{ background: material.type === "video" ? "#9b5a6b" : "var(--brand)" }}
+      />
+      <div className="flex gap-4">
+        <span className="grid size-10 place-items-center rounded-lg bg-surface-2" style={{ color: type.color }}>
+          <Icon name={type.icon} size={18} />
+        </span>
+        <div className="min-w-0 flex-1 pr-40">
+          <div className="text-[16px] font-bold text-ink">{material.title}</div>
+          <div className="mt-1 font-mono text-[12px] text-ink-faint">
+            {material.source} · {material.date}
+          </div>
+          <p className="mt-4 truncate text-[14px] leading-relaxed text-ink-soft">{material.preview}</p>
+          <div className="mt-4 flex gap-2">
+            {material.tags.map((tag) => (
+              <span key={tag} className="rounded-full bg-surface-2 px-2.5 py-1 text-[12px] font-bold text-ink-muted">
+                # {tag}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="absolute top-6 right-6 rounded-full bg-ai-wash px-3 py-1 text-[12px] font-bold text-ai">
+          {isTranscribed ? t("st.transcribed") : t("st.pending")}
+        </div>
+        <Link
+          className={buttonVariants({ size: "lg", className: "absolute right-6 bottom-5 bg-brand px-5 text-white hover:bg-brand/85" })}
+          href={`/workshop/process?path=${encodeURIComponent(material.id)}`}
+        >
+          <Icon name="arrowR" size={15} />
+          {t("workshop.processKnowledge")}
+        </Link>
+      </div>
+    </article>
   );
 }

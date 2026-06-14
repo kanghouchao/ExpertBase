@@ -28,13 +28,14 @@ pub fn run() {
       kb::kb_graph,
       kb::kb_orphans,
       kb::kb_read_entry,
+      kb::kb_read_inbox_material,
       kb::kb_save_entry,
       kb::kb_list_inbox,
       capture::capture_text,
       capture::capture_file,
       capture::capture_web,
-      ai::ai_set_key,
       ai::ai_has_key,
+      ai::ai_list_ollama_models,
       workshop::workshop_draft,
       workshop::workshop_confirm
     ])

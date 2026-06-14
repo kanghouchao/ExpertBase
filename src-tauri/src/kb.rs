@@ -260,6 +260,14 @@ pub fn kb_read_entry(app: tauri::AppHandle, path: String) -> Result<String, Stri
 }
 
 #[tauri::command]
+pub fn kb_read_inbox_material(app: tauri::AppHandle, path: String) -> Result<String, String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  let root = active_kb_root(&home)?;
+  let rel = checked_kb_markdown_path(&path, "inbox")?;
+  fs::read_to_string(root.join(rel)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn kb_save_entry(app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
   let home = app.path().home_dir().map_err(|e| e.to_string())?;
   let (root, conn) = open_active(&home)?;
@@ -365,6 +373,17 @@ mod tests {
 
     set_active(home, &first.path).unwrap();
     assert_eq!(load_registry(home).unwrap().active, Some(first.path));
+  }
+
+  #[test]
+  fn checked_kb_markdown_path_accepts_expected_dirs_only() {
+    assert_eq!(
+      checked_kb_markdown_path("inbox/a.md", "inbox").unwrap(),
+      PathBuf::from("inbox/a.md")
+    );
+    assert!(checked_kb_markdown_path("inbox/a.md", "entries").is_err());
+    assert!(checked_kb_markdown_path("inbox/nested/a.md", "inbox").is_err());
+    assert!(checked_kb_markdown_path("../inbox/a.md", "inbox").is_err());
   }
 
   #[test]

@@ -1,40 +1,15 @@
-use std::path::Path;
-
 use serde::Serialize;
-use tauri::Manager;
 
-pub mod claude;
+pub mod ollama;
 
-/// API キーの保存場所（ユーザーホーム直下、ドット始まりの設定ディレクトリ内）。
-fn key_path(home: &Path) -> std::path::PathBuf {
-  home.join(".expertBase").join("anthropic.key")
-}
-
-/// BYO API キーを保存する。UI はキーを保持せず、Rust 側にのみ置く。
-pub fn set_api_key(home: &Path, key: &str) -> Result<(), String> {
-  let path = key_path(home);
-  std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
-  std::fs::write(path, key.trim()).map_err(|e| e.to_string())
-}
-
-/// 保存済み API キーを読む。未設定・空なら None。
-pub fn get_api_key(home: &Path) -> Option<String> {
-  std::fs::read_to_string(key_path(home))
-    .ok()
-    .map(|s| s.trim().to_string())
-    .filter(|s| !s.is_empty())
+#[tauri::command]
+pub fn ai_has_key() -> Result<bool, String> {
+  Ok(ollama::OllamaProvider::available())
 }
 
 #[tauri::command]
-pub fn ai_set_key(app: tauri::AppHandle, key: String) -> Result<(), String> {
-  let home = app.path().home_dir().map_err(|e| e.to_string())?;
-  set_api_key(&home, &key)
-}
-
-#[tauri::command]
-pub fn ai_has_key(app: tauri::AppHandle) -> Result<bool, String> {
-  let home = app.path().home_dir().map_err(|e| e.to_string())?;
-  Ok(get_api_key(&home).is_some())
+pub fn ai_list_ollama_models() -> Result<Vec<ollama::OllamaModel>, String> {
+  ollama::OllamaProvider::list_models().map_err(|e| e.to_string())
 }
 
 /// FTS で引いた関連既存条目の要約（title + excerpt）。
@@ -69,12 +44,8 @@ pub struct StructureResult {
 /// AI エラー。UI で区別して表示し、手動パスへ退避できるようにする。
 #[derive(Debug, PartialEq)]
 pub enum AiError {
-  /// API キー未設定。
-  NoKey,
   /// ネットワーク障害。
   Network(String),
-  /// レート制限。
-  RateLimited,
   /// その他（API エラー応答・解析失敗など）。
   Other(String),
 }
@@ -82,9 +53,7 @@ pub enum AiError {
 impl std::fmt::Display for AiError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      AiError::NoKey => write!(f, "未配置 API 密钥"),
       AiError::Network(m) => write!(f, "网络错误: {m}"),
-      AiError::RateLimited => write!(f, "请求过于频繁，请稍后再试"),
       AiError::Other(m) => write!(f, "{m}"),
     }
   }
@@ -131,7 +100,7 @@ mod tests {
   }
 
   #[test]
-  fn ai_error_displays_distinct_messages() {
-    assert_ne!(AiError::NoKey.to_string(), AiError::RateLimited.to_string());
+  fn ai_error_displays_messages() {
+    assert_eq!(AiError::Other("x".into()).to_string(), "x");
   }
 }
