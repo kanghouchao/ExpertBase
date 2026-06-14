@@ -170,14 +170,14 @@ pub fn kb_set_active(app: tauri::AppHandle, path: String) -> Result<(), String> 
 }
 
 /// アクティブなナレッジベースのルートパスを返す。未選択ならエラー。
-fn active_kb_root(home: &Path) -> Result<PathBuf, String> {
+pub(crate) fn active_kb_root(home: &Path) -> Result<PathBuf, String> {
   let registry = load_registry(home)?;
   let active = registry.active.ok_or("没有激活的知识库")?;
   Ok(PathBuf::from(active))
 }
 
 /// アクティブ KB のルートとインデックス接続をまとめて開く。
-fn open_active(home: &Path) -> Result<(PathBuf, rusqlite::Connection), String> {
+pub(crate) fn open_active(home: &Path) -> Result<(PathBuf, rusqlite::Connection), String> {
   let root = active_kb_root(home)?;
   let conn = index::open_index(&root)?;
   Ok((root, conn))

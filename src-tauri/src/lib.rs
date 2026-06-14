@@ -1,3 +1,4 @@
+mod capture;
 mod kb;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -26,7 +27,9 @@ pub fn run() {
       kb::kb_orphans,
       kb::kb_read_entry,
       kb::kb_save_entry,
-      kb::kb_list_inbox
+      kb::kb_list_inbox,
+      capture::capture_text,
+      capture::capture_file
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
