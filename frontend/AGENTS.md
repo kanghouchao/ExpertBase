@@ -31,6 +31,24 @@ When working under `frontend/`, follow this file in addition to the repository-l
 
 Create new folders only when the first real file needs them. Do not add empty architecture folders.
 
+## Feature-Sliced Design
+
+Use Feature-Sliced Design (FSD) for frontend code organization, adapted to Next.js App Router.
+
+- `src/app/` remains the routing and composition layer. Route files read routing context, compose screens, and stay thin.
+- `features/` contains complete user scenarios, including scenario-specific UI, state, API calls, and logic.
+- `entities/` contains domain-facing client models, types, validation, and pure functions. It must not contain UI or HTTP client logic.
+- `shared/` contains reusable UI primitives, framework-neutral utilities, configuration, and typed clients that can be used by any layer.
+- Add new FSD folders only when the first real file needs them. Do not create empty architecture folders.
+
+Dependencies must flow downward:
+
+```text
+app -> features -> entities -> shared
+```
+
+If `widgets/` or another FSD layer becomes necessary, document the boundary before introducing it. Cross-slice imports must go through a slice public API such as `index.ts`; do not import another slice's internals.
+
 ## Next.js Practices
 
 - Prefer Server Components. Add `"use client"` only when a component needs browser APIs, state, effects, event handlers, or client-only libraries.
@@ -68,6 +86,7 @@ Create new folders only when the first real file needs them. Do not add empty ar
 
 ## Quality Bar
 
+- For behavior changes, write or update the relevant test before implementation. If a meaningful frontend test cannot be written first, state why before coding.
 - Before finishing frontend changes, run `bun run lint`.
 - Run `bun run build` when changing routing, layout, config, imports, or anything that can affect production compilation.
 - If build fails due to local sandbox or network restrictions, report the exact reason instead of hiding it.
