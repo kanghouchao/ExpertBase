@@ -4,6 +4,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
+pub mod entry;
+pub mod index;
+pub mod store;
+
 /// グローバル設定ディレクトリ（ユーザーホーム直下）。
 const CONFIG_DIR: &str = ".expertBase";
 /// グローバル設定ファイル名。登録済みナレッジベースの一覧を保持する。
