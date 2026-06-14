@@ -22,8 +22,8 @@ When working under `src-tauri/`, follow this file in addition to the repository-
 
 ## Directory Rules
 
-- `src/lib.rs`: Tauri builder setup and command registration. Register new commands in `tauri::generate_handler!`.
-- `src/<feature>.rs`: one module per feature domain (e.g. `kb.rs` for the knowledge base).
+- `src/lib.rs`: Tauri builder setup and command registration. Register new commands in `tauri::generate_handler!` (commands live in each feature's `interface` module, e.g. `kb::interface::kb_list`).
+- `src/<feature>/`: one module per feature domain (e.g. `kb/`), split into `domain`, `application`, `infrastructure`, and `interface` layers — only the layers a feature actually needs. A feature re-exports its public surface from `mod.rs`; other features depend on that surface, not on internal layers.
 - `capabilities/`: Tauri capability definitions. Grant the minimum permissions a feature needs.
 - `tauri.conf.json`: app configuration.
 - `gen/`: generated files. Do not edit by hand.
@@ -38,7 +38,7 @@ Use Domain-Driven Design (DDD) for Rust backend code in `src-tauri/`.
 - Interface code adapts the outside world to the application layer. Tauri commands are interface adapters only.
 - Domain code must not depend on Tauri, storage, filesystem, frontend DTOs, or other infrastructure details.
 
-Keep the current module layout lightweight until real code requires deeper structure. New feature modules may start as `src/<feature>.rs`, but split into feature-local `domain`, `application`, `infrastructure`, and interface modules when a feature accumulates real business rules or multiple use cases. Use top-level shared modules only when a cross-feature abstraction is justified by real reuse.
+All current features (`kb`, `ai`, `capture`, `workshop`) are split into the DDD layers they actually use. New feature modules may start as `src/<feature>.rs`, but split into feature-local `domain`, `application`, `infrastructure`, and `interface` modules as they accumulate real business rules or multiple use cases. Create only the layers a feature actually needs — do not add empty layers (e.g. `ai` has no `application` layer; `workshop` has no `infrastructure` layer). Use top-level shared modules only when a cross-feature abstraction is justified by real reuse.
 
 ## IPC Command Practices
 
