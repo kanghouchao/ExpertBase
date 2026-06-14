@@ -1,39 +1,14 @@
-use std::path::Path;
-
 use serde::Serialize;
-use tauri::Manager;
 
 pub mod ollama;
 
-/// API キーの保存場所（ユーザーホーム直下、ドット始まりの設定ディレクトリ内）。
-fn key_path(home: &Path) -> std::path::PathBuf {
-  home.join(".expertBase").join("anthropic.key")
-}
-
-/// BYO API キーを保存する。UI はキーを保持せず、Rust 側にのみ置く。
-pub fn set_api_key(home: &Path, key: &str) -> Result<(), String> {
-  let path = key_path(home);
-  std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
-  std::fs::write(path, key.trim()).map_err(|e| e.to_string())
-}
-
 #[tauri::command]
-pub fn ai_set_key(app: tauri::AppHandle, key: String) -> Result<(), String> {
-  let home = app.path().home_dir().map_err(|e| e.to_string())?;
-  set_api_key(&home, &key)
-}
-
-#[tauri::command]
-pub fn ai_has_key(app: tauri::AppHandle) -> Result<bool, String> {
-  let _home = app.path().home_dir().map_err(|e| e.to_string())?;
+pub fn ai_has_key() -> Result<bool, String> {
   Ok(ollama::OllamaProvider::available())
 }
 
 #[tauri::command]
-pub fn ai_list_ollama_models(
-  app: tauri::AppHandle,
-) -> Result<Vec<ollama::OllamaModel>, String> {
-  let _home = app.path().home_dir().map_err(|e| e.to_string())?;
+pub fn ai_list_ollama_models() -> Result<Vec<ollama::OllamaModel>, String> {
   ollama::OllamaProvider::list_models().map_err(|e| e.to_string())
 }
 

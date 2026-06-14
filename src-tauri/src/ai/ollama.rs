@@ -5,7 +5,6 @@ use serde_json::{json, Value};
 
 use super::{AiError, AiProvider, StructureRequest, StructureResult};
 
-const DEFAULT_MODEL: &str = "llama3.2";
 const API_BASE: &str = "http://127.0.0.1:11434";
 
 /// Ollama に渡す system プロンプト。出力は JSON スキーマで固定する。
@@ -22,7 +21,7 @@ pub struct OllamaModel {
 }
 
 pub struct OllamaProvider {
-  model: String,
+  model: Option<String>,
   base_url: String,
 }
 
@@ -31,7 +30,7 @@ impl OllamaProvider {
     let model = std::env::var("EXPERTBASE_OLLAMA_MODEL")
       .ok()
       .filter(|s| !s.trim().is_empty())
-      .unwrap_or_else(|| DEFAULT_MODEL.to_string());
+      .map(|s| s.trim().to_string());
     Self { model, base_url: API_BASE.to_string() }
   }
 
@@ -40,7 +39,7 @@ impl OllamaProvider {
     if selected.is_empty() {
       Self::new()
     } else {
-      Self { model: selected.to_string(), base_url: API_BASE.to_string() }
+      Self { model: Some(selected.to_string()), base_url: API_BASE.to_string() }
     }
   }
 
@@ -169,14 +168,11 @@ fn parse_response(body: &str) -> Result<StructureResult, AiError> {
 
 impl AiProvider for OllamaProvider {
   fn structure(&self, req: StructureRequest) -> Result<StructureResult, AiError> {
-    let model = if self.model.trim().is_empty() || self.model == DEFAULT_MODEL {
-      Self::first_local_model()?.unwrap_or_else(|| self.model.clone())
-    } else {
-      self.model.clone()
+    let model = match &self.model {
+      Some(model) => model.clone(),
+      None => Self::first_local_model()?
+        .ok_or_else(|| AiError::Other("Ollama 没有可用模型，请先下载模型".into()))?,
     };
-    if model.trim().is_empty() {
-      return Err(AiError::Other("Ollama 没有可用模型，请先下载模型".into()));
-    }
     let body = build_body(&model, &req);
     let client = reqwest::blocking::Client::builder()
       .timeout(Duration::from_secs(120))
@@ -219,6 +215,12 @@ mod tests {
     assert_eq!(body["stream"], false);
     assert_eq!(body["format"]["type"], "object");
     assert!(body["prompt"].as_str().unwrap().contains("緑茶の淹れ方"));
+  }
+
+  #[test]
+  fn with_model_preserves_explicit_model_name() {
+    let provider = OllamaProvider::with_model("llama3.2".into());
+    assert_eq!(provider.model.as_deref(), Some("llama3.2"));
   }
 
   #[test]

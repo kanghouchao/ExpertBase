@@ -146,12 +146,7 @@ export async function captureWeb(url: string): Promise<string> {
   return invoke<string>("capture_web", { url });
 }
 
-/** Anthropic API キーを保存する（Rust 側にのみ保存、UI は保持しない）。 */
-export async function aiSetKey(key: string): Promise<void> {
-  await invoke("ai_set_key", { key });
-}
-
-/** API キーが設定済みか。 */
+/** ローカル Ollama が応答するか。 */
 export async function aiHasKey(): Promise<boolean> {
   if (!isTauri()) return false;
   return invoke<boolean>("ai_has_key");

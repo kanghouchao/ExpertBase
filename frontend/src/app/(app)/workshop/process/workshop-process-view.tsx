@@ -70,23 +70,35 @@ export function WorkshopProcessView() {
     void (async () => {
       setError(null);
       try {
-        const [inbox, ollama, modelList, raw] = await Promise.all([
-          listInbox(),
-          aiHasKey(),
-          listOllamaModels(),
-          readInboxMaterial(inboxPath),
-        ]);
+        const [inbox, raw] = await Promise.all([listInbox(), readInboxMaterial(inboxPath)]);
         const found = inbox.find((candidate) => candidate.path === inboxPath) ?? null;
         setItem(found ? materialFromInbox(found) : null);
-        setHasOllama(ollama);
-        setModels(modelList);
-        setSelectedModel((current) => current || modelList[0]?.name || "");
         setSource(raw);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
     })();
   }, [available, inboxPath]);
+
+  useEffect(() => {
+    if (!available) return;
+    void (async () => {
+      try {
+        const [ollama, modelList] = await Promise.all([aiHasKey(), listOllamaModels()]);
+        setHasOllama(ollama);
+        setModels(modelList);
+        setSelectedModel((current) =>
+          current && modelList.some((model) => model.name === current)
+            ? current
+            : (modelList[0]?.name ?? "")
+        );
+      } catch {
+        setHasOllama(false);
+        setModels([]);
+        setSelectedModel("");
+      }
+    })();
+  }, [available]);
 
   const visibleItem = available ? item : PREVIEW_SOURCE;
   const visibleSource = available ? source : PREVIEW_RAW;
