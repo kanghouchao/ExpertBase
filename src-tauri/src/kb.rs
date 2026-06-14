@@ -169,6 +169,93 @@ pub fn kb_set_active(app: tauri::AppHandle, path: String) -> Result<(), String> 
   set_active(&home, &path)
 }
 
+/// アクティブなナレッジベースのルートパスを返す。未選択ならエラー。
+fn active_kb_root(home: &Path) -> Result<PathBuf, String> {
+  let registry = load_registry(home)?;
+  let active = registry.active.ok_or("没有激活的知识库")?;
+  Ok(PathBuf::from(active))
+}
+
+/// アクティブ KB のルートとインデックス接続をまとめて開く。
+fn open_active(home: &Path) -> Result<(PathBuf, rusqlite::Connection), String> {
+  let root = active_kb_root(home)?;
+  let conn = index::open_index(&root)?;
+  Ok((root, conn))
+}
+
+#[tauri::command]
+pub fn kb_rebuild_index(app: tauri::AppHandle) -> Result<(), String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  let (root, conn) = open_active(&home)?;
+  index::rebuild(&conn, &root)
+}
+
+#[tauri::command]
+pub fn kb_list_entries(app: tauri::AppHandle) -> Result<Vec<index::EntryRef>, String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  let (_root, conn) = open_active(&home)?;
+  index::list_entries(&conn)
+}
+
+#[tauri::command]
+pub fn kb_search(app: tauri::AppHandle, query: String) -> Result<Vec<index::SearchHit>, String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  let (_root, conn) = open_active(&home)?;
+  index::search(&conn, &query)
+}
+
+#[tauri::command]
+pub fn kb_backlinks(app: tauri::AppHandle, title: String) -> Result<Vec<index::EntryRef>, String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  let (_root, conn) = open_active(&home)?;
+  index::backlinks(&conn, &title)
+}
+
+#[tauri::command]
+pub fn kb_stats(app: tauri::AppHandle) -> Result<index::Stats, String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  let (_root, conn) = open_active(&home)?;
+  index::stats(&conn)
+}
+
+#[tauri::command]
+pub fn kb_graph(app: tauri::AppHandle) -> Result<index::GraphData, String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  let (_root, conn) = open_active(&home)?;
+  index::graph(&conn)
+}
+
+#[tauri::command]
+pub fn kb_orphans(app: tauri::AppHandle) -> Result<Vec<index::EntryRef>, String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  let (_root, conn) = open_active(&home)?;
+  index::orphans(&conn)
+}
+
+#[tauri::command]
+pub fn kb_read_entry(app: tauri::AppHandle, path: String) -> Result<String, String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  let root = active_kb_root(&home)?;
+  fs::read_to_string(root.join(&path)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn kb_save_entry(app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  let (root, conn) = open_active(&home)?;
+  // 保存前に frontmatter を検証する（不正なら書き込まない）。
+  let parsed = entry::parse_entry(&content)?;
+  fs::write(root.join(&path), &content).map_err(|e| e.to_string())?;
+  index::upsert_entry(&conn, &path, &parsed)
+}
+
+#[tauri::command]
+pub fn kb_list_inbox(app: tauri::AppHandle) -> Result<Vec<index::InboxItem>, String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  let (_root, conn) = open_active(&home)?;
+  index::list_inbox(&conn)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

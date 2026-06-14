@@ -16,7 +16,17 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       kb::kb_list,
       kb::kb_create,
-      kb::kb_set_active
+      kb::kb_set_active,
+      kb::kb_rebuild_index,
+      kb::kb_list_entries,
+      kb::kb_search,
+      kb::kb_backlinks,
+      kb::kb_stats,
+      kb::kb_graph,
+      kb::kb_orphans,
+      kb::kb_read_entry,
+      kb::kb_save_entry,
+      kb::kb_list_inbox
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
