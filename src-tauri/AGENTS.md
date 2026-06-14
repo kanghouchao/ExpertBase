@@ -28,13 +28,27 @@ When working under `src-tauri/`, follow this file in addition to the repository-
 - `tauri.conf.json`: app configuration.
 - `gen/`: generated files. Do not edit by hand.
 
+## Domain-Driven Design
+
+Use Domain-Driven Design (DDD) for Rust backend code in `src-tauri/`.
+
+- Domain code owns business rules, invariants, entities, value objects, domain errors, and domain events.
+- Application code represents use cases. It orchestrates domain behavior and depends on domain abstractions, not concrete infrastructure.
+- Infrastructure code implements persistence, filesystem access, indexing, plugin loading, OS integration, and other concrete adapters.
+- Interface code adapts the outside world to the application layer. Tauri commands are interface adapters only.
+- Domain code must not depend on Tauri, storage, filesystem, frontend DTOs, or other infrastructure details.
+
+Keep the current module layout lightweight until real code requires deeper structure. New feature modules may start as `src/<feature>.rs`, but split into feature-local `domain`, `application`, `infrastructure`, and interface modules when a feature accumulates real business rules or multiple use cases. Use top-level shared modules only when a cross-feature abstraction is justified by real reuse.
+
 ## IPC Command Practices
 
 - Define commands with `#[tauri::command]` returning `Result<T, String>`, mapping internal errors with `map_err(|e| e.to_string())`.
 - Structs crossing the IPC boundary derive `Serialize` with `#[serde(rename_all = "camelCase")]` to match the TypeScript client in `frontend/src/lib/tauri`.
-- Keep commands as thin wrappers: put the real logic in plain functions that take explicit inputs (paths, values) instead of `AppHandle`, so they are unit-testable.
+- Keep commands as thin wrappers: parse IPC inputs, call application services or plain functions, and format IPC outputs. Do not put business rules in command handlers.
 
 ## Quality Bar
 
-- New logic gets unit tests in a `#[cfg(test)] mod tests` block in the same file; use `tempfile` for filesystem tests.
+- Follow TDD for behavior changes: write or update the failing unit test first, then implement the smallest change that makes it pass.
+- New domain and application logic gets unit tests in a `#[cfg(test)] mod tests` block in the same file.
+- Use `tempfile` for filesystem and infrastructure tests.
 - Before finishing Rust changes, run `bun run test` from the repository root and report the actual result.
