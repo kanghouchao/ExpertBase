@@ -3,7 +3,7 @@ use std::path::Path;
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 
-use super::entry::{extract_links, word_count, Entry};
+use crate::kb::domain::entry::{extract_links, word_count, Entry};
 
 /// インデックスの軽量な条目参照（一覧・バックリンク・孤立で共用）。
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -115,7 +115,7 @@ pub fn rebuild(conn: &Connection, root: &Path) -> Result<(), String> {
         continue;
       }
       let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-      let entry = super::entry::parse_entry(&text)?;
+      let entry = crate::kb::domain::entry::parse_entry(&text)?;
       let rel = format!("entries/{}", path.file_name().unwrap().to_string_lossy());
       upsert_entry(conn, &rel, &entry)?;
     }
@@ -129,7 +129,7 @@ pub fn rebuild(conn: &Connection, root: &Path) -> Result<(), String> {
         continue;
       }
       let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-      let m = super::store::parse_material(&text)?;
+      let m = crate::kb::domain::material::parse_material(&text)?;
       let rel = format!("inbox/{}", path.file_name().unwrap().to_string_lossy());
       upsert_inbox(conn, &rel, &m.meta.kind, &m.meta.source, &m.meta.status, &m.meta.captured_at)?;
     }
@@ -347,7 +347,7 @@ pub fn list_inbox(conn: &Connection) -> Result<Vec<InboxItem>, String> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::kb::entry::EntryMeta;
+  use crate::kb::domain::entry::EntryMeta;
 
   fn meta(title: &str, cat: &str) -> EntryMeta {
     EntryMeta {

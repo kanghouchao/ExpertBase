@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use tauri::Manager;
 
 use crate::kb::index;
-use crate::kb::store::{serialize_material, Material, MaterialMeta};
+use crate::kb::material::{serialize_material, Material, MaterialMeta};
 
 pub mod doc;
 pub mod web;

@@ -5,7 +5,7 @@ use tauri::Manager;
 
 use crate::ai::{AiError, AiProvider, EntrySummary, StructureRequest, StructureResult};
 use crate::kb::entry::{Entry, EntryMeta};
-use crate::kb::{index, store};
+use crate::kb::{index, material, store};
 
 /// 素材本文から検索候補語を取り出す（空白・句読点で分割、3 文字以上）。
 /// trigram FTS の制約上 3 文字未満は使えない。空白の無い CJK は recall が限られる（MVP の既知の制限）。
@@ -101,7 +101,7 @@ pub fn workshop_draft(
   let (root, conn) = crate::kb::open_active(&home)?;
   let inbox_rel = crate::kb::checked_kb_markdown_path(&inbox_path, "inbox")?;
   let raw = std::fs::read_to_string(root.join(inbox_rel)).map_err(|e| e.to_string())?;
-  let material = store::parse_material(&raw)?;
+  let material = material::parse_material(&raw)?;
   let provider = crate::ai::ollama::OllamaProvider::with_model(model);
   draft(&provider, &conn, &material.body, &instruction).map_err(|e| e.to_string())
 }
