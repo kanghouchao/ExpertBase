@@ -25,7 +25,7 @@ tauri-plugin-log = "2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 regex = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "blocking"] }
 dom_smoothie = "0.18"
 htmd = "0.5"
 pdf-extract = "0.10"

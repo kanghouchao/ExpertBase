@@ -31,7 +31,9 @@ pub fn run() {
       kb::kb_list_inbox,
       capture::capture_text,
       capture::capture_file,
-      capture::capture_web
+      capture::capture_web,
+      ai::ai_set_key,
+      ai::ai_has_key
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
