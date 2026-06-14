@@ -1,4 +1,4 @@
-import { BotsView } from "./bots-view";
+import { BotsView } from "@/features/bots";
 
 export default function BotsPage() {
   return <BotsView />;

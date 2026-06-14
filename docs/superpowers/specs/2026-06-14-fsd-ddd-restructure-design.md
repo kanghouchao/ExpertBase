@@ -92,11 +92,12 @@ import は下方向のみ。スライス間 import は必ず公開 API（`index.
 
 - `components/shell/*`（app-shell, sidebar, title-bar, nav-item, kb-switcher, settings-dialog）は
   **複数 feature と entity と shared を合成するアプリ外殻**であり、単一シナリオ（feature）でも純粋プリミティブ（shared）でもない。
-- `material-row` は capture / workshop / dashboard の **3 つの feature から再利用**される、`material` エンティティに
-  束ねられた UI ブロック。`AGENTS.md` は「entities は UI を含まない」と明記するため entities には置けない。
-  feature 横断の再利用 UI は widgets が正しい置き場。
+  app-shell は `features/onboarding` を合成する（`widget -> feature` は下方向で合法）。
 
-→ `widgets` 境界 = 「entities/shared（および必要なら feature）を合成する、ルート非依存の再利用合成 UI」。
+→ `widgets` 境界 = 「feature / entity / shared を合成する、ルート非依存のアプリ外殻 UI」。現状の唯一の widget は `app-shell`。
+
+注: `material-row` は当初 widget 候補だったが、実測では **capture 機能のみが利用**するため
+`features/capture/ui/material-row` に置く（単一機能専用 UI を widget 化すると feature→widget の逆向き依存を生むため）。
 
 ### 目標ツリー
 
@@ -117,10 +118,9 @@ src/
       plugins/page.tsx        # features/plugins
   widgets/
     app-shell/      index.ts, app-shell, sidebar, title-bar, nav-item, kb-switcher, settings-dialog
-    material-row/   index.ts, material-row
   features/
     dashboard/      index.ts, ui/{dashboard-view, recent-materials, wiki-health}
-    capture/        index.ts, ui/capture-view
+    capture/        index.ts, ui/{capture-view, material-row}
     workshop/       index.ts, ui/{workshop-view, workshop-process-view}
     wiki/           index.ts, ui/wiki-view
     graph/          index.ts, ui/graph-view
@@ -159,7 +159,7 @@ src/
 | `components/dashboard/wiki-health.tsx` | `features/dashboard/ui/wiki-health.tsx` | feature |
 | `components/onboarding/onboarding.tsx` | `features/onboarding/ui/onboarding.tsx` | feature |
 | `components/shell/*` | `widgets/app-shell/*` | widget |
-| `app/(app)/_components/material-row.tsx` | `widgets/material-row/material-row.tsx` | widget |
+| `app/(app)/_components/material-row.tsx` | `features/capture/ui/material-row.tsx` | feature（capture のみ利用） |
 | `app/(app)/_components/seg-tabs.tsx` | `shared/ui/seg-tabs.tsx` | shared |
 | `lib/kb/store.ts` | `entities/knowledge-base/model/store.ts` | entity |
 | `lib/data/types.ts` | `entities/material` + `entities/wiki-entry` の `model/types.ts` に分割 | entity |
@@ -180,7 +180,7 @@ src/
 - `lib/data/types.ts` と `lib/nav.ts` は `@/components/eb/icon`（`IconName` 型）を import。
   → `icon` は `shared/ui`、`types`→entity、`nav`→`shared/config`。`entity -> shared`、`shared/config -> shared/ui` は
   どちらも合法（型のみ依存）。
-- `material-row` は `entities/material` + `shared/ui` に依存 → widget なので合法。
+- `material-row`（features/capture/ui）は `entities/material` + `shared/ui` に依存 → `feature -> entity/shared` で合法。
 - `entities/*/model/adapt.ts` は `shared/api/tauri` の DTO 型を import → `entity -> shared` で合法。
 - `entities/knowledge-base/model/store.ts` は `shared/api/tauri` の関数を呼ぶ → `entity -> shared` で合法
   （状態コンテナであり HTTP クライアント実装そのものではない）。

@@ -3,8 +3,8 @@
 import { usePathname } from "next/navigation";
 
 import { Logo } from "@/shared/ui/logo";
-import { NavItem } from "@/components/shell/nav-item";
-import { KbSwitcher } from "@/components/shell/kb-switcher";
+import { NavItem } from "./nav-item";
+import { KbSwitcher } from "./kb-switcher";
 import { useI18n } from "@/shared/providers/providers";
 import { NAV } from "@/shared/config/nav";
 
