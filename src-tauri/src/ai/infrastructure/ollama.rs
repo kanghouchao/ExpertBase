@@ -3,7 +3,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{AiError, AiProvider, StructureRequest, StructureResult};
+use crate::ai::domain::{AiError, AiProvider, StructureRequest, StructureResult};
 
 const API_BASE: &str = "http://127.0.0.1:11434";
 
