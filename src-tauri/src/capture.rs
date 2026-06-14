@@ -7,6 +7,9 @@ use tauri::Manager;
 use crate::kb::index;
 use crate::kb::store::{serialize_material, Material, MaterialMeta};
 
+pub mod doc;
+pub mod web;
+
 /// 拡張子から素材タイプを判定する。未知は "file"。
 pub fn kind_for_ext(ext: &str) -> &'static str {
   match ext.to_ascii_lowercase().as_str() {
@@ -111,12 +114,46 @@ pub fn capture_file(app: tauri::AppHandle, path: String) -> Result<String, Strin
       let body = std::fs::read_to_string(src).map_err(|e| e.to_string())?;
       write_material(&root, &conn, "text", &source, &body, None)
     }
+    "pdf" | "doc" => {
+      // デジタル文書は本文を抽出し、原本も添付として残す（出典参照のため）。
+      let body = if kind == "pdf" {
+        doc::extract_pdf(src)?
+      } else {
+        doc::extract_docx(src)?
+      };
+      let att = copy_attachment(&root, src)?;
+      write_material(&root, &conn, kind, &source, &body, Some(&att))
+    }
     _ => {
-      // PDF/Word/メディアはまず添付として保存（PDF/Word は Task 2.2 で本文抽出に差し替え）。
+      // 音声/動画/画像など不透明メディアは添付として保存（本文は任意で空）。
       let att = copy_attachment(&root, src)?;
       write_material(&root, &conn, kind, &source, "", Some(&att))
     }
   }
+}
+
+/// Web ページを取り込む。Rust 側で取得し、Readability で本文を抽出して受信箱へ保存する。
+/// 原始 HTML はクラウドへ送らない（取得は HTTPS、抽出はローカル）。
+#[tauri::command]
+pub async fn capture_web(app: tauri::AppHandle, url: String) -> Result<String, String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  let html = reqwest::Client::new()
+    .get(&url)
+    .header("User-Agent", "ExpertBase/0.1 (+local capture)")
+    .send()
+    .await
+    .map_err(|e| e.to_string())?
+    .text()
+    .await
+    .map_err(|e| e.to_string())?;
+  let (title, markdown) = web::extract_readable(&html, &url)?;
+  let body = if title.trim().is_empty() {
+    markdown
+  } else {
+    format!("# {title}\n\n{markdown}")
+  };
+  let (root, conn) = crate::kb::open_active(&home)?;
+  write_material(&root, &conn, "web", &url, &body, None)
 }
 
 #[cfg(test)]

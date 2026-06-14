@@ -29,7 +29,8 @@ pub fn run() {
       kb::kb_save_entry,
       kb::kb_list_inbox,
       capture::capture_text,
-      capture::capture_file
+      capture::capture_file,
+      capture::capture_web
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
