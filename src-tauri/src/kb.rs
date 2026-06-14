@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
@@ -183,6 +183,25 @@ pub(crate) fn open_active(home: &Path) -> Result<(PathBuf, rusqlite::Connection)
   Ok((root, conn))
 }
 
+/// IPC から受け取る KB 内パスを、許可された直下 Markdown ファイルに限定する。
+pub(crate) fn checked_kb_markdown_path(rel_path: &str, dir: &str) -> Result<PathBuf, String> {
+  let path = Path::new(rel_path);
+  if path.is_absolute() {
+    return Err("知识库路径必须是相对路径".into());
+  }
+  let parts = path.components().collect::<Vec<_>>();
+  match parts.as_slice() {
+    [Component::Normal(prefix), Component::Normal(file)]
+      if prefix.to_string_lossy() == dir
+        && !file.to_string_lossy().is_empty()
+        && Path::new(file).extension().and_then(|s| s.to_str()) == Some("md") =>
+    {
+      Ok(PathBuf::from(dir).join(file))
+    }
+    _ => Err("知识库路径不在允许的 Markdown 目录内".into()),
+  }
+}
+
 #[tauri::command]
 pub fn kb_rebuild_index(app: tauri::AppHandle) -> Result<(), String> {
   let home = app.path().home_dir().map_err(|e| e.to_string())?;
@@ -236,17 +255,19 @@ pub fn kb_orphans(app: tauri::AppHandle) -> Result<Vec<index::EntryRef>, String>
 pub fn kb_read_entry(app: tauri::AppHandle, path: String) -> Result<String, String> {
   let home = app.path().home_dir().map_err(|e| e.to_string())?;
   let root = active_kb_root(&home)?;
-  fs::read_to_string(root.join(&path)).map_err(|e| e.to_string())
+  let rel = checked_kb_markdown_path(&path, "entries")?;
+  fs::read_to_string(root.join(rel)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn kb_save_entry(app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
   let home = app.path().home_dir().map_err(|e| e.to_string())?;
   let (root, conn) = open_active(&home)?;
+  let rel = checked_kb_markdown_path(&path, "entries")?;
   // 保存前に frontmatter を検証する（不正なら書き込まない）。
   let parsed = entry::parse_entry(&content)?;
-  fs::write(root.join(&path), &content).map_err(|e| e.to_string())?;
-  index::upsert_entry(&conn, &path, &parsed)
+  fs::write(root.join(&rel), &content).map_err(|e| e.to_string())?;
+  index::upsert_entry(&conn, &rel.to_string_lossy(), &parsed)
 }
 
 #[tauri::command]
@@ -350,5 +371,19 @@ mod tests {
   fn set_active_rejects_unknown_path() {
     let tmp = tempfile::tempdir().unwrap();
     assert!(set_active(tmp.path(), "/nowhere").is_err());
+  }
+
+  #[test]
+  fn checked_kb_markdown_path_rejects_escape_paths() {
+    assert_eq!(
+      checked_kb_markdown_path("entries/a.md", "entries").unwrap(),
+      PathBuf::from("entries/a.md")
+    );
+    assert!(checked_kb_markdown_path("../secret.md", "entries").is_err());
+    assert!(checked_kb_markdown_path("entries/../secret.md", "entries").is_err());
+    assert!(checked_kb_markdown_path("/tmp/secret.md", "entries").is_err());
+    assert!(checked_kb_markdown_path("inbox/a.md", "entries").is_err());
+    assert!(checked_kb_markdown_path("entries/nested/a.md", "entries").is_err());
+    assert!(checked_kb_markdown_path("entries/a.txt", "entries").is_err());
   }
 }
