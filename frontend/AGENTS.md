@@ -13,15 +13,15 @@ When working under `frontend/`, follow this file in addition to the repository-l
 - Language: TypeScript.
 - UI runtime: React Server Components by default.
 - Styling: Tailwind CSS v4 through `src/app/globals.css`.
-- Component system: shadcn/ui source components under `src/components/ui`.
+- Component system: shadcn/ui source components under `src/shared/ui`.
 - Import alias: `@/*`.
 - Build target: static export (`output: "export"`) loaded by the Tauri 2 shell; no server runtime.
 
 ## Command Policy
 
-- Prefer the `package.json` scripts for frontend work.
-- Use `bun install`, `bun run dev`, `bun run lint`, `bun run build`, and `bun run format` from `frontend/`.
-- Run other `bun` or `bunx` commands only when the scripts do not expose the needed operation. If doing so, state why.
+- From the repository root, prefer the root `package.json` scripts for setup, dev, build, lint, and test.
+- Use frontend-local scripts only for operations the root scripts do not expose, such as `bun run format` from `frontend/`.
+- Run other frontend-local `bun` or `bunx` commands only when the scripts do not expose the needed operation. If doing so, state why.
 
 ## Directory Rules
 
@@ -40,7 +40,7 @@ Use Feature-Sliced Design (FSD) for frontend code organization, adapted to Next.
 
 - `src/app/` remains the routing and composition layer. Route files read routing context, compose screens, and stay thin.
 - `src/features/` contains complete user scenarios, including scenario-specific UI, state, API calls, and logic.
-- `src/entities/` contains domain-facing client models, types, validation, and pure functions. It must not contain UI or HTTP client logic.
+- `src/entities/` contains domain-facing client models, types, validation, and pure functions. It must not contain UI or transport/client invocation logic.
 - `src/shared/` contains reusable UI primitives, framework-neutral utilities, configuration, and typed clients that can be used by any layer.
 - The codebase has migrated to FSD layers; `src/lib/` and `src/components/` no longer exist. Shared code lives under `src/shared/`, and shadcn primitives under `src/shared/ui/`.
 - Add new FSD folders only when the first real file needs them. Do not create empty architecture folders.
@@ -48,10 +48,10 @@ Use Feature-Sliced Design (FSD) for frontend code organization, adapted to Next.
 Dependencies must flow downward:
 
 ```text
-src/app -> src/features -> src/entities -> src/shared
+src/app -> src/widgets -> src/features -> src/entities -> src/shared
 ```
 
-If `widgets/` or another FSD layer becomes necessary, document the boundary before introducing it. Cross-slice imports must go through a slice public API such as `index.ts`; do not import another slice's internals.
+`src/widgets/` composes feature and entity slices into reusable app-shell sections, but must not own business rules. If another FSD layer becomes necessary, document the boundary before introducing it. Cross-slice imports must go through a slice public API such as `index.ts`; do not import another slice's internals.
 
 ## Next.js Practices
 
