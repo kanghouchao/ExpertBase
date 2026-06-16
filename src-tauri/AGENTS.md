@@ -43,7 +43,7 @@ All current features (`kb`, `ai`, `capture`, `workshop`) are split into the DDD 
 ## IPC Command Practices
 
 - Define commands with `#[tauri::command]` returning `Result<T, String>`, mapping internal errors with `map_err(|e| e.to_string())`.
-- Structs crossing the IPC boundary derive `Serialize` with `#[serde(rename_all = "camelCase")]` to match the TypeScript client in `frontend/src/lib/tauri`.
+- Structs crossing the IPC boundary derive `Serialize` with `#[serde(rename_all = "camelCase")]` to match the TypeScript client in `frontend/src/shared/api/tauri`.
 - Keep commands as thin wrappers: parse IPC inputs, call application services or plain functions, and format IPC outputs. Do not put business rules in command handlers.
 
 ## Quality Bar
