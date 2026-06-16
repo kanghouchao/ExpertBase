@@ -1,8 +1,8 @@
 //! ナレッジベース機能。DDD レイヤ構成（domain / application / infrastructure / interface）。
 
-pub mod application;
-pub mod domain;
-pub mod infrastructure;
+mod application;
+mod domain;
+mod infrastructure;
 pub mod interface;
 
 // kb 機能の公開 API（他機能・コマンド登録が参照する安定面）。

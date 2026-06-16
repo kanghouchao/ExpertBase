@@ -19,8 +19,7 @@ import {
   type InboxItem,
   type OllamaModel,
 } from "@/shared/api/tauri/client";
-import { inboxToMaterial } from "@/entities/material";
-import { RAW_TYPE, type RawMaterial } from "@/entities/material";
+import { inboxToMaterial, RAW_TYPE, type RawMaterial } from "@/entities/material";
 import { useKbStore } from "@/entities/knowledge-base";
 
 const PREVIEW_SOURCE: RawMaterial = {
