@@ -1,6 +1,9 @@
 //! 取り込み機能。DDD レイヤ構成（domain / application / infrastructure / interface）。
 
-pub mod application;
-pub mod domain;
-pub mod infrastructure;
+mod application;
+mod domain;
+mod infrastructure;
 pub mod interface;
+
+// capture 機能の公開面は interface のコマンドのみ（lib.rs で登録）。
+// 各レイヤ内部は非公開とし、他機能から直接到達させない。
