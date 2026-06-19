@@ -39,6 +39,8 @@ impl Language {
 #[derive(Clone, Debug)]
 pub struct TranscriptRequest {
   pub wav_path: PathBuf,
+  // whisper エンジンのみが参照する（FakeEngine は無視）。feature オフ時は未読でも許容。
+  #[cfg_attr(not(feature = "whisper"), allow(dead_code))]
   pub language: Language,
 }
 
@@ -57,7 +59,8 @@ pub enum TranscribeError {
   ModelUnavailable(String),
   /// 音声の読み込み/デコード失敗。
   Decode(String),
-  /// 推論エンジンの失敗。
+  /// 推論エンジンの失敗。whisper エンジンのみが生成する。
+  #[cfg_attr(not(feature = "whisper"), allow(dead_code))]
   Engine(String),
 }
 

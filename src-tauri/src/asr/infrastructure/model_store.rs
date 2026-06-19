@@ -18,6 +18,8 @@ pub struct ModelSpec {
 }
 
 /// 既定モデル: whisper.cpp 公式の large-v3-turbo q5_0（約 547MB）。
+/// 実際に呼ぶのは whisper feature を有効にした interface のみ。
+#[cfg(feature = "whisper")]
 pub fn default_whisper_model() -> ModelSpec {
   ModelSpec {
     file_name: "ggml-large-v3-turbo-q5_0.bin".into(),

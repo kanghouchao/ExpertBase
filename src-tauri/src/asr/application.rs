@@ -47,6 +47,8 @@ pub fn transcribe_into_material(
 }
 
 /// 受信箱の audio 素材を転写する（アクティブ KB を開いてコアへ委譲）。
+/// 実際に呼ぶのは whisper feature を有効にした interface のみ。テストはコアを直接叩く。
+#[cfg(feature = "whisper")]
 pub fn transcribe_material(
   home: &Path,
   inbox_path: &str,
