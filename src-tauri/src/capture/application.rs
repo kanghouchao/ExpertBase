@@ -46,6 +46,27 @@ pub fn write_material(
   Ok(rel)
 }
 
+/// 録音バイト列を attachments/ へ WAV として保存し、audio/pending の素材を受信箱へ作る。
+/// 本文は空（後段の転写が本文を埋める）。原始音声は外部送信しない。
+pub fn write_audio_material(
+  root: &Path,
+  conn: &Connection,
+  wav: &[u8],
+  source: &str,
+) -> Result<String, String> {
+  let dir = root.join("attachments");
+  std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+  let stamp = Utc::now().format("%Y%m%d-%H%M%S").to_string();
+  let mut rel = format!("attachments/{stamp}.wav");
+  let mut n = 2;
+  while root.join(&rel).exists() {
+    rel = format!("attachments/{stamp}-{n}.wav");
+    n += 1;
+  }
+  std::fs::write(root.join(&rel), wav).map_err(|e| e.to_string())?;
+  write_material(root, conn, "audio", source, "", Some(&rel))
+}
+
 /// ファイルを attachments/ へコピーし、相対パスを返す。原始メディアは外部送信しない。
 pub fn copy_attachment(root: &Path, src: &Path) -> Result<String, String> {
   let dir = root.join("attachments");
@@ -102,6 +123,12 @@ pub fn ingest_file(home: &Path, path: &str) -> Result<String, String> {
   }
 }
 
+/// 録音バイト列（WAV）を受信箱へ取り込む。停止後に転写へ渡せる audio 素材を作る。
+pub fn ingest_audio_bytes(home: &Path, wav: &[u8], source: &str) -> Result<String, String> {
+  let (root, conn) = crate::kb::open_active(home)?;
+  write_audio_material(&root, &conn, wav, source)
+}
+
 /// Web ページを取り込む。Rust 側で取得し、Readability で本文を抽出して受信箱へ保存する。
 pub async fn ingest_web(home: &Path, url: &str) -> Result<String, String> {
   let html = web::fetch_html(url).await?;
@@ -143,5 +170,27 @@ mod tests {
     let rel = copy_attachment(root, &src).unwrap();
     assert!(root.join(&rel).is_file());
     assert!(rel.starts_with("attachments/"));
+  }
+
+  #[test]
+  fn write_audio_material_saves_wav_and_creates_audio_inbox_item() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let conn = index::open_index(root).unwrap();
+    let rel = write_audio_material(root, &conn, b"RIFF....WAVEfake", "recording").unwrap();
+    assert!(root.join(&rel).is_file());
+    assert!(rel.starts_with("inbox/"));
+    // 録音バイト列が attachments/ に WAV として保存されている。
+    let wavs: Vec<_> = std::fs::read_dir(root.join("attachments"))
+      .unwrap()
+      .filter_map(|e| e.ok())
+      .filter(|e| e.path().extension().is_some_and(|x| x == "wav"))
+      .collect();
+    assert_eq!(wavs.len(), 1);
+    // 受信箱には audio/pending の素材が 1 件できる（本文は空、後で転写が埋める）。
+    let items = index::list_inbox(&conn).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].kind, "audio");
+    assert_eq!(items[0].status, "pending");
   }
 }

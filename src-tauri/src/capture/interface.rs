@@ -22,6 +22,17 @@ pub fn capture_file(app: tauri::AppHandle, path: String) -> Result<String, Strin
   application::ingest_file(&home, &path)
 }
 
+/// 録音バイト列（WAV）を受信箱へ取り込む。停止後の転写へ渡せる audio 素材を作る。
+#[tauri::command]
+pub fn capture_audio(
+  app: tauri::AppHandle,
+  wav: Vec<u8>,
+  source: String,
+) -> Result<String, String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  application::ingest_audio_bytes(&home, &wav, &source)
+}
+
 /// Web ページを取り込む。
 #[tauri::command]
 pub async fn capture_web(app: tauri::AppHandle, url: String) -> Result<String, String> {

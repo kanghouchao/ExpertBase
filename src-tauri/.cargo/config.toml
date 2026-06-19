@@ -1,0 +1,6 @@
+# macOS: whisper.cpp の ggml は std::filesystem を使うため、デプロイメントターゲットを
+# 11.0 にする。cmake クレートの既定（10.13）は std::filesystem::path が無効で
+# `--features whisper` のネイティブビルドが失敗する。tauri.conf.json の
+# bundle.macOS.minimumSystemVersion と一致させること。Linux/Windows では無視される。
+[env]
+MACOSX_DEPLOYMENT_TARGET = "11.0"

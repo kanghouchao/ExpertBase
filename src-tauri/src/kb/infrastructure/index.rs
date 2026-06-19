@@ -325,6 +325,14 @@ pub fn set_inbox_status(conn: &Connection, rel_path: &str, status: &str) -> Resu
   Ok(())
 }
 
+/// 受信箱からインデックス行を削除する。
+pub fn delete_inbox(conn: &Connection, rel_path: &str) -> Result<(), String> {
+  conn
+    .execute("DELETE FROM inbox WHERE path=?1", rusqlite::params![rel_path])
+    .map_err(|e| e.to_string())?;
+  Ok(())
+}
+
 /// 受信箱の一覧（取り込み新しい順）。
 pub fn list_inbox(conn: &Connection) -> Result<Vec<InboxItem>, String> {
   let mut stmt = conn
@@ -461,6 +469,8 @@ mod tests {
     assert_eq!(items[0].status, "pending");
     set_inbox_status(&conn, "inbox/a.md", "processed").unwrap();
     assert_eq!(list_inbox(&conn).unwrap()[0].status, "processed");
+    delete_inbox(&conn, "inbox/a.md").unwrap();
+    assert!(list_inbox(&conn).unwrap().is_empty());
   }
 
   #[test]

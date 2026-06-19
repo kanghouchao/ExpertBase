@@ -1,4 +1,5 @@
 mod ai;
+mod asr;
 mod capture;
 mod kb;
 mod workshop;
@@ -6,6 +7,7 @@ mod workshop;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    .plugin(tauri_plugin_dialog::init())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -30,14 +32,17 @@ pub fn run() {
       kb::interface::kb_read_entry,
       kb::interface::kb_read_inbox_material,
       kb::interface::kb_save_entry,
+      kb::interface::kb_delete_inbox_material,
       kb::interface::kb_list_inbox,
       capture::interface::capture_text,
       capture::interface::capture_file,
+      capture::interface::capture_audio,
       capture::interface::capture_web,
       ai::interface::ai_has_key,
       ai::interface::ai_list_ollama_models,
       workshop::interface::workshop_draft,
-      workshop::interface::workshop_confirm
+      workshop::interface::workshop_confirm,
+      asr::interface::transcribe_material
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

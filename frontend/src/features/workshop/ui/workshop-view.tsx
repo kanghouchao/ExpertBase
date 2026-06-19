@@ -7,7 +7,8 @@ import { Icon } from "@/shared/ui/icon";
 import { PageHead } from "@/shared/ui/page-head";
 import { buttonVariants } from "@/shared/ui/button";
 import { useI18n } from "@/shared/providers/providers";
-import { listInbox, type InboxItem } from "@/shared/api/tauri/client";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { deleteInboxMaterial, listInbox, type InboxItem } from "@/shared/api/tauri/client";
 import { inboxToMaterial, RAW_TYPE, type RawMaterial } from "@/entities/material";
 import { useKbStore } from "@/entities/knowledge-base";
 
@@ -68,6 +69,17 @@ export function WorkshopView() {
   const [pending, setPending] = useState<RawMaterial[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  async function refresh() {
+    try {
+      const inbox = await listInbox();
+      setPending(
+        inbox.filter((item) => item.status !== "processed").map((item) => materialFromInbox(item))
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   useEffect(() => {
     if (!available) return;
     void (async () => {
@@ -83,6 +95,18 @@ export function WorkshopView() {
       }
     })();
   }, [available]);
+
+  async function handleDelete(path: string) {
+    // ネイティブ confirm は Tauri の WKWebView で機能しないため dialog プラグインを使う。
+    if (!(await ask(t("capture.delete.confirm"), { kind: "warning" }))) return;
+    setError(null);
+    try {
+      await deleteInboxMaterial(path);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   const visibleMaterials = available ? pending : PREVIEW_MATERIALS;
   const pendingCount = visibleMaterials.length;
@@ -130,7 +154,11 @@ export function WorkshopView() {
 
       <div className="grid gap-4">
         {visibleMaterials.map((item) => (
-          <WorkshopQueueCard key={item.id} material={item} />
+          <WorkshopQueueCard
+            key={item.id}
+            material={item}
+            onDelete={available ? handleDelete : undefined}
+          />
         ))}
       </div>
       {error && <div className="mt-3 text-[12.5px] font-semibold text-brand">{error}</div>}
@@ -159,7 +187,13 @@ function Metric({ value, label, gold = false }: { value: number; label: string; 
   );
 }
 
-function WorkshopQueueCard({ material }: { material: RawMaterial }) {
+function WorkshopQueueCard({
+  material,
+  onDelete,
+}: {
+  material: RawMaterial;
+  onDelete?: (path: string) => void;
+}) {
   const { t } = useI18n();
   const type = RAW_TYPE[material.type];
   const isTranscribed = material.status === "transcribed";
@@ -187,8 +221,21 @@ function WorkshopQueueCard({ material }: { material: RawMaterial }) {
             ))}
           </div>
         </div>
-        <div className="absolute top-6 right-6 rounded-full bg-ai-wash px-3 py-1 text-[12px] font-bold text-ai">
-          {isTranscribed ? t("st.transcribed") : t("st.pending")}
+        <div className="absolute top-6 right-6 flex items-center gap-2">
+          {onDelete && (
+            <button
+              type="button"
+              onClick={() => onDelete(material.id)}
+              aria-label={t("capture.delete")}
+              title={t("capture.delete")}
+              className="grid size-7 place-items-center rounded-lg text-ink-faint transition-colors hover:bg-surface-2 hover:text-brand"
+            >
+              <Icon name="trash" size={14} />
+            </button>
+          )}
+          <div className="rounded-full bg-ai-wash px-3 py-1 text-[12px] font-bold text-ai">
+            {isTranscribed ? t("st.transcribed") : t("st.pending")}
+          </div>
         </div>
         <Link
           className={buttonVariants({ size: "lg", className: "absolute right-6 bottom-5 bg-brand px-5 text-white hover:bg-brand/85" })}

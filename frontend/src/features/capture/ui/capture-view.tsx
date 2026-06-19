@@ -10,12 +10,29 @@ import { Button } from "@/shared/ui/button";
 import { useI18n } from "@/shared/providers/providers";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { cn } from "@/shared/lib/utils";
-import { captureText, captureWeb, listInbox } from "@/shared/api/tauri/client";
+import {
+  captureAudio,
+  captureText,
+  captureWeb,
+  deleteInboxMaterial,
+  listInbox,
+  transcribeMaterial,
+  type DownloadProgress,
+} from "@/shared/api/tauri/client";
 import { inboxToMaterial } from "@/entities/material";
 import { useKbStore } from "@/entities/knowledge-base";
 import type { RawMaterial } from "@/entities/material";
 import { MaterialRow } from "./material-row";
 import { SegTabs } from "@/shared/ui/seg-tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/select";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { startRecording, type Recording } from "../lib/recorder";
 
 const TABS = ["upload", "record", "manual", "web"] as const;
 type Tab = (typeof TABS)[number];
@@ -34,6 +51,13 @@ export function CaptureView() {
   const [items, setItems] = useState<RawMaterial[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 録音状態。recorder は録音中のセッションハンドル。
+  const [recording, setRecording] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [recorder, setRecorder] = useState<Recording | null>(null);
+  const [language, setLanguage] = useState("auto");
+  const [transcribing, setTranscribing] = useState(false);
+  const [progress, setProgress] = useState<DownloadProgress | null>(null);
 
   async function refresh() {
     try {
@@ -52,7 +76,50 @@ export function CaptureView() {
     })();
   }, [available]);
 
+  // 録音中だけ 1 秒ごとに経過時間を進める。
+  useEffect(() => {
+    if (!recording) return;
+    const id = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [recording]);
+
   const pending = items.filter((item) => item.status !== "processed");
+
+  async function handleStartRecord() {
+    setError(null);
+    try {
+      const session = await startRecording();
+      setRecorder(session);
+      setElapsed(0);
+      setRecording(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleStopRecord() {
+    if (!recorder) return;
+    setRecording(false);
+    setTranscribing(true);
+    setProgress(null);
+    try {
+      const wav = await recorder.stop();
+      setRecorder(null);
+      const inboxPath = await captureAudio(wav, "record");
+      await refresh();
+      await transcribeMaterial(inboxPath, language, setProgress);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTranscribing(false);
+      setProgress(null);
+    }
+  }
+
+  const elapsedLabel = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(
+    elapsed % 60
+  ).padStart(2, "0")}`;
 
   async function handleManualSave() {
     if (!text.trim()) return;
@@ -66,6 +133,18 @@ export function CaptureView() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleDelete(path: string) {
+    // ネイティブ confirm は Tauri の WKWebView で機能しないため dialog プラグインを使う。
+    if (!(await ask(t("capture.delete.confirm"), { kind: "warning" }))) return;
+    setError(null);
+    try {
+      await deleteInboxMaterial(path);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -125,18 +204,57 @@ export function CaptureView() {
 
           {tab === "record" && (
             <div className="py-8 text-center">
-              <button
-                disabled
-                className="mx-auto grid size-24 cursor-not-allowed place-items-center rounded-full bg-ink text-paper opacity-70 shadow-(--shadow-md)"
-              >
-                <Icon name="mic" size={34} />
-              </button>
-              <div className="mt-5 font-mono text-[28px] font-semibold tracking-[0.04em] text-ink">
-                00:00
+              {/* 言語ヒント（自動検出 or 手動指定）。録音・転写中は変更不可。 */}
+              <div className="mb-6 flex items-center justify-center gap-2.5">
+                <span className="text-[12.5px] text-ink-muted">{t("capture.record.lang")}</span>
+                <Select
+                  value={language}
+                  onValueChange={(value) => setLanguage(String(value))}
+                  disabled={recording || transcribing}
+                >
+                  <SelectTrigger size="sm" className="min-w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">{t("capture.record.lang.auto")}</SelectItem>
+                    <SelectItem value="zh">中文</SelectItem>
+                    <SelectItem value="ja">日本語</SelectItem>
+                    <SelectItem value="en">English</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="mt-2.5 text-[13.5px] text-ink-muted">{t("capture.record.tip")}</div>
-              <div className="mt-2 text-[12.5px] font-semibold text-brand">
-                {t("capture.disabled")}
+
+              {/* 待機時はマイク、録音中は停止（四角）。転写中は無効。 */}
+              <button
+                type="button"
+                onClick={recording ? handleStopRecord : handleStartRecord}
+                disabled={!available || transcribing}
+                className={cn(
+                  "mx-auto grid size-24 place-items-center rounded-full text-paper shadow-(--shadow-md) transition disabled:cursor-not-allowed disabled:opacity-60",
+                  recording ? "animate-pulse bg-brand" : "bg-ink"
+                )}
+              >
+                {recording ? (
+                  <span className="size-7 rounded-md bg-paper" />
+                ) : (
+                  <Icon name="mic" size={34} />
+                )}
+              </button>
+
+              <div className="mt-5 font-mono text-[28px] font-semibold tracking-[0.04em] text-ink">
+                {elapsedLabel}
+              </div>
+
+              <div className="mt-2.5 text-[13.5px] text-ink-muted">
+                {transcribing
+                  ? progress && progress.total
+                    ? t("capture.record.downloading", {
+                        percent: Math.floor((progress.downloaded / progress.total) * 100),
+                      })
+                    : t("capture.record.transcribing")
+                  : recording
+                    ? t("capture.record.recording")
+                    : t("capture.record.tip")}
               </div>
             </div>
           )}
@@ -270,7 +388,21 @@ export function CaptureView() {
           <EmptyState icon="inbox" title={t("empty.materials")} sub={t("empty.materials.sub")} />
         )}
         {items.slice(0, 5).map((item) => (
-          <MaterialRow key={item.id} material={item} />
+          <MaterialRow
+            key={item.id}
+            material={item}
+            action={
+              <button
+                type="button"
+                onClick={() => handleDelete(item.id)}
+                aria-label={t("capture.delete")}
+                title={t("capture.delete")}
+                className="grid size-8 flex-none place-items-center rounded-lg text-ink-faint transition-colors hover:bg-surface-2 hover:text-brand"
+              >
+                <Icon name="trash" size={15} />
+              </button>
+            }
+          />
         ))}
       </Panel>
     </div>

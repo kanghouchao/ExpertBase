@@ -113,6 +113,12 @@ pub fn kb_save_entry(app: tauri::AppHandle, path: String, content: String) -> Re
 }
 
 #[tauri::command]
+pub fn kb_delete_inbox_material(app: tauri::AppHandle, path: String) -> Result<(), String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  application::delete_inbox_material(&home, &path)
+}
+
+#[tauri::command]
 pub fn kb_list_inbox(app: tauri::AppHandle) -> Result<Vec<index::InboxItem>, String> {
   let home = app.path().home_dir().map_err(|e| e.to_string())?;
   let (_root, conn) = application::open_active(&home)?;

@@ -1,4 +1,4 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { invoke, isTauri, Channel } from "@tauri-apps/api/core";
 
 // ナレッジベースはパスを一意な識別子として扱う（Rust 側と同じ契約）。
 export type Kb = {
@@ -125,6 +125,11 @@ export async function saveEntry(path: string, content: string): Promise<void> {
   await invoke("kb_save_entry", { path, content });
 }
 
+/** 受信箱素材を削除する（素材・添付・インデックスをまとめて消す）。 */
+export async function deleteInboxMaterial(path: string): Promise<void> {
+  await invoke("kb_delete_inbox_material", { path });
+}
+
 /** 受信箱一覧。 */
 export async function listInbox(): Promise<InboxItem[]> {
   if (!isTauri()) return [];
@@ -144,6 +149,29 @@ export async function captureFile(path: string): Promise<string> {
 /** Web ページを取り込む。 */
 export async function captureWeb(url: string): Promise<string> {
   return invoke<string>("capture_web", { url });
+}
+
+/** 録音した WAV を取り込む。確定した素材の相対パスを返す。 */
+export async function captureAudio(wav: Uint8Array, source: string): Promise<string> {
+  return invoke<string>("capture_audio", { wav, source });
+}
+
+/** モデルダウンロードの進捗（Rust 側 DownloadProgress と一致）。 */
+export type DownloadProgress = { downloaded: number; total: number | null };
+
+/**
+ * 受信箱の audio 素材を転写し、本文へ書き戻す。転写後のテキストを返す。
+ * 初回はモデルをダウンロードし、`onProgress` で進捗を受け取る。
+ * language は "auto" | "zh" | "ja" | "en"。
+ */
+export async function transcribeMaterial(
+  inboxPath: string,
+  language: string,
+  onProgress?: (progress: DownloadProgress) => void
+): Promise<string> {
+  const channel = new Channel<DownloadProgress>();
+  if (onProgress) channel.onmessage = onProgress;
+  return invoke<string>("transcribe_material", { inboxPath, language, onProgress: channel });
 }
 
 /** ローカル Ollama が応答するか。 */
