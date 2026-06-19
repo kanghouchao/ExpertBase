@@ -46,6 +46,12 @@ pub fn kb_set_active(app: tauri::AppHandle, path: String) -> Result<(), String> 
 }
 
 #[tauri::command]
+pub fn kb_delete(app: tauri::AppHandle, path: String) -> Result<(), String> {
+  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  application::delete_kb(&home, &path)
+}
+
+#[tauri::command]
 pub fn kb_rebuild_index(app: tauri::AppHandle) -> Result<(), String> {
   let home = app.path().home_dir().map_err(|e| e.to_string())?;
   let (root, conn) = application::open_active(&home)?;

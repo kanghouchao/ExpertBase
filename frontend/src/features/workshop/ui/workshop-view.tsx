@@ -6,8 +6,8 @@ import Link from "next/link";
 import { Icon } from "@/shared/ui/icon";
 import { PageHead } from "@/shared/ui/page-head";
 import { buttonVariants } from "@/shared/ui/button";
+import { DeleteButton } from "@/shared/ui/delete-button";
 import { useI18n } from "@/shared/providers/providers";
-import { ask } from "@tauri-apps/plugin-dialog";
 import { deleteInboxMaterial, listInbox, type InboxItem } from "@/shared/api/tauri/client";
 import { inboxToMaterial, RAW_TYPE, type RawMaterial } from "@/entities/material";
 import { useKbStore } from "@/entities/knowledge-base";
@@ -97,8 +97,7 @@ export function WorkshopView() {
   }, [available]);
 
   async function handleDelete(path: string) {
-    // ネイティブ confirm は Tauri の WKWebView で機能しないため dialog プラグインを使う。
-    if (!(await ask(t("capture.delete.confirm"), { kind: "warning" }))) return;
+    // 確認は DeleteButton のインライン 2 段階操作で済むため、ここでは直接削除する。
     setError(null);
     try {
       await deleteInboxMaterial(path);
@@ -222,17 +221,7 @@ function WorkshopQueueCard({
           </div>
         </div>
         <div className="absolute top-6 right-6 flex items-center gap-2">
-          {onDelete && (
-            <button
-              type="button"
-              onClick={() => onDelete(material.id)}
-              aria-label={t("capture.delete")}
-              title={t("capture.delete")}
-              className="grid size-7 place-items-center rounded-lg text-ink-faint transition-colors hover:bg-surface-2 hover:text-brand"
-            >
-              <Icon name="trash" size={14} />
-            </button>
-          )}
+          {onDelete && <DeleteButton onDelete={() => onDelete(material.id)} />}
           <div className="rounded-full bg-ai-wash px-3 py-1 text-[12px] font-bold text-ai">
             {isTranscribed ? t("st.transcribed") : t("st.pending")}
           </div>

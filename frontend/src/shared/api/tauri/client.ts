@@ -33,6 +33,11 @@ export async function setActiveKb(path: string): Promise<void> {
   await invoke("kb_set_active", { path });
 }
 
+/** ナレッジベースを削除する（レジストリ登録解除＋ディスク上のフォルダ削除）。不可逆。 */
+export async function deleteKb(path: string): Promise<void> {
+  await invoke("kb_delete", { path });
+}
+
 // ── データ層（Rust の派生インデックスから来る型。camelCase は Rust 側と一致） ──
 
 /** 条目の軽量参照（一覧・バックリンク・孤立・グラフノード）。 */

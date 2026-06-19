@@ -31,7 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/select";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { DeleteButton } from "@/shared/ui/delete-button";
 import { startRecording, type Recording } from "../lib/recorder";
 
 const TABS = ["upload", "record", "manual", "web"] as const;
@@ -137,8 +137,7 @@ export function CaptureView() {
   }
 
   async function handleDelete(path: string) {
-    // ネイティブ confirm は Tauri の WKWebView で機能しないため dialog プラグインを使う。
-    if (!(await ask(t("capture.delete.confirm"), { kind: "warning" }))) return;
+    // 確認は DeleteButton のインライン 2 段階操作で済むため、ここでは直接削除する。
     setError(null);
     try {
       await deleteInboxMaterial(path);
@@ -391,17 +390,7 @@ export function CaptureView() {
           <MaterialRow
             key={item.id}
             material={item}
-            action={
-              <button
-                type="button"
-                onClick={() => handleDelete(item.id)}
-                aria-label={t("capture.delete")}
-                title={t("capture.delete")}
-                className="grid size-8 flex-none place-items-center rounded-lg text-ink-faint transition-colors hover:bg-surface-2 hover:text-brand"
-              >
-                <Icon name="trash" size={15} />
-              </button>
-            }
+            action={<DeleteButton onDelete={() => handleDelete(item.id)} />}
           />
         ))}
       </Panel>
