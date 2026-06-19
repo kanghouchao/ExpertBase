@@ -7,6 +7,7 @@ import { Icon } from "@/shared/ui/icon";
 import { PageHead } from "@/shared/ui/page-head";
 import { buttonVariants } from "@/shared/ui/button";
 import { useI18n } from "@/shared/providers/providers";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { deleteInboxMaterial, listInbox, type InboxItem } from "@/shared/api/tauri/client";
 import { inboxToMaterial, RAW_TYPE, type RawMaterial } from "@/entities/material";
 import { useKbStore } from "@/entities/knowledge-base";
@@ -96,7 +97,8 @@ export function WorkshopView() {
   }, [available]);
 
   async function handleDelete(path: string) {
-    if (!confirm(t("capture.delete.confirm"))) return;
+    // ネイティブ confirm は Tauri の WKWebView で機能しないため dialog プラグインを使う。
+    if (!(await ask(t("capture.delete.confirm"), { kind: "warning" }))) return;
     setError(null);
     try {
       await deleteInboxMaterial(path);

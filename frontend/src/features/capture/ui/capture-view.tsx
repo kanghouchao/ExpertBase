@@ -31,6 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/select";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { startRecording, type Recording } from "../lib/recorder";
 
 const TABS = ["upload", "record", "manual", "web"] as const;
@@ -136,7 +137,8 @@ export function CaptureView() {
   }
 
   async function handleDelete(path: string) {
-    if (!confirm(t("capture.delete.confirm"))) return;
+    // ネイティブ confirm は Tauri の WKWebView で機能しないため dialog プラグインを使う。
+    if (!(await ask(t("capture.delete.confirm"), { kind: "warning" }))) return;
     setError(null);
     try {
       await deleteInboxMaterial(path);

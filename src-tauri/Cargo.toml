@@ -34,6 +34,7 @@ dotext = "0.1"
 # 転写エンジン（whisper.cpp）。ネイティブビルドに cmake が要るため、optional feature の裏に置く。
 whisper-rs = { version = "0.16", optional = true }
 hound = { version = "3", optional = true }
+tauri-plugin-dialog = "2.7.1"
 
 [features]
 # 既定は OFF（cmake 無しでも cargo test が通る）。実アプリのビルドでは有効化する。
