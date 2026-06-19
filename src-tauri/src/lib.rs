@@ -22,6 +22,7 @@ pub fn run() {
       kb::interface::kb_list,
       kb::interface::kb_create,
       kb::interface::kb_set_active,
+      kb::interface::kb_delete,
       kb::interface::kb_rebuild_index,
       kb::interface::kb_list_entries,
       kb::interface::kb_search,

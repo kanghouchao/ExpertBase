@@ -79,6 +79,38 @@ pub fn set_active(home: &Path, path: &str) -> Result<(), String> {
   config_store::save_registry(home, &reg)
 }
 
+/// 登録済みナレッジベースを削除する。ExpertBase のメタデータだけを削除し、
+/// 空になった場合に限ってルートも削除してからレジストリを更新する。
+pub fn delete_kb(home: &Path, path: &str) -> Result<(), String> {
+  let mut reg = config_store::load_registry(home)?;
+  let idx = reg
+    .knowledge_bases
+    .iter()
+    .position(|k| k.path == path)
+    .ok_or("未找到该知识库")?;
+  let root = Path::new(path);
+  let metadata = root.join(".expertbase");
+  if metadata.exists() {
+    if !metadata.is_dir() {
+      return Err("知识库元数据不是目录".into());
+    }
+    fs::remove_dir_all(&metadata).map_err(|e| e.to_string())?;
+  }
+  match fs::remove_dir(root) {
+    Ok(()) => {}
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+    // ponytail: 空でないルートはユーザーデータを含む可能性があるため残す。
+    Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => {}
+    Err(e) => return Err(e.to_string()),
+  }
+
+  reg.knowledge_bases.remove(idx);
+  if reg.active.as_deref() == Some(path) {
+    reg.active = reg.knowledge_bases.first().map(|k| k.path.clone());
+  }
+  config_store::save_registry(home, &reg)
+}
+
 /// 条目を上書き保存する（frontmatter 検証付き）。保存前に検証し、不正なら書き込まない。
 pub fn save_entry(home: &Path, rel_path: &str, content: &str) -> Result<(), String> {
   let (root, conn) = open_active(home)?;
@@ -208,6 +240,76 @@ mod tests {
   fn set_active_rejects_unknown_path() {
     let tmp = tempfile::tempdir().unwrap();
     assert!(set_active(tmp.path(), "/nowhere").is_err());
+  }
+
+  #[test]
+  fn delete_kb_removes_empty_application_created_folder() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let kb_path = home.join("kb");
+    create_kb(home, "k", "", kb_path.to_str().unwrap()).unwrap();
+    assert!(kb_path.exists());
+
+    delete_kb(home, kb_path.to_str().unwrap()).unwrap();
+
+    assert!(!kb_path.exists());
+    let reg = config_store::load_registry(home).unwrap();
+    assert!(reg.knowledge_bases.is_empty());
+    assert!(reg.active.is_none());
+  }
+
+  #[test]
+  fn delete_kb_preserves_unrelated_files_in_existing_folder() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let kb_path = home.join("existing");
+    fs::create_dir_all(&kb_path).unwrap();
+    fs::write(kb_path.join("notes.txt"), "user data").unwrap();
+    create_kb(home, "k", "", kb_path.to_str().unwrap()).unwrap();
+
+    delete_kb(home, kb_path.to_str().unwrap()).unwrap();
+
+    assert_eq!(
+      fs::read_to_string(kb_path.join("notes.txt")).unwrap(),
+      "user data"
+    );
+    assert!(!config_store::kb_config_path(&kb_path).exists());
+  }
+
+  #[test]
+  fn delete_kb_keeps_registry_when_metadata_deletion_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let kb_path = home.join("kb");
+    let entry = create_kb(home, "k", "", kb_path.to_str().unwrap()).unwrap();
+    fs::remove_dir_all(kb_path.join(".expertbase")).unwrap();
+    fs::write(kb_path.join(".expertbase"), "not a directory").unwrap();
+
+    assert!(delete_kb(home, kb_path.to_str().unwrap()).is_err());
+
+    let reg = config_store::load_registry(home).unwrap();
+    assert_eq!(reg.knowledge_bases, vec![entry.clone()]);
+    assert_eq!(reg.active.as_deref(), Some(entry.path.as_str()));
+  }
+
+  #[test]
+  fn delete_kb_reassigns_active_to_remaining() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let first = create_kb(home, "a", "", home.join("a").to_str().unwrap()).unwrap();
+    let second = create_kb(home, "b", "", home.join("b").to_str().unwrap()).unwrap();
+    // 直近作成の second がアクティブ。これを消すと first へ付け替わる。
+    delete_kb(home, &second.path).unwrap();
+
+    let reg = config_store::load_registry(home).unwrap();
+    assert_eq!(reg.knowledge_bases, vec![first.clone()]);
+    assert_eq!(reg.active.as_deref(), Some(first.path.as_str()));
+  }
+
+  #[test]
+  fn delete_kb_rejects_unknown_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    assert!(delete_kb(tmp.path(), "/nowhere").is_err());
   }
 
   #[test]

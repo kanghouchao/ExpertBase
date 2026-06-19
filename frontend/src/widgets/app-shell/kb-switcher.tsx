@@ -1,14 +1,26 @@
 "use client";
 
 import { Menu } from "@base-ui/react/menu";
+import { useState } from "react";
 
 import { Icon } from "@/shared/ui/icon";
+import { DeleteButton } from "@/shared/ui/delete-button";
 import { useI18n } from "@/shared/providers/providers";
-import { switchKb, useKbStore } from "@/entities/knowledge-base";
+import { removeKb, switchKb, useKbStore } from "@/entities/knowledge-base";
 
 export function KbSwitcher({ onAdd }: { onAdd: () => void }) {
   const { t } = useI18n();
   const { kbs, active } = useKbStore();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleDelete(path: string) {
+    setDeleteError(null);
+    try {
+      await removeKb(path);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   // ブラウザ単体実行などでナレッジベースが取得できない場合は非表示
   if (kbs.length === 0) return null;
@@ -34,30 +46,42 @@ export function KbSwitcher({ onAdd }: { onAdd: () => void }) {
                   {kbs.map((kb) => {
                     const on = kb.path === current.path;
                     return (
-                      <Menu.RadioItem
-                        key={kb.path}
-                        value={kb.path}
-                        closeOnClick
-                        label={kb.name}
-                        className="flex w-full cursor-default items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface-2 data-highlighted:bg-surface-2 data-checked:bg-surface-2"
-                      >
-                        <span className="grid size-7 flex-none place-items-center rounded-lg bg-brand text-white">
-                          <Icon name="book" size={15} />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[13px] font-semibold">
-                            {kb.name}
+                      // 選択（RadioItem）と削除を別々のクリック対象に分け、メニューの
+                      // クリックイベント衝突（選択や自動クローズ）を避ける。
+                      <div key={kb.path} className="flex items-center gap-1">
+                        <Menu.RadioItem
+                          value={kb.path}
+                          closeOnClick
+                          label={kb.name}
+                          className="flex min-w-0 flex-1 cursor-default items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface-2 data-highlighted:bg-surface-2 data-checked:bg-surface-2"
+                        >
+                          <span className="grid size-7 flex-none place-items-center rounded-lg bg-brand text-white">
+                            <Icon name="book" size={15} />
                           </span>
-                          <span className="block truncate font-mono text-[10.5px] text-ink-faint">
-                            {kb.path}
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[13px] font-semibold">
+                              {kb.name}
+                            </span>
+                            <span className="block truncate font-mono text-[10.5px] text-ink-faint">
+                              {kb.path}
+                            </span>
                           </span>
-                        </span>
-                        {on && <Icon name="check" size={15} className="flex-none text-brand" />}
-                      </Menu.RadioItem>
+                          {on && <Icon name="check" size={15} className="flex-none text-brand" />}
+                        </Menu.RadioItem>
+                        <DeleteButton
+                          title={t("kb.delete")}
+                          onDelete={() => void handleDelete(kb.path)}
+                        />
+                      </div>
                     );
                   })}
                 </Menu.RadioGroup>
               </Menu.Group>
+              {deleteError && (
+                <p className="px-2.5 py-2 text-[12px] font-semibold text-brand" role="alert">
+                  {deleteError}
+                </p>
+              )}
               <div className="mx-2 my-1.25 h-px bg-line" />
               <Menu.Item
                 closeOnClick

@@ -4,5 +4,6 @@ export {
   refreshKbs,
   createAndActivateKb,
   switchKb,
+  removeKb,
 } from "./model/store";
 export type { KbState } from "./model/store";
