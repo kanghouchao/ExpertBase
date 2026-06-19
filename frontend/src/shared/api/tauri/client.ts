@@ -125,6 +125,11 @@ export async function saveEntry(path: string, content: string): Promise<void> {
   await invoke("kb_save_entry", { path, content });
 }
 
+/** 受信箱素材を削除する（素材・添付・インデックスをまとめて消す）。 */
+export async function deleteInboxMaterial(path: string): Promise<void> {
+  await invoke("kb_delete_inbox_material", { path });
+}
+
 /** 受信箱一覧。 */
 export async function listInbox(): Promise<InboxItem[]> {
   if (!isTauri()) return [];

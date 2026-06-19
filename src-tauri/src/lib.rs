@@ -31,6 +31,7 @@ pub fn run() {
       kb::interface::kb_read_entry,
       kb::interface::kb_read_inbox_material,
       kb::interface::kb_save_entry,
+      kb::interface::kb_delete_inbox_material,
       kb::interface::kb_list_inbox,
       capture::interface::capture_text,
       capture::interface::capture_file,

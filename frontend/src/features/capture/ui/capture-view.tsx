@@ -14,6 +14,7 @@ import {
   captureAudio,
   captureText,
   captureWeb,
+  deleteInboxMaterial,
   listInbox,
   transcribeMaterial,
   type DownloadProgress,
@@ -131,6 +132,17 @@ export function CaptureView() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleDelete(path: string) {
+    if (!confirm(t("capture.delete.confirm"))) return;
+    setError(null);
+    try {
+      await deleteInboxMaterial(path);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -374,7 +386,21 @@ export function CaptureView() {
           <EmptyState icon="inbox" title={t("empty.materials")} sub={t("empty.materials.sub")} />
         )}
         {items.slice(0, 5).map((item) => (
-          <MaterialRow key={item.id} material={item} />
+          <MaterialRow
+            key={item.id}
+            material={item}
+            action={
+              <button
+                type="button"
+                onClick={() => handleDelete(item.id)}
+                aria-label={t("capture.delete")}
+                title={t("capture.delete")}
+                className="grid size-8 flex-none place-items-center rounded-lg text-ink-faint transition-colors hover:bg-surface-2 hover:text-brand"
+              >
+                <Icon name="trash" size={15} />
+              </button>
+            }
+          />
         ))}
       </Panel>
     </div>
