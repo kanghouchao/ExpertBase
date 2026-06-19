@@ -13,6 +13,7 @@ When working under `src-tauri/`, follow this file in addition to the repository-
 - Library crate: `expert_base_lib` (`src/lib.rs`); `src/main.rs` is a thin binary entry point.
 - Serialization: serde / serde_json.
 - Logging: `log` macros, emitted through `tauri-plugin-log` (registered in debug builds only).
+- Speech-to-text (`asr` feature): the on-device transcription engine (whisper.cpp via `whisper-rs`) is gated behind the optional `whisper` Cargo feature, off by default so `cargo test` runs without a C/C++ toolchain. Enabling it (`--features whisper`, required for real transcription in `bun run build`/`bun run dev`) needs `cmake` and a C/C++ compiler installed (e.g. `brew install cmake` on macOS).
 
 ## Command Policy
 

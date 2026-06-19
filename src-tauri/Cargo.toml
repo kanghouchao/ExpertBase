@@ -26,10 +26,18 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 regex = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "blocking"] }
+sha2 = "0.10"
 dom_smoothie = "0.18"
 htmd = "0.5"
 pdf-extract = "0.10"
 dotext = "0.1"
+# 転写エンジン（whisper.cpp）。ネイティブビルドに cmake が要るため、optional feature の裏に置く。
+whisper-rs = { version = "0.16", optional = true }
+hound = { version = "3", optional = true }
+
+[features]
+# 既定は OFF（cmake 無しでも cargo test が通る）。実アプリのビルドでは有効化する。
+whisper = ["dep:whisper-rs", "dep:hound"]
 
 [dev-dependencies]
 tempfile = "3"

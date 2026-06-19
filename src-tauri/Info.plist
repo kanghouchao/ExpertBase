@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- 録音→文字起こし機能のため、WebView の getUserMedia がマイクへアクセスする。
+       このキーが無いと macOS はマイク利用を拒否し、録音が動作しない。 -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Expert Base uses the microphone to record voice memos and transcribe them to text on your device.</string>
+</dict>
+</plist>

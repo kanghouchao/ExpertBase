@@ -18,7 +18,12 @@ const TYPE_MAP: Record<string, RawType> = {
 /** 受信箱素材を MaterialRow 用の表示型へ変換する。 */
 export function inboxToMaterial(item: InboxItem): RawMaterial {
   const name = item.path.split("/").pop() ?? item.path;
-  const status: RawStatus = item.status === "processed" ? "processed" : "pending";
+  const status: RawStatus =
+    item.status === "processed"
+      ? "processed"
+      : item.status === "transcribed"
+        ? "transcribed"
+        : "pending";
   return {
     id: item.path,
     type: TYPE_MAP[item.type] ?? "note",

@@ -1,4 +1,5 @@
 mod ai;
+mod asr;
 mod capture;
 mod kb;
 mod workshop;
@@ -33,11 +34,13 @@ pub fn run() {
       kb::interface::kb_list_inbox,
       capture::interface::capture_text,
       capture::interface::capture_file,
+      capture::interface::capture_audio,
       capture::interface::capture_web,
       ai::interface::ai_has_key,
       ai::interface::ai_list_ollama_models,
       workshop::interface::workshop_draft,
-      workshop::interface::workshop_confirm
+      workshop::interface::workshop_confirm,
+      asr::interface::transcribe_material
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
