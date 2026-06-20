@@ -1,13 +1,22 @@
 //! ai ドメイン層。AI プロバイダのポート（trait）と境界 DTO、ドメインエラー。
 //! 具体的な HTTP/プロバイダ実装には依存しない。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// FTS で引いた関連既存条目の要約（title + excerpt）。
 #[derive(Clone, Debug)]
 pub struct EntrySummary {
   pub title: String,
   pub excerpt: String,
+}
+
+/// 会話の 1 ターン。フロントが履歴を組み立てて渡す（多輪・記憶あり）。
+/// role は "user" / "assistant"。
+#[derive(Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatTurn {
+  pub role: String,
+  pub content: String,
 }
 
 /// 構造化リクエスト（ワークショップが組み立てる）。
@@ -17,14 +26,17 @@ pub struct StructureRequest {
   pub source_text: String,
   /// FTS で引いた関連既存条目。
   pub related: Vec<EntrySummary>,
-  /// ユーザーの指示文。
-  pub instruction: String,
+  /// ユーザーとの会話履歴（最後が最新のユーザー発話）。
+  pub messages: Vec<ChatTurn>,
 }
 
-/// 構造化結果。
+/// 構造化結果。kind が "chat" のときは body_markdown に会話返信が入り、
+/// title/cat/suggested_links は空になる。
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StructureResult {
+  /// "entry"（条目草稿）か "chat"（会話返信）か。
+  pub kind: String,
   pub title: String,
   pub cat: String,
   pub body_markdown: String,
@@ -66,6 +78,7 @@ impl AiProvider for FakeProvider {
     let title = req.source_text.lines().next().unwrap_or("").trim().to_string();
     let suggested_links = req.related.iter().take(3).map(|e| e.title.clone()).collect();
     Ok(StructureResult {
+      kind: "entry".into(),
       title: if title.is_empty() { "無題".into() } else { title },
       cat: "uncategorized".into(),
       body_markdown: req.source_text.clone(),
@@ -83,9 +96,10 @@ mod tests {
     let req = StructureRequest {
       source_text: "緑茶の淹れ方\n\n本文".into(),
       related: vec![EntrySummary { title: "煎茶".into(), excerpt: "...".into() }],
-      instruction: "整理して".into(),
+      messages: vec![ChatTurn { role: "user".into(), content: "整理して".into() }],
     };
     let res = FakeProvider.structure(req).unwrap();
+    assert_eq!(res.kind, "entry");
     assert_eq!(res.title, "緑茶の淹れ方");
     assert_eq!(res.suggested_links, vec!["煎茶".to_string()]);
   }

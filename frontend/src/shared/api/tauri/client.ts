@@ -61,12 +61,19 @@ export type InboxItem = {
   capturedAt: string;
 };
 
-/** AI が生成した構造化草稿。 */
+/** AI の応答。kind="chat" のときは bodyMarkdown に会話返信が入り、他は空。 */
 export type StructureResult = {
+  kind: "entry" | "chat";
   title: string;
   cat: string;
   bodyMarkdown: string;
   suggestedLinks: string[];
+};
+
+/** 会話の 1 ターン（多輪・記憶のためフロントが履歴を組み立てて渡す）。 */
+export type ChatTurn = {
+  role: "user" | "assistant";
+  content: string;
 };
 
 export type OllamaModel = {
@@ -191,18 +198,18 @@ export async function listOllamaModels(): Promise<OllamaModel[]> {
   return invoke<OllamaModel[]>("ai_list_ollama_models");
 }
 
-/** 受信箱素材から AI 構造化草稿を生成する。 */
+/** 複数の受信箱素材 + 会話履歴から AI 応答（草稿 or 会話返信）を生成する。 */
 export async function workshopDraft(
-  inboxPath: string,
-  instruction: string,
+  inboxPaths: string[],
+  messages: ChatTurn[],
   model: string
 ): Promise<StructureResult> {
-  return invoke<StructureResult>("workshop_draft", { inboxPath, instruction, model });
+  return invoke<StructureResult>("workshop_draft", { inboxPaths, messages, model });
 }
 
 /** 承認内容を条目として確定する。確定した条目の相対パスを返す。 */
 export async function workshopConfirm(input: {
-  inboxPath: string;
+  inboxPaths: string[];
   title: string;
   cat: string;
   body: string;
