@@ -5,7 +5,7 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
-use crate::ai::{AiError, AiProvider, EntrySummary, StructureRequest, StructureResult};
+use crate::ai::{AiError, AiProvider, ChatTurn, EntrySummary, StructureRequest, StructureResult};
 use crate::kb::entry::{Entry, EntryMeta};
 use crate::kb::{index, store};
 use crate::workshop::domain::candidate_terms;
@@ -31,30 +31,30 @@ pub fn related_entries(
   Ok(out)
 }
 
-/// RAG 編成: 関連条目を引き、AiProvider で構造化草稿を生成する。
+/// RAG 編成: 関連条目を引き、会話履歴つきで AiProvider に構造化（草稿 or 会話返信）を依頼する。
 pub fn draft<P: AiProvider>(
   provider: &P,
   conn: &Connection,
   source_text: &str,
-  instruction: &str,
+  messages: Vec<ChatTurn>,
 ) -> Result<StructureResult, AiError> {
   let related = related_entries(conn, source_text, 5).map_err(AiError::Other)?;
   provider.structure(StructureRequest {
     source_text: source_text.to_string(),
     related,
-    instruction: instruction.to_string(),
+    messages,
   })
 }
 
-/// 承認された内容を `entries/` に確定し、インデックス更新 + 受信箱を processed にする。
-/// AI 草稿でも手動入力でも同じ経路を通る。
+/// 承認された内容を `entries/` に確定し、インデックス更新 + source の受信箱を全て processed にする。
+/// AI 草稿でも手動入力でも、単一・複数素材でも同じ経路を通る。
 pub fn confirm(
   root: &Path,
   conn: &Connection,
   title: &str,
   cat: &str,
   body: &str,
-  inbox_rel: &str,
+  inbox_rels: &[String],
 ) -> Result<String, String> {
   let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
   let entry = Entry {
@@ -71,7 +71,9 @@ pub fn confirm(
   };
   let rel = store::write_entry(root, &entry)?;
   index::upsert_entry(conn, &rel, &entry)?;
-  index::set_inbox_status(conn, inbox_rel, "processed")?;
+  for inbox_rel in inbox_rels {
+    index::set_inbox_status(conn, inbox_rel, "processed")?;
+  }
   Ok(rel)
 }
 
@@ -113,25 +115,31 @@ mod tests {
     let conn = Connection::open_in_memory().unwrap();
     index::ensure_schema(&conn).unwrap();
     seed_entry(&conn, "entries/green.md", "緑茶の淹れ方", "湯温は70度。淹れ方の基本。");
-    let result = draft(&FakeProvider, &conn, "新しい 淹れ方 の本文", "整理して").unwrap();
+    let messages = vec![ChatTurn { role: "user".into(), content: "整理して".into() }];
+    let result = draft(&FakeProvider, &conn, "新しい 淹れ方 の本文", messages).unwrap();
+    assert_eq!(result.kind, "entry");
     assert_eq!(result.title, "新しい 淹れ方 の本文");
     // FakeProvider は関連条目のタイトルをリンク候補にする。
     assert_eq!(result.suggested_links, vec!["緑茶の淹れ方".to_string()]);
   }
 
   #[test]
-  fn confirm_writes_entry_indexes_it_and_marks_inbox_processed() {
+  fn confirm_writes_one_entry_and_marks_all_source_inboxes_processed() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let conn = index::open_index(root).unwrap();
     index::upsert_inbox(&conn, "inbox/m.md", "text", "paste", "pending", "2026-06-14T00:00:00Z")
       .unwrap();
+    index::upsert_inbox(&conn, "inbox/n.md", "text", "paste", "pending", "2026-06-14T00:00:00Z")
+      .unwrap();
 
-    let rel = confirm(root, &conn, "緑茶", "tea", "湯温は [[煎茶]] で70度", "inbox/m.md").unwrap();
+    // 複数素材を 1 条目に合成する。確定後、source の inbox は全て processed になる。
+    let rels = vec!["inbox/m.md".to_string(), "inbox/n.md".to_string()];
+    let rel = confirm(root, &conn, "緑茶", "tea", "湯温は [[煎茶]] で70度", &rels).unwrap();
     assert!(root.join(&rel).is_file());
     assert_eq!(index::stats(&conn).unwrap().entries, 1);
     assert_eq!(index::backlinks(&conn, "煎茶").unwrap().len(), 1);
     let inbox = index::list_inbox(&conn).unwrap();
-    assert_eq!(inbox[0].status, "processed");
+    assert!(inbox.iter().all(|m| m.status == "processed"));
   }
 }

@@ -23,9 +23,9 @@ export function TitleBar({ kbLabel, onSettings }: { kbLabel: string; onSettings:
         type="button"
         onClick={onSettings}
         title={t("cfg.title")}
-        className="flex h-7 items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 text-[12.5px] font-semibold text-ink-soft shadow-(--shadow-sm) transition-colors hover:bg-surface-2 hover:text-ink"
+        className="flex h-7 items-center gap-1.5 rounded-[8px] border border-line bg-surface px-2.5 text-[12px] font-semibold text-ink-soft transition-colors hover:border-brand-soft hover:bg-surface-2 hover:text-brand"
       >
-        <Icon name="gear" size={15} />
+        <Icon name="gear" size={14} />
         <span>{t("cfg.title")}</span>
       </button>
     </div>
