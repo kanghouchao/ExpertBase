@@ -64,6 +64,7 @@ pub fn confirm(
       description: String::new(),
       cat: cat.to_string(),
       tags: vec![],
+      sources: inbox_rels.to_vec(),
       created: today.clone(),
       updated: today,
     },
@@ -91,12 +92,27 @@ mod tests {
         description: String::new(),
         cat: "x".into(),
         tags: vec![],
+        sources: vec![],
         created: "2026-06-14".into(),
         updated: "2026-06-14".into(),
       },
       body: body.into(),
     };
     index::upsert_entry(conn, path, &entry).unwrap();
+  }
+
+  #[test]
+  fn confirm_records_inbox_rels_as_sources() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let conn = crate::kb::index::open_index(root).unwrap();
+    std::fs::create_dir_all(root.join("inbox")).unwrap();
+
+    let rel = confirm(root, &conn, "緑茶", "tea", "本文", &["inbox/a.md".into()]).unwrap();
+
+    let saved = std::fs::read_to_string(root.join(&rel)).unwrap();
+    let entry = crate::kb::entry::parse_entry(&saved).unwrap();
+    assert_eq!(entry.meta.sources, vec!["inbox/a.md".to_string()]);
   }
 
   #[test]

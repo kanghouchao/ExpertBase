@@ -364,6 +364,7 @@ mod tests {
       description: String::new(),
       cat: cat.into(),
       tags: vec![],
+      sources: vec![],
       created: "2026-06-14".into(),
       updated: "2026-06-14".into(),
     }

@@ -20,6 +20,8 @@ pub struct EntryMeta {
   pub cat: String,
   #[serde(default)]
   pub tags: Vec<String>,
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub sources: Vec<String>,
   pub created: String,
   pub updated: String,
 }
@@ -109,6 +111,7 @@ mod tests {
         description: "基本手順".into(),
         cat: "tea".into(),
         tags: vec!["howto".into(), "tea".into()],
+        sources: vec![],
         created: "2026-06-14".into(),
         updated: "2026-06-14".into(),
       },
@@ -148,5 +151,26 @@ mod tests {
   #[test]
   fn word_count_counts_whitespace_separated_tokens() {
     assert_eq!(word_count("hello  world\nthree"), 3);
+  }
+
+  #[test]
+  fn parse_then_serialize_round_trips_with_sources() {
+    let mut entry = sample();
+    entry.meta.sources = vec!["inbox/foo.md".into(), "inbox/bar.md".into()];
+    let text = serialize_entry(&entry).unwrap();
+    assert!(text.contains("sources:"));
+    assert_eq!(parse_entry(&text).unwrap(), entry);
+  }
+
+  #[test]
+  fn parse_defaults_sources_when_missing() {
+    let raw = "---\ntitle: t\ncreated: 2026-06-14\nupdated: 2026-06-14\n---\n\nbody\n";
+    assert!(parse_entry(raw).unwrap().meta.sources.is_empty());
+  }
+
+  #[test]
+  fn serialize_omits_empty_sources() {
+    // 既存 entries の出力を変えないこと（空 sources は出力しない）。
+    assert!(!serialize_entry(&sample()).unwrap().contains("sources:"));
   }
 }
