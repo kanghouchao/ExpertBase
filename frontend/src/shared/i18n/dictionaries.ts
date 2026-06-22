@@ -202,6 +202,7 @@ const zh: Dict = {
   "workshop.insp.new": "新文件",
   "workshop.insp.linksPending": "生成后显示关联",
   "workshop.insp.hint": "给一句指令或直接发送。草稿会显示在这里，确认后写入知识库。",
+  "workshop.insp.sourcesChanged": "已追加素材，请再次发送指令以生成包含新上下文的草稿。",
   "workshop.st.idle": "待运行",
   "workshop.st.done": "已生成",
   "workshop.sug.label": "提示词建议",
@@ -537,6 +538,8 @@ const en: Dict = {
   "workshop.insp.linksPending": "Links appear after generating",
   "workshop.insp.hint":
     "Give an instruction or just send. The draft shows here; confirm to save it into the knowledge base.",
+  "workshop.insp.sourcesChanged":
+    "Material was added. Send another instruction to generate a draft with the new context.",
   "workshop.st.idle": "Idle",
   "workshop.st.done": "Ready",
   "workshop.sug.label": "Suggestions",
@@ -869,6 +872,8 @@ const ja: Dict = {
   "workshop.insp.linksPending": "生成後に関連を表示",
   "workshop.insp.hint":
     "指示を出すか、そのまま送信。草案がここに表示され、確認するとナレッジベースに保存します。",
+  "workshop.insp.sourcesChanged":
+    "素材が追加されました。新しい文脈を含む草案を生成するため、もう一度指示を送信してください。",
   "workshop.st.idle": "実行待ち",
   "workshop.st.done": "生成済",
   "workshop.sug.label": "プロンプト候補",

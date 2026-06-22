@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildManualDraft,
+  canRemoveSource,
   replaceLatestEntryResult,
   sameSourceIds,
   toChatTurn,
@@ -50,4 +51,10 @@ test("manual draft includes every selected source in order", () => {
 test("draft source snapshot must exactly match current sources", () => {
   assert.equal(sameSourceIds(["a", "b"], ["a", "b"]), true);
   assert.equal(sameSourceIds(["a"], ["a", "b"]), false);
+});
+
+test("source removal is allowed only before the first turn", () => {
+  assert.equal(canRemoveSource(0, 2), true);
+  assert.equal(canRemoveSource(1, 2), false);
+  assert.equal(canRemoveSource(0, 1), false);
 });
