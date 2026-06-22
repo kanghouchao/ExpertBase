@@ -1,0 +1,56 @@
+import type { ChatTurn, StructureResult } from "@/shared/api/tauri/client";
+
+export type ProcessMessage =
+  | { role: "user"; text: string; sources?: unknown[] }
+  | { role: "ai"; result: StructureResult };
+
+type DraftSource = {
+  id: string;
+  title: string;
+  preview: string;
+};
+
+export function toChatTurn(message: ProcessMessage): ChatTurn {
+  return message.role === "user"
+    ? { role: "user", content: message.text }
+    : { role: "assistant", content: JSON.stringify(message.result) };
+}
+
+export function replaceLatestEntryResult(
+  messages: ProcessMessage[],
+  result: StructureResult
+): ProcessMessage[] {
+  const index = messages.findLastIndex(
+    (message) => message.role === "ai" && message.result.kind === "entry"
+  );
+  if (index === -1) return messages;
+  return messages.map((message, current) =>
+    current === index ? { role: "ai", result } : message
+  );
+}
+
+export function buildManualDraft(
+  sources: DraftSource[],
+  rawByPath: Record<string, string>
+): StructureResult {
+  return {
+    kind: "entry",
+    title: sources[0]?.title ?? "",
+    cat: "",
+    bodyMarkdown: sources
+      .map((source) => stripFrontmatter(rawByPath[source.id] ?? source.preview))
+      .join("\n\n---\n\n"),
+    suggestedLinks: [],
+  };
+}
+
+export function sameSourceIds(expected: string[], actual: string[]): boolean {
+  return expected.length === actual.length && expected.every((id, index) => id === actual[index]);
+}
+
+function stripFrontmatter(markdown: string): string {
+  if (!markdown.startsWith("---")) return markdown.trim();
+  const end = markdown.indexOf("\n---", 3);
+  if (end === -1) return markdown.trim();
+  return markdown.slice(end + 4).trim();
+}
