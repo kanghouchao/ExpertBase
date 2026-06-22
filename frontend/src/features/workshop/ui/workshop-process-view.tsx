@@ -16,13 +16,20 @@ import {
   readInboxMaterial,
   workshopConfirm,
   workshopDraft,
-  type ChatTurn,
   type InboxItem,
   type OllamaModel,
   type StructureResult,
 } from "@/shared/api/tauri/client";
 import { inboxToMaterial, RAW_TYPE, type RawMaterial } from "@/entities/material";
 import { useKbStore } from "@/entities/knowledge-base";
+import {
+  buildManualDraft,
+  canRemoveSource,
+  replaceLatestEntryResult,
+  sameSourceIds,
+  toChatTurn,
+  type ProcessMessage,
+} from "../model/process-state";
 
 // Tauri 外（静的プレビュー）で会話シェルだけを見せるための素材。AI 出力は偽装しない。
 const PREVIEW_SOURCE: RawMaterial = {
@@ -83,15 +90,7 @@ const PREVIEW_DRAFT: StructureResult = {
 };
 
 // 会話メッセージ。ユーザー発話 or AI 応答（草稿 entry / 会話返信 chat）。
-type Msg =
-  | { role: "user"; text: string; sources?: RawMaterial[] }
-  | { role: "ai"; result: StructureResult };
-
-function toTurn(m: Msg): ChatTurn {
-  return m.role === "user"
-    ? { role: "user", content: m.text }
-    : { role: "assistant", content: m.result.bodyMarkdown };
-}
+type Msg = ProcessMessage<RawMaterial>;
 
 export function WorkshopProcessView() {
   const { t } = useI18n();
@@ -110,6 +109,7 @@ export function WorkshopProcessView() {
   const [selectedModel, setSelectedModel] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
   const [draft, setDraft] = useState<StructureResult | null>(null);
+  const [draftSourceIds, setDraftSourceIds] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -123,16 +123,13 @@ export function WorkshopProcessView() {
         const [inboxList, raw] = await Promise.all([listInbox(), readInboxMaterial(inboxPath)]);
         setInbox(inboxList);
         const found = inboxList.find((candidate) => candidate.path === inboxPath) ?? null;
-        setSources(found ? [materialFromInbox(found)] : []);
-        setRawByPath({ [inboxPath]: raw });
+        const initialSources = found ? [materialFromInbox(found)] : [];
+        const initialRaw = { [inboxPath]: raw };
+        setSources(initialSources);
+        setRawByPath(initialRaw);
         setMessages([]);
-        setDraft({
-          kind: "entry",
-          title: found ? materialFromInbox(found).title : "",
-          cat: "",
-          bodyMarkdown: stripFrontmatter(raw),
-          suggestedLinks: [],
-        });
+        setDraft(buildManualDraft(initialSources, initialRaw));
+        setDraftSourceIds(initialSources.map((source) => source.id));
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -180,20 +177,30 @@ export function WorkshopProcessView() {
   async function addSource(material: RawMaterial) {
     setShowPicker(false);
     if (!available || sources.some((s) => s.id === material.id)) return;
-    setSources((prev) => [...prev, material]);
+    let nextRawByPath = rawByPath;
     if (!rawByPath[material.id]) {
       try {
         const raw = await readInboxMaterial(material.id);
-        setRawByPath((prev) => ({ ...prev, [material.id]: raw }));
+        nextRawByPath = { ...rawByPath, [material.id]: raw };
+        setRawByPath(nextRawByPath);
       } catch {
         /* 本文取得の失敗は致命的でない（カードは material.preview にフォールバック）。 */
       }
     }
+    const nextSources = [...sources, material];
+    setSources(nextSources);
+    if (messages.length === 0) {
+      setDraft(buildManualDraft(nextSources, nextRawByPath));
+      setDraftSourceIds(nextSources.map((source) => source.id));
+    }
   }
 
   function removeSource(id: string) {
-    if (!available) return;
-    setSources((prev) => prev.filter((s) => s.id !== id));
+    if (!available || messages.length > 0) return;
+    const nextSources = sources.filter((source) => source.id !== id);
+    setSources(nextSources);
+    setDraft(buildManualDraft(nextSources, rawByPath));
+    setDraftSourceIds(nextSources.map((source) => source.id));
   }
 
   // 会話履歴つきで AI を呼ぶ。entry なら草稿を更新、chat なら会話気泡として表示。
@@ -206,11 +213,14 @@ export function WorkshopProcessView() {
     try {
       const result = await workshopDraft(
         sources.map((s) => s.id),
-        history.map(toTurn),
+        history.map(toChatTurn),
         visibleSelectedModel
       );
       setMessages([...history, { role: "ai", result }]);
-      if (result.kind === "entry") setDraft(result);
+      if (result.kind === "entry") {
+        setDraft(result);
+        setDraftSourceIds(sources.map((source) => source.id));
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       // 失敗したターンは履歴から外し、入力を戻して再試行できるようにする。
@@ -257,6 +267,11 @@ export function WorkshopProcessView() {
     }
   }
 
+  function handleDraftChange(next: StructureResult) {
+    setDraft(next);
+    setMessages((current) => replaceLatestEntryResult(current, next));
+  }
+
   const notFound = !inboxPath || (visibleSources.length === 0 && !error);
   // 会話に出た最後の entry 草稿だけを編集可能にする（それより前は読み取り専用スナップ）。
   const lastEntryIdx = messages.reduce(
@@ -265,8 +280,16 @@ export function WorkshopProcessView() {
   );
   // Ollama が無いときは会話せず、素材から起こした草稿を直接編集して確定する手動経路。
   const showManualDraft = !visibleHasOllama && !!draft && messages.length === 0;
+  const sourcesChanged = !sameSourceIds(
+    draftSourceIds,
+    sources.map((source) => source.id)
+  );
   const canConfirm =
-    sources.length > 0 && !!draft?.title.trim() && !!draft?.bodyMarkdown.trim() && !busy;
+    sources.length > 0 &&
+    !sourcesChanged &&
+    !!draft?.title.trim() &&
+    !!draft?.bodyMarkdown.trim() &&
+    !busy;
   // 実データの draft が無いプレビューでは、パネルの体裁だけ見せる（確認は無効）。
   const visibleDraft = draft ?? (available ? null : PREVIEW_DRAFT);
 
@@ -341,7 +364,7 @@ export function WorkshopProcessView() {
                       <DraftCard
                         draft={draft}
                         done
-                        onChange={setDraft}
+                        onChange={handleDraftChange}
                         onRegenerate={handleRegenerate}
                         canRegenerate={canGenerate}
                         busy={busy}
@@ -366,7 +389,12 @@ export function WorkshopProcessView() {
               {/* 手動経路（Ollama 無し）: 素材から起こした草稿を直接編集して確定 */}
               {showManualDraft && draft && (
                 <ChatRow ai>
-                  <DraftCard draft={draft} done={false} onChange={setDraft} readOnly={false} />
+                  <DraftCard
+                    draft={draft}
+                    done={false}
+                    onChange={handleDraftChange}
+                    readOnly={false}
+                  />
                 </ChatRow>
               )}
 
@@ -402,7 +430,11 @@ export function WorkshopProcessView() {
                     <SourceChip
                       key={m.id}
                       material={m}
-                      onRemove={visibleSources.length > 1 ? () => removeSource(m.id) : undefined}
+                      onRemove={
+                        canRemoveSource(messages.length, visibleSources.length)
+                          ? () => removeSource(m.id)
+                          : undefined
+                      }
                     />
                   ))}
                 </div>
@@ -522,6 +554,7 @@ export function WorkshopProcessView() {
             generating={generating}
             draft={visibleDraft}
             canConfirm={canConfirm}
+            sourcesChanged={sourcesChanged}
             busy={busy}
             onConfirm={handleConfirm}
           />
@@ -711,6 +744,7 @@ function Inspector({
   generating,
   draft,
   canConfirm,
+  sourcesChanged,
   busy,
   onConfirm,
 }: {
@@ -718,6 +752,7 @@ function Inspector({
   generating: boolean;
   draft: StructureResult;
   canConfirm: boolean;
+  sourcesChanged: boolean;
   busy: boolean;
   onConfirm: () => void;
 }) {
@@ -808,7 +843,7 @@ function Inspector({
 
         {!generating && !canConfirm && (
           <p className="mt-3.5 text-[12px] leading-relaxed text-ink-faint">
-            {t("workshop.insp.hint")}
+            {t(sourcesChanged ? "workshop.insp.sourcesChanged" : "workshop.insp.hint")}
           </p>
         )}
       </div>

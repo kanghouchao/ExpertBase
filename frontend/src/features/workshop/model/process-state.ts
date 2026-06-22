@@ -1,7 +1,7 @@
 import type { ChatTurn, StructureResult } from "@/shared/api/tauri/client";
 
-export type ProcessMessage =
-  | { role: "user"; text: string; sources?: unknown[] }
+export type ProcessMessage<Source = unknown> =
+  | { role: "user"; text: string; sources?: Source[] }
   | { role: "ai"; result: StructureResult };
 
 type DraftSource = {
@@ -10,23 +10,21 @@ type DraftSource = {
   preview: string;
 };
 
-export function toChatTurn(message: ProcessMessage): ChatTurn {
+export function toChatTurn<Source>(message: ProcessMessage<Source>): ChatTurn {
   return message.role === "user"
     ? { role: "user", content: message.text }
     : { role: "assistant", content: JSON.stringify(message.result) };
 }
 
-export function replaceLatestEntryResult(
-  messages: ProcessMessage[],
+export function replaceLatestEntryResult<Source>(
+  messages: ProcessMessage<Source>[],
   result: StructureResult
-): ProcessMessage[] {
+): ProcessMessage<Source>[] {
   const index = messages.findLastIndex(
     (message) => message.role === "ai" && message.result.kind === "entry"
   );
   if (index === -1) return messages;
-  return messages.map((message, current) =>
-    current === index ? { role: "ai", result } : message
-  );
+  return messages.map((message, current) => (current === index ? { role: "ai", result } : message));
 }
 
 export function buildManualDraft(
@@ -46,6 +44,10 @@ export function buildManualDraft(
 
 export function sameSourceIds(expected: string[], actual: string[]): boolean {
   return expected.length === actual.length && expected.every((id, index) => id === actual[index]);
+}
+
+export function canRemoveSource(messageCount: number, sourceCount: number): boolean {
+  return messageCount === 0 && sourceCount > 1;
 }
 
 function stripFrontmatter(markdown: string): string {
