@@ -27,6 +27,7 @@ import {
   buildManualDraft,
   canRemoveSource,
   isGeneratingPhase,
+  lineDiff,
   phaseLabelKey,
   replaceLatestEntryResult,
   sameSourceIds,
@@ -226,6 +227,8 @@ export function WorkshopProcessView() {
           if (p.phase === "generating") {
             setPhase("generating");
             setGenChars(p.chars);
+          } else if (p.phase === "retrieving") {
+            setPhase("retrieving");
           } else {
             setPhase("loadingModel");
           }
@@ -307,6 +310,13 @@ export function WorkshopProcessView() {
     !busy;
   // 実データの draft が無いプレビューでは、パネルの体裁だけ見せる（確認は無効）。
   const visibleDraft = draft ?? (available ? null : PREVIEW_DRAFT);
+  // 行差分は実測値: 素材本文 vs 現在の草稿（品質スコアのような偽装はしない）。
+  const sourceText = visibleSources
+    .map((source) => stripFrontmatter(rawByPath[source.id] ?? source.preview))
+    .join("\n\n---\n\n");
+  const changes = visibleDraft
+    ? lineDiff(sourceText, visibleDraft.bodyMarkdown)
+    : { added: 0, removed: 0 };
 
   if (notFound) {
     return (
@@ -575,6 +585,8 @@ export function WorkshopProcessView() {
                 : t(phaseLabelKey(phase))
             }
             draft={visibleDraft}
+            added={changes.added}
+            removed={changes.removed}
             canConfirm={canConfirm}
             sourcesChanged={sourcesChanged}
             busy={busy}
@@ -766,6 +778,8 @@ function Inspector({
   generating,
   runningLabel,
   draft,
+  added,
+  removed,
   canConfirm,
   sourcesChanged,
   busy,
@@ -775,6 +789,8 @@ function Inspector({
   generating: boolean;
   runningLabel: string;
   draft: StructureResult;
+  added: number;
+  removed: number;
   canConfirm: boolean;
   sourcesChanged: boolean;
   busy: boolean;
@@ -849,6 +865,32 @@ function Inspector({
               <Tag tone="accent">{draft.cat}</Tag>
             </div>
           )}
+        </InspRow>
+
+        <InspRow label={t("workshop.insp.changes")}>
+          <div className="flex items-baseline gap-3">
+            <span className="font-mono text-[19px] font-bold text-ai">+{added}</span>
+            <span
+              className={`font-mono text-[19px] font-bold ${removed ? "text-brand" : "text-ink-faint"}`}
+            >
+              −{removed}
+            </span>
+            <span className="text-[11.5px] text-ink-faint">{t("workshop.insp.lines")}</span>
+          </div>
+          <div className="mt-2.5 flex h-1.5 overflow-hidden rounded-full bg-surface-2">
+            <div
+              className="bg-ai transition-[width] duration-500"
+              style={{
+                width: `${added + removed > 0 ? (added / (added + removed)) * 100 : 100}%`,
+              }}
+            />
+            {removed > 0 && (
+              <div
+                className="bg-brand transition-[width] duration-500"
+                style={{ width: `${(removed / (added + removed)) * 100}%` }}
+              />
+            )}
+          </div>
         </InspRow>
 
         <InspRow label={t("workshop.suggestedLinks")}>
