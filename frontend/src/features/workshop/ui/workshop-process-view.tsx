@@ -120,6 +120,7 @@ export function WorkshopProcessView() {
   const [draftSourceIds, setDraftSourceIds] = useState<string[]>([]);
   const [phase, setPhase] = useState<DraftUiPhase>("idle");
   const [genChars, setGenChars] = useState(0);
+  const [thinkingBuf, setThinkingBuf] = useState("");
   const generating = isGeneratingPhase(phase);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -222,8 +223,10 @@ export function WorkshopProcessView() {
     setShowPicker(false);
     setPhase("connecting");
     setGenChars(0);
+    setThinkingBuf("");
     setError(null);
     try {
+      let thinking = "";
       const result = await workshopDraft(
         sources.map((s) => s.id),
         history.map(toChatTurn),
@@ -235,12 +238,16 @@ export function WorkshopProcessView() {
             setGenChars(p.chars);
           } else if (p.phase === "retrieving") {
             setPhase("retrieving");
+          } else if (p.phase === "thinking") {
+            setPhase("thinking");
+            thinking += p.delta;
+            setThinkingBuf(thinking);
           } else {
             setPhase("loadingModel");
           }
         }
       );
-      setMessages([...history, { role: "ai", result }]);
+      setMessages([...history, { role: "ai", result, thinking: thinking || undefined }]);
       if (result.kind === "entry") {
         setDraft(result);
         setDraftSourceIds(sources.map((source) => source.id));
@@ -385,12 +392,14 @@ export function WorkshopProcessView() {
                   </div>
                 ) : m.result.kind === "chat" ? (
                   <ChatRow key={i} ai>
+                    {m.thinking && <ThinkingPanel text={m.thinking} streaming={false} />}
                     <div className="text-[14.5px] leading-relaxed whitespace-pre-wrap text-ink-soft">
                       {m.result.bodyMarkdown}
                     </div>
                   </ChatRow>
                 ) : (
                   <ChatRow key={i} ai>
+                    {m.thinking && <ThinkingPanel text={m.thinking} streaming={false} />}
                     {i === lastEntryIdx && draft ? (
                       <DraftCard
                         draft={draft}
@@ -410,6 +419,9 @@ export function WorkshopProcessView() {
               {/* AI: 生成中 */}
               {generating && (
                 <ChatRow ai>
+                  {thinkingBuf && (
+                    <ThinkingPanel text={thinkingBuf} streaming={phase === "thinking"} />
+                  )}
                   <div className="flex items-center gap-2.5 text-[13.5px] text-ink-soft">
                     <span className="size-4 animate-spin rounded-full border-2 border-ai-soft border-t-ai" />
                     {phase === "generating"
@@ -545,7 +557,9 @@ export function WorkshopProcessView() {
                     ) : (
                       visibleModels.map((model) => (
                         <option key={model.name} value={model.name}>
-                          {model.name}
+                          {model.thinking
+                            ? `${model.name} · ${t("workshop.think.badge")}`
+                            : model.name}
                         </option>
                       ))
                     )}
@@ -646,6 +660,49 @@ function ChatRow({ ai, children }: { ai?: boolean; children: ReactNode }) {
         <Icon name={ai ? "spark" : "edit"} size={16} />
       </div>
       <div className="min-w-0 flex-1 pt-0.5">{children}</div>
+    </div>
+  );
+}
+
+// 思考モデルの推論(thinking)を映す折りたたみパネル。streaming 中は自動展開＋底部追従、
+// 終わったら自動的に「思考過程 · N 字」へ折りたたむ（再展開可）。
+function ThinkingPanel({ text, streaming }: { text: string; streaming: boolean }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(streaming);
+  const [wasStreaming, setWasStreaming] = useState(streaming);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // streaming の切替に追従して自動開閉（レンダー中の状態調整＝React 推奨パターン）。
+  if (wasStreaming !== streaming) {
+    setWasStreaming(streaming);
+    setOpen(streaming);
+  }
+  // 流式中は本文を最下部に追従させる。
+  useEffect(() => {
+    if (streaming && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+  }, [text, streaming]);
+  return (
+    <div className="mb-2.5 overflow-hidden rounded-lg border border-ai-soft bg-ai-wash/40">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+      >
+        <Icon name={open ? "chevD" : "chevR"} size={13} className="flex-none text-ai" />
+        <span className="text-[12px] font-bold text-ai">{t("workshop.think.label")}</span>
+        {streaming ? (
+          <span className="size-3 animate-spin rounded-full border-2 border-ai-soft border-t-ai" />
+        ) : (
+          <span className="font-mono text-[11px] text-ink-faint">· {text.length}</span>
+        )}
+      </button>
+      {open && (
+        <div
+          ref={bodyRef}
+          className="max-h-48 overflow-auto border-t border-ai-soft px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-ink-soft"
+        >
+          {text}
+        </div>
+      )}
     </div>
   );
 }
