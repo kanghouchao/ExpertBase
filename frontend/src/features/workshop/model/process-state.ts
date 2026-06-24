@@ -56,3 +56,26 @@ function stripFrontmatter(markdown: string): string {
   if (end === -1) return markdown.trim();
   return markdown.slice(end + 4).trim();
 }
+
+// AI 草稿生成のフェーズ（確定的状態機。UI の反馈はここから駆動する）。
+export type DraftUiPhase = "idle" | "connecting" | "loadingModel" | "generating" | "done";
+
+export function isGeneratingPhase(phase: DraftUiPhase): boolean {
+  return phase === "connecting" || phase === "loadingModel" || phase === "generating";
+}
+
+/** フェーズ → i18n キー（spinner ラベル / inspector status）。 */
+export function phaseLabelKey(phase: DraftUiPhase): string {
+  switch (phase) {
+    case "connecting":
+      return "workshop.phase.connecting";
+    case "loadingModel":
+      return "workshop.phase.loadingModel";
+    case "generating":
+      return "workshop.phase.generating";
+    case "done":
+      return "workshop.st.done";
+    default:
+      return "workshop.st.idle";
+  }
+}
