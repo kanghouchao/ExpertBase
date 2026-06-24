@@ -43,6 +43,15 @@ Do not:
 
 Reply with JSON only."###;
 
+/// Pass1(思考パス)用プロンプト。JSON を要求せず、推論しながら散文ドラフトを書かせる。
+/// format grammar と think を同時に使うと content が壊れるため、思考時は構造化を
+/// Pass2 に分離する。ここは"良いドラフト"を出すことだけに集中させる。
+const DRAFT_PROMPT: &str = r###"You are a knowledge base editor chatting with the user about the provided Material.
+Read the Material and the conversation, think it through, then write the best response in Markdown:
+- If the user wants a knowledge entry created or revised, write a clean, well-structured Markdown entry grounded ONLY in the Material.
+- Otherwise, reply conversationally.
+Do not add facts that are not supported by the Material. Output only the response itself — no JSON, no code fences, no meta commentary."###;
+
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OllamaModel {
@@ -140,8 +149,8 @@ fn output_schema() -> Value {
   })
 }
 
-/// 素材と関連条目は会話全体で固定の文脈。system メッセージに pin する。
-fn system_content(req: &StructureRequest) -> String {
+/// 素材と関連条目は会話全体で固定の文脈。指定プロンプトの後に pin する。
+fn system_content_with(prompt: &str, req: &StructureRequest) -> String {
   let mut related = String::new();
   for e in &req.related {
     related.push_str(&format!("- {}: {}\n", e.title, e.excerpt));
@@ -150,39 +159,65 @@ fn system_content(req: &StructureRequest) -> String {
     related.push_str("(none)\n");
   }
   format!(
-    "{SYSTEM_PROMPT}\n\n# Material\n{}\n\n# Related existing entries\n{related}",
+    "{prompt}\n\n# Material\n{}\n\n# Related existing entries\n{related}",
     req.source_text
   )
 }
 
 /// /api/chat 用メッセージ列: 先頭に system（指示 + 固定文脈）、続けて会話履歴。
-fn chat_messages(req: &StructureRequest) -> Value {
-  let mut messages = vec![json!({ "role": "system", "content": system_content(req) })];
+fn messages_with(prompt: &str, req: &StructureRequest) -> Value {
+  let mut messages = vec![json!({ "role": "system", "content": system_content_with(prompt, req) })];
   for turn in &req.messages {
     messages.push(json!({ "role": turn.role, "content": turn.content }));
   }
   Value::Array(messages)
 }
 
-fn build_body(model: &str, req: &StructureRequest, think: bool) -> Value {
-  let mut body = json!({
+/// 非思考モデル: 単発で format 固定の構造化出力（従来の確実な経路）。
+fn build_body(model: &str, req: &StructureRequest) -> Value {
+  json!({
     "model": model,
-    "messages": chat_messages(req),
+    "messages": messages_with(SYSTEM_PROMPT, req),
     "stream": true,
     "format": output_schema(),
+    "options": { "temperature": 0.2 }
+  })
+}
+
+/// Pass1(思考パス): think 有効・format なし。推論を message.thinking に流しつつ
+/// 散文ドラフトを生成する。format grammar と think の同時使用は content を壊す
+/// （実機検証済み）ため format を付けない。サンプリングは公式モデルカード推奨値
+/// （temp 1.0 / top_p .95 / top_k 64; 低温は推論モデルを退化させる）。num_ctx で
+/// 思考+本文の予算を確保し、num_predict で暴走（話痨）を抑える。
+fn build_draft_body(model: &str, req: &StructureRequest) -> Value {
+  json!({
+    "model": model,
+    "messages": messages_with(DRAFT_PROMPT, req),
+    "stream": true,
+    "think": true,
     "options": {
-      "temperature": 0.2
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 64,
+      "num_ctx": 16384,
+      "num_predict": 2048
     }
-  });
-  if think {
-    body["think"] = json!(true);
-    // 思考(thinking)は content と同じ context window を消費する。既定 4096 だと
-    // 思考でほぼ使い切られ、structured content が途中で切れて JSON が壊れる
-    // （done_reason=stop でも context-shift で本文が欠ける）。思考モデルだけ
-    // num_ctx を広げ、content 生成分の予算を確保する。
-    body["options"]["num_ctx"] = json!(16384);
-  }
-  body
+  })
+}
+
+/// Pass2(構造化パス): think なし・format あり。Pass1 の散文ドラフトを確実に
+/// StructureResult へ整形する（= 非思考の確実な経路を再利用）。
+fn build_structure_body(model: &str, draft: &str) -> Value {
+  json!({
+    "model": model,
+    "messages": [
+      { "role": "system", "content": SYSTEM_PROMPT },
+      { "role": "user", "content": format!("Convert the following draft into the JSON object as specified:\n\n{draft}") }
+    ],
+    "stream": true,
+    "format": output_schema(),
+    "options": { "temperature": 0.2 }
+  })
 }
 
 #[derive(Deserialize)]
@@ -243,13 +278,13 @@ struct RawResult {
   suggested_links: Vec<String>,
 }
 
-/// NDJSON ストリーム（Ollama /api/chat stream=true）を消費し、本文を連結して構造化結果へ。
-/// チャンク毎に累積文字数を Generating として上報する。format スキーマ固定なので、
-/// 連結後の本文は 1 つの JSON オブジェクトになる。
+/// NDJSON ストリーム（Ollama /api/chat stream=true）を消費し、message.content を連結して返す。
+/// thinking は Thinking として、content の累積文字数は Generating として上報する。
+/// JSON への整形は呼び出し側（parse_structure）に分離する（思考パスは散文を返すため）。
 fn consume_chat_stream(
   lines: impl Iterator<Item = std::io::Result<String>>,
   on_progress: &mut dyn FnMut(StreamProgress),
-) -> Result<StructureResult, AiError> {
+) -> Result<String, AiError> {
   let mut content = String::new();
   for line in lines {
     let line = line.map_err(|e| {
@@ -277,8 +312,16 @@ fn consume_chat_stream(
       break;
     }
   }
+  Ok(content)
+}
+
+/// モデル出力から JSON オブジェクトを取り出して構造化結果へ。Pass2 は format 固定で
+/// 通常そのまま JSON だが、コードフェンスや前後の文字が混じっても拾えるよう、
+/// 最初の `{` から最後の `}` までを抽出してから解析する。
+fn parse_structure(content: &str) -> Result<StructureResult, AiError> {
+  let json = extract_json_object(content).unwrap_or(content);
   let raw: RawResult =
-    serde_json::from_str(&content).map_err(|e| AiError::Other(e.to_string()))?;
+    serde_json::from_str(json).map_err(|e| AiError::Other(e.to_string()))?;
   Ok(StructureResult {
     kind: raw.kind,
     title: raw.title,
@@ -286,6 +329,13 @@ fn consume_chat_stream(
     body_markdown: raw.body_markdown,
     suggested_links: raw.suggested_links,
   })
+}
+
+/// 最初の `{` から最後の `}` までを返す（コードフェンス等の混入に耐える）。
+fn extract_json_object(text: &str) -> Option<&str> {
+  let start = text.find('{')?;
+  let end = text.rfind('}')?;
+  (end > start).then(|| &text[start..=end])
 }
 
 impl AiProvider for OllamaProvider {
@@ -299,7 +349,6 @@ impl AiProvider for OllamaProvider {
       None => Self::first_local_model()?
         .ok_or_else(|| AiError::Other("Ollama 没有可用模型，请先下载模型".into()))?,
     };
-    let body = build_body(&model, &req, self.think);
     // 接続は短く（未起動を即検知）、全体は長く（モデルのロード + 生成を許容）。
     let client = reqwest::blocking::Client::builder()
       .connect_timeout(Duration::from_secs(3))
@@ -308,36 +357,58 @@ impl AiProvider for OllamaProvider {
       .map_err(|e| AiError::Network(e.to_string()))?;
 
     on_progress(StreamProgress::LoadingModel);
-    let resp = client
-      .post(format!("{}/api/chat", self.base_url))
-      .header("content-type", "application/json")
-      .json(&body)
-      .send()
-      .map_err(|e| {
-        if e.is_timeout() {
-          AiError::Network(format!(
-            "等待 Ollama 响应超时（模型可能正在加载，请先在终端执行 `ollama run {model}` 预热，或选择更小的模型）"
-          ))
-        } else {
-          AiError::Network(format!("无法连接 Ollama（请确认 `ollama serve` 正在运行）: {e}"))
-        }
-      })?;
-
-    let status = resp.status();
-    if status.as_u16() == 404 {
-      return Err(AiError::Other(format!(
-        "Ollama 模型未找到: {model}（请先执行 `ollama pull {model}`）"
-      )));
+    if self.think {
+      // 思考モデルは 2 段階。format grammar と think の同時使用が content を壊すため。
+      // Pass1: 推論 + 散文ドラフト（think あり・format なし）。推論は面板へ流れる。
+      let draft = post_chat(&client, &self.base_url, &model, build_draft_body(&model, &req), on_progress)?;
+      // Pass2: ドラフトを構造化（format あり・think なし＝確実な経路）。
+      let content =
+        post_chat(&client, &self.base_url, &model, build_structure_body(&model, &draft), on_progress)?;
+      parse_structure(&content)
+    } else {
+      let content = post_chat(&client, &self.base_url, &model, build_body(&model, &req), on_progress)?;
+      parse_structure(&content)
     }
-    if !status.is_success() {
-      let text = resp.text().unwrap_or_default();
-      return Err(AiError::Other(format!("Ollama API 错误({status}): {text}")));
-    }
-
-    use std::io::BufRead;
-    let reader = std::io::BufReader::new(resp);
-    consume_chat_stream(reader.lines(), on_progress)
   }
+}
+
+/// /api/chat に 1 リクエストを投げ、ストリームを消費して連結 content を返す。
+fn post_chat(
+  client: &reqwest::blocking::Client,
+  base_url: &str,
+  model: &str,
+  body: Value,
+  on_progress: &mut dyn FnMut(StreamProgress),
+) -> Result<String, AiError> {
+  let resp = client
+    .post(format!("{base_url}/api/chat"))
+    .header("content-type", "application/json")
+    .json(&body)
+    .send()
+    .map_err(|e| {
+      if e.is_timeout() {
+        AiError::Network(format!(
+          "等待 Ollama 响应超时（模型可能正在加载，请先在终端执行 `ollama run {model}` 预热，或选择更小的模型）"
+        ))
+      } else {
+        AiError::Network(format!("无法连接 Ollama（请确认 `ollama serve` 正在运行）: {e}"))
+      }
+    })?;
+
+  let status = resp.status();
+  if status.as_u16() == 404 {
+    return Err(AiError::Other(format!(
+      "Ollama 模型未找到: {model}（请先执行 `ollama pull {model}`）"
+    )));
+  }
+  if !status.is_success() {
+    let text = resp.text().unwrap_or_default();
+    return Err(AiError::Other(format!("Ollama API 错误({status}): {text}")));
+  }
+
+  use std::io::BufRead;
+  let reader = std::io::BufReader::new(resp);
+  consume_chat_stream(reader.lines(), on_progress)
 }
 
 #[cfg(test)]
@@ -355,7 +426,7 @@ mod tests {
 
   #[test]
   fn build_body_uses_ollama_chat_contract() {
-    let body = build_body("llama3.2", &req(), false);
+    let body = build_body("llama3.2", &req());
     assert_eq!(body["model"], "llama3.2");
     assert_eq!(body["stream"], true);
     assert_eq!(body["format"]["type"], "object");
@@ -371,7 +442,7 @@ mod tests {
   fn system_prompt_handles_chat_kind_and_relevant_links() {
     // kind（entry/chat）の判別・例示・関連性ルール・禁止事項を含む
     let system =
-      build_body("llama3.2", &req(), false)["messages"][0]["content"].as_str().unwrap().to_lowercase();
+      build_body("llama3.2", &req())["messages"][0]["content"].as_str().unwrap().to_lowercase();
     assert!(system.contains("kind"));
     assert!(system.contains("chat"));
     assert!(system.contains("entry"));
@@ -394,7 +465,9 @@ mod tests {
       Ok(r#"{"message":{"content":"茶\",\"cat\":\"tea\",\"body_markdown\":\"本文\",\"suggested_links\":[]}"},"done":true}"#.to_string()),
     ];
     let mut events = Vec::new();
-    let result = consume_chat_stream(lines.into_iter(), &mut |p| events.push(p)).unwrap();
+    let content = consume_chat_stream(lines.into_iter(), &mut |p| events.push(p)).unwrap();
+    // consume は content を連結して返すだけ。整形は parse_structure に分離。
+    let result = parse_structure(&content).unwrap();
     assert_eq!(result.kind, "entry");
     assert_eq!(result.title, "緑茶");
     assert_eq!(result.cat, "tea");
@@ -410,25 +483,43 @@ mod tests {
       Ok(r#"{"message":{"content":"{\"kind\":\"chat\",\"title\":\"\",\"cat\":\"\",\"body_markdown\":\"hi\",\"suggested_links\":[]}"},"done":true}"#.to_string()),
     ];
     let mut events = Vec::new();
-    let result = consume_chat_stream(lines.into_iter(), &mut |p| events.push(p)).unwrap();
-    assert_eq!(result.body_markdown, "hi");
+    let content = consume_chat_stream(lines.into_iter(), &mut |p| events.push(p)).unwrap();
+    assert_eq!(parse_structure(&content).unwrap().body_markdown, "hi");
     assert_eq!(events.first(), Some(&StreamProgress::Thinking { delta: "考え中".into() }));
     assert!(events.iter().any(|e| matches!(e, StreamProgress::Generating { .. })));
   }
 
   #[test]
-  fn build_body_includes_think_when_enabled() {
-    assert_eq!(build_body("m", &req(), true)["think"], true);
-    assert_eq!(build_body("m", &req(), false).get("think"), None);
+  fn draft_body_omits_format_and_enables_think() {
+    // Pass1: think あり・format なし（grammar+think の同時使用が content を壊すため）。
+    let body = build_draft_body("m", &req());
+    assert_eq!(body["think"], true);
+    assert_eq!(body.get("format"), None);
+    assert_eq!(body["options"]["num_ctx"], 16384);
+    assert_eq!(body["options"]["num_predict"], 2048);
+    assert_eq!(body["options"]["temperature"], 1.0);
+    // system は JSON を要求しない（散文ドラフト）が、素材は文脈として渡す。
+    let system = body["messages"][0]["content"].as_str().unwrap();
+    assert!(system.contains("緑茶の淹れ方"));
   }
 
   #[test]
-  fn build_body_widens_context_only_for_thinking() {
-    // 思考(thinking)は content と同じ context window を消費する。既定 4096 だと
-    // 思考で使い切られ structured content が途中で切れて JSON が壊れるため、
-    // 思考モデルのみ num_ctx を広げる。非思考は既定のまま（指定しない）。
-    assert_eq!(build_body("m", &req(), true)["options"]["num_ctx"], 16384);
-    assert_eq!(build_body("m", &req(), false)["options"].get("num_ctx"), None);
+  fn structure_body_uses_format_without_think() {
+    // Pass2: format あり・think なし。Pass1 のドラフトを user として渡す。
+    let body = build_structure_body("m", "杀青の本文");
+    assert_eq!(body["format"]["type"], "object");
+    assert_eq!(body.get("think"), None);
+    assert!(body["messages"][1]["content"].as_str().unwrap().contains("杀青の本文"));
+  }
+
+  #[test]
+  fn parse_structure_extracts_json_even_with_code_fence() {
+    // コードフェンスや前後テキストが混じっても最初の { 〜 最後の } を拾う。
+    let wrapped =
+      "```json\n{\"kind\":\"entry\",\"title\":\"T\",\"cat\":\"c\",\"body_markdown\":\"B\",\"suggested_links\":[]}\n```";
+    let result = parse_structure(wrapped).unwrap();
+    assert_eq!(result.title, "T");
+    assert_eq!(result.kind, "entry");
   }
 
   #[test]
