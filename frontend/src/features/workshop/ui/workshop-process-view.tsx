@@ -16,6 +16,7 @@ import {
   readInboxMaterial,
   workshopConfirm,
   workshopDraft,
+  type DraftPhase,
   type InboxItem,
   type OllamaModel,
   type StructureResult,
@@ -25,9 +26,12 @@ import { useKbStore } from "@/entities/knowledge-base";
 import {
   buildManualDraft,
   canRemoveSource,
+  isGeneratingPhase,
+  phaseLabelKey,
   replaceLatestEntryResult,
   sameSourceIds,
   toChatTurn,
+  type DraftUiPhase,
   type ProcessMessage,
 } from "../model/process-state";
 
@@ -110,7 +114,9 @@ export function WorkshopProcessView() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [draft, setDraft] = useState<StructureResult | null>(null);
   const [draftSourceIds, setDraftSourceIds] = useState<string[]>([]);
-  const [generating, setGenerating] = useState(false);
+  const [phase, setPhase] = useState<DraftUiPhase>("idle");
+  const [genChars, setGenChars] = useState(0);
+  const generating = isGeneratingPhase(phase);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const threadEnd = useRef<HTMLDivElement>(null);
@@ -208,27 +214,36 @@ export function WorkshopProcessView() {
     setMessages(history);
     setInstruction("");
     setShowPicker(false);
-    setGenerating(true);
+    setPhase("connecting");
+    setGenChars(0);
     setError(null);
     try {
       const result = await workshopDraft(
         sources.map((s) => s.id),
         history.map(toChatTurn),
-        visibleSelectedModel
+        visibleSelectedModel,
+        (p: DraftPhase) => {
+          if (p.phase === "generating") {
+            setPhase("generating");
+            setGenChars(p.chars);
+          } else {
+            setPhase("loadingModel");
+          }
+        }
       );
       setMessages([...history, { role: "ai", result }]);
       if (result.kind === "entry") {
         setDraft(result);
         setDraftSourceIds(sources.map((source) => source.id));
       }
+      setPhase("idle");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       // 失敗したターンは履歴から外し、入力を戻して再試行できるようにする。
       const last = history[history.length - 1];
       setMessages(history.slice(0, -1));
       if (last?.role === "user") setInstruction(last.text);
-    } finally {
-      setGenerating(false);
+      setPhase("idle");
     }
   }
 
@@ -381,7 +396,9 @@ export function WorkshopProcessView() {
                 <ChatRow ai>
                   <div className="flex items-center gap-2.5 text-[13.5px] text-ink-soft">
                     <span className="size-4 animate-spin rounded-full border-2 border-ai-soft border-t-ai" />
-                    {t("workshop.thinking")}
+                    {phase === "generating"
+                      ? `${t("workshop.phase.generating")} · ${genChars}`
+                      : t(phaseLabelKey(phase))}
                   </div>
                 </ChatRow>
               )}
@@ -552,6 +569,11 @@ export function WorkshopProcessView() {
           <Inspector
             model={visibleSelectedModel}
             generating={generating}
+            runningLabel={
+              phase === "generating"
+                ? `${t("workshop.phase.generating")} · ${genChars}`
+                : t(phaseLabelKey(phase))
+            }
             draft={visibleDraft}
             canConfirm={canConfirm}
             sourcesChanged={sourcesChanged}
@@ -742,6 +764,7 @@ function SourceCard({ material, source }: { material: RawMaterial; source: strin
 function Inspector({
   model,
   generating,
+  runningLabel,
   draft,
   canConfirm,
   sourcesChanged,
@@ -750,6 +773,7 @@ function Inspector({
 }: {
   model: string;
   generating: boolean;
+  runningLabel: string;
   draft: StructureResult;
   canConfirm: boolean;
   sourcesChanged: boolean;
@@ -758,7 +782,7 @@ function Inspector({
 }) {
   const { t } = useI18n();
   const status = generating
-    ? { label: t("workshop.running"), color: "var(--gold)" }
+    ? { label: runningLabel, color: "var(--gold)" }
     : canConfirm
       ? { label: t("workshop.st.done"), color: "var(--ai)" }
       : { label: t("workshop.st.idle"), color: "var(--ink-muted)" };
