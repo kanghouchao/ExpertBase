@@ -47,6 +47,8 @@ Reply with JSON only."###;
 #[serde(rename_all = "camelCase")]
 pub struct OllamaModel {
   pub name: String,
+  /// thinking（推論トレース）能力を持つか。/api/show の capabilities で判定。
+  pub thinking: bool,
 }
 
 pub struct OllamaProvider {
@@ -92,10 +94,22 @@ impl OllamaProvider {
       .map_err(|e| AiError::Network(e.to_string()))?;
     let status = resp.status();
     let text = resp.text().map_err(|e| AiError::Network(e.to_string()))?;
-    match status.as_u16() {
-      200 => parse_models_response(&text),
-      _ => Err(AiError::Other(format!("Ollama 模型列表读取失败({status}): {text}"))),
+    if status.as_u16() != 200 {
+      return Err(AiError::Other(format!("Ollama 模型列表读取失败({status}): {text}")));
     }
+    let mut models = parse_models_response(&text)?;
+    // 各モデルの thinking 能力を /api/show で補う（ローカル・高速）。
+    for model in &mut models {
+      if let Ok(show) = client
+        .post(format!("{API_BASE}/api/show"))
+        .json(&json!({ "model": model.name }))
+        .send()
+        .and_then(|r| r.text())
+      {
+        model.thinking = show_supports_thinking(&show);
+      }
+    }
+    Ok(models)
   }
 
   pub fn first_local_model() -> Result<Option<String>, AiError> {
@@ -170,8 +184,21 @@ fn parse_models_response(body: &str) -> Result<Vec<OllamaModel>, AiError> {
     .models
     .into_iter()
     .filter(|model| !model.name.trim().is_empty())
-    .map(|model| OllamaModel { name: model.name })
+    .map(|model| OllamaModel { name: model.name, thinking: false })
     .collect())
+}
+
+#[derive(Deserialize)]
+struct ShowResponse {
+  #[serde(default)]
+  capabilities: Vec<String>,
+}
+
+/// /api/show のレスポンスから thinking 能力の有無を読む。
+fn show_supports_thinking(body: &str) -> bool {
+  serde_json::from_str::<ShowResponse>(body)
+    .map(|s| s.capabilities.iter().any(|c| c == "thinking"))
+    .unwrap_or(false)
 }
 
 #[derive(Deserialize)]
@@ -356,6 +383,15 @@ mod tests {
   }
 
   #[test]
+  fn show_supports_thinking_reads_capabilities() {
+    let yes = r#"{"capabilities":["completion","thinking"]}"#;
+    let no = r#"{"capabilities":["completion"]}"#;
+    assert!(show_supports_thinking(yes));
+    assert!(!show_supports_thinking(no));
+    assert!(!show_supports_thinking("{}"));
+  }
+
+  #[test]
   fn parse_models_response_returns_downloaded_model_names() {
     let sample = r#"{
       "models": [
@@ -367,8 +403,8 @@ mod tests {
     assert_eq!(
       models,
       vec![
-        OllamaModel { name: "qwen3:8b".into() },
-        OllamaModel { name: "llama3.1:8b".into() },
+        OllamaModel { name: "qwen3:8b".into(), thinking: false },
+        OllamaModel { name: "llama3.1:8b".into(), thinking: false },
       ]
     );
   }
