@@ -26,7 +26,7 @@ pub fn workshop_draft(
   }
   let source_text = bodies.join("\n\n---\n\n");
   let provider = crate::ai::ollama::OllamaProvider::with_model(model);
-  application::draft(&provider, &conn, &source_text, messages).map_err(|e| e.to_string())
+  application::draft(&provider, &conn, &source_text, messages, &mut |_| {}).map_err(|e| e.to_string())
 }
 
 /// 承認内容を条目として確定する（UI で手編集済みの値を受け取る）。

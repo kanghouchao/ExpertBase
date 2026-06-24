@@ -44,6 +44,15 @@ pub struct StructureResult {
   pub suggested_links: Vec<String>,
 }
 
+/// ストリーミング進捗。Tauri 非依存のドメイン値（interface 層が Channel へ橋渡しする）。
+#[derive(Clone, Debug, PartialEq)]
+pub enum StreamProgress {
+  /// リクエスト送信済み・最初のトークン待ち（モデルのロード中を含む）。
+  LoadingModel,
+  /// トークン受信中。chars は累積文字数。
+  Generating { chars: usize },
+}
+
 /// AI エラー。UI で区別して表示し、手動パスへ退避できるようにする。
 #[derive(Debug, PartialEq)]
 pub enum AiError {
@@ -65,7 +74,11 @@ impl std::fmt::Display for AiError {
 /// AI プロバイダ接合面。ワークショップはこの trait の裏でのみ AI を呼ぶ。
 /// 将来のローカル LLM / マルチモーダルは別実装として差し込む（下流は変更不要）。
 pub trait AiProvider {
-  fn structure(&self, req: StructureRequest) -> Result<StructureResult, AiError>;
+  fn structure(
+    &self,
+    req: StructureRequest,
+    on_progress: &mut dyn FnMut(StreamProgress),
+  ) -> Result<StructureResult, AiError>;
 }
 
 /// テスト用の決定的プロバイダ（ネットワーク不要）。
@@ -74,8 +87,14 @@ pub struct FakeProvider;
 
 #[cfg(test)]
 impl AiProvider for FakeProvider {
-  fn structure(&self, req: StructureRequest) -> Result<StructureResult, AiError> {
+  fn structure(
+    &self,
+    req: StructureRequest,
+    on_progress: &mut dyn FnMut(StreamProgress),
+  ) -> Result<StructureResult, AiError> {
+    on_progress(StreamProgress::LoadingModel);
     let title = req.source_text.lines().next().unwrap_or("").trim().to_string();
+    on_progress(StreamProgress::Generating { chars: req.source_text.chars().count() });
     let suggested_links = req.related.iter().take(3).map(|e| e.title.clone()).collect();
     Ok(StructureResult {
       kind: "entry".into(),
@@ -98,10 +117,23 @@ mod tests {
       related: vec![EntrySummary { title: "煎茶".into(), excerpt: "...".into() }],
       messages: vec![ChatTurn { role: "user".into(), content: "整理して".into() }],
     };
-    let res = FakeProvider.structure(req).unwrap();
+    let res = FakeProvider.structure(req, &mut |_| {}).unwrap();
     assert_eq!(res.kind, "entry");
     assert_eq!(res.title, "緑茶の淹れ方");
     assert_eq!(res.suggested_links, vec!["煎茶".to_string()]);
+  }
+
+  #[test]
+  fn fake_provider_reports_loading_then_generating() {
+    let req = StructureRequest {
+      source_text: "abc".into(),
+      related: vec![],
+      messages: vec![],
+    };
+    let mut events = Vec::new();
+    FakeProvider.structure(req, &mut |p| events.push(p)).unwrap();
+    assert_eq!(events.first(), Some(&StreamProgress::LoadingModel));
+    assert!(matches!(events.last(), Some(StreamProgress::Generating { chars: 3 })));
   }
 
   #[test]

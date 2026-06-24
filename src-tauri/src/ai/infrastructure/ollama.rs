@@ -3,7 +3,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::ai::domain::{AiError, AiProvider, StructureRequest, StructureResult};
+use crate::ai::domain::{AiError, AiProvider, StreamProgress, StructureRequest, StructureResult};
 
 /// kind が欠落したモデル出力への安全な既定値（信頼境界の堅牢化）。
 fn default_kind() -> String {
@@ -209,7 +209,11 @@ fn parse_response(body: &str) -> Result<StructureResult, AiError> {
 }
 
 impl AiProvider for OllamaProvider {
-  fn structure(&self, req: StructureRequest) -> Result<StructureResult, AiError> {
+  fn structure(
+    &self,
+    req: StructureRequest,
+    on_progress: &mut dyn FnMut(StreamProgress),
+  ) -> Result<StructureResult, AiError> {
     let model = match &self.model {
       Some(model) => model.clone(),
       None => Self::first_local_model()?
@@ -220,6 +224,7 @@ impl AiProvider for OllamaProvider {
       .timeout(Duration::from_secs(120))
       .build()
       .map_err(|e| AiError::Network(e.to_string()))?;
+    on_progress(StreamProgress::LoadingModel);
     let resp = client
       .post(format!("{}/api/chat", self.base_url))
       .header("content-type", "application/json")
