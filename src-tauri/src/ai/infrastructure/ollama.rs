@@ -176,6 +176,11 @@ fn build_body(model: &str, req: &StructureRequest, think: bool) -> Value {
   });
   if think {
     body["think"] = json!(true);
+    // 思考(thinking)は content と同じ context window を消費する。既定 4096 だと
+    // 思考でほぼ使い切られ、structured content が途中で切れて JSON が壊れる
+    // （done_reason=stop でも context-shift で本文が欠ける）。思考モデルだけ
+    // num_ctx を広げ、content 生成分の予算を確保する。
+    body["options"]["num_ctx"] = json!(16384);
   }
   body
 }
@@ -415,6 +420,15 @@ mod tests {
   fn build_body_includes_think_when_enabled() {
     assert_eq!(build_body("m", &req(), true)["think"], true);
     assert_eq!(build_body("m", &req(), false).get("think"), None);
+  }
+
+  #[test]
+  fn build_body_widens_context_only_for_thinking() {
+    // 思考(thinking)は content と同じ context window を消費する。既定 4096 だと
+    // 思考で使い切られ structured content が途中で切れて JSON が壊れるため、
+    // 思考モデルのみ num_ctx を広げる。非思考は既定のまま（指定しない）。
+    assert_eq!(build_body("m", &req(), true)["options"]["num_ctx"], 16384);
+    assert_eq!(build_body("m", &req(), false)["options"].get("num_ctx"), None);
   }
 
   #[test]
