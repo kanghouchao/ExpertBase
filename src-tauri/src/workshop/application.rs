@@ -5,7 +5,9 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
-use crate::ai::{AiError, AiProvider, ChatTurn, EntrySummary, StructureRequest, StructureResult};
+use crate::ai::{
+  AiError, AiProvider, ChatTurn, EntrySummary, StreamProgress, StructureRequest, StructureResult,
+};
 use crate::kb::entry::{Entry, EntryMeta};
 use crate::kb::{index, store};
 use crate::workshop::domain::candidate_terms;
@@ -37,13 +39,13 @@ pub fn draft<P: AiProvider>(
   conn: &Connection,
   source_text: &str,
   messages: Vec<ChatTurn>,
+  on_progress: &mut dyn FnMut(StreamProgress),
 ) -> Result<StructureResult, AiError> {
   let related = related_entries(conn, source_text, 5).map_err(AiError::Other)?;
-  provider.structure(StructureRequest {
-    source_text: source_text.to_string(),
-    related,
-    messages,
-  })
+  provider.structure(
+    StructureRequest { source_text: source_text.to_string(), related, messages },
+    on_progress,
+  )
 }
 
 /// 承認された内容を `entries/` に確定し、インデックス更新 + source の受信箱を全て processed にする。
@@ -132,11 +134,20 @@ mod tests {
     index::ensure_schema(&conn).unwrap();
     seed_entry(&conn, "entries/green.md", "緑茶の淹れ方", "湯温は70度。淹れ方の基本。");
     let messages = vec![ChatTurn { role: "user".into(), content: "整理して".into() }];
-    let result = draft(&FakeProvider, &conn, "新しい 淹れ方 の本文", messages).unwrap();
+    let result = draft(&FakeProvider, &conn, "新しい 淹れ方 の本文", messages, &mut |_| {}).unwrap();
     assert_eq!(result.kind, "entry");
     assert_eq!(result.title, "新しい 淹れ方 の本文");
     // FakeProvider は関連条目のタイトルをリンク候補にする。
     assert_eq!(result.suggested_links, vec!["緑茶の淹れ方".to_string()]);
+  }
+
+  #[test]
+  fn draft_forwards_streaming_progress() {
+    let conn = Connection::open_in_memory().unwrap();
+    index::ensure_schema(&conn).unwrap();
+    let mut events = Vec::new();
+    draft(&FakeProvider, &conn, "本文", vec![], &mut |p| events.push(p)).unwrap();
+    assert!(events.contains(&StreamProgress::LoadingModel));
   }
 
   #[test]
