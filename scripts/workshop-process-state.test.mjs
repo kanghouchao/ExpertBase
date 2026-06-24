@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import {
   buildManualDraft,
   canRemoveSource,
+  isGeneratingPhase,
+  phaseLabelKey,
   replaceLatestEntryResult,
   sameSourceIds,
   toChatTurn,
@@ -57,4 +59,20 @@ test("source removal is allowed only before the first turn", () => {
   assert.equal(canRemoveSource(0, 2), true);
   assert.equal(canRemoveSource(1, 2), false);
   assert.equal(canRemoveSource(0, 1), false);
+});
+
+test("isGeneratingPhase is true only while a turn is in flight", () => {
+  assert.equal(isGeneratingPhase("idle"), false);
+  assert.equal(isGeneratingPhase("connecting"), true);
+  assert.equal(isGeneratingPhase("loadingModel"), true);
+  assert.equal(isGeneratingPhase("generating"), true);
+  assert.equal(isGeneratingPhase("done"), false);
+});
+
+test("phaseLabelKey maps loadingModel to its own i18n key", () => {
+  assert.equal(phaseLabelKey("loadingModel"), "workshop.phase.loadingModel");
+  assert.equal(phaseLabelKey("connecting"), "workshop.phase.connecting");
+  assert.equal(phaseLabelKey("generating"), "workshop.phase.generating");
+  assert.equal(phaseLabelKey("idle"), "workshop.st.idle");
+  assert.equal(phaseLabelKey("done"), "workshop.st.done");
 });
