@@ -5,6 +5,7 @@ import {
   buildManualDraft,
   canRemoveSource,
   isGeneratingPhase,
+  lineDiff,
   phaseLabelKey,
   replaceLatestEntryResult,
   sameSourceIds,
@@ -64,15 +65,28 @@ test("source removal is allowed only before the first turn", () => {
 test("isGeneratingPhase is true only while a turn is in flight", () => {
   assert.equal(isGeneratingPhase("idle"), false);
   assert.equal(isGeneratingPhase("connecting"), true);
+  assert.equal(isGeneratingPhase("retrieving"), true);
   assert.equal(isGeneratingPhase("loadingModel"), true);
   assert.equal(isGeneratingPhase("generating"), true);
   assert.equal(isGeneratingPhase("done"), false);
 });
 
-test("phaseLabelKey maps loadingModel to its own i18n key", () => {
+test("phaseLabelKey maps each phase to its own i18n key", () => {
+  assert.equal(phaseLabelKey("retrieving"), "workshop.phase.retrieving");
   assert.equal(phaseLabelKey("loadingModel"), "workshop.phase.loadingModel");
   assert.equal(phaseLabelKey("connecting"), "workshop.phase.connecting");
   assert.equal(phaseLabelKey("generating"), "workshop.phase.generating");
   assert.equal(phaseLabelKey("idle"), "workshop.st.idle");
   assert.equal(phaseLabelKey("done"), "workshop.st.done");
+});
+
+test("lineDiff counts added and removed non-empty lines, source vs draft", () => {
+  // 同一行は変更なし、draft だけの行は +、source だけの行は −。
+  const source = "A\nB\nC";
+  const draft = "A\nB\nD\nE";
+  assert.deepEqual(lineDiff(source, draft), { added: 2, removed: 1 });
+  // 空白行・前後空白は無視する。
+  assert.deepEqual(lineDiff("  X  \n\n", "X\nY"), { added: 1, removed: 0 });
+  // 同一なら 0/0。
+  assert.deepEqual(lineDiff("A\nB", "A\nB"), { added: 0, removed: 0 });
 });

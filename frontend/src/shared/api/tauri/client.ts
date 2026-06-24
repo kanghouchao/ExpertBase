@@ -78,6 +78,7 @@ export type ChatTurn = {
 
 /** 草稿生成のフェーズイベント（Rust DraftEvent と一致）。 */
 export type DraftPhase =
+  | { phase: "retrieving" }
   | { phase: "loadingModel" }
   | { phase: "generating"; chars: number };
 

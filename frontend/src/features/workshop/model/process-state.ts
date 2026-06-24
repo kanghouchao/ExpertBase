@@ -58,10 +58,21 @@ function stripFrontmatter(markdown: string): string {
 }
 
 // AI 草稿生成のフェーズ（確定的状態機。UI の反馈はここから駆動する）。
-export type DraftUiPhase = "idle" | "connecting" | "loadingModel" | "generating" | "done";
+export type DraftUiPhase =
+  | "idle"
+  | "connecting"
+  | "retrieving"
+  | "loadingModel"
+  | "generating"
+  | "done";
 
 export function isGeneratingPhase(phase: DraftUiPhase): boolean {
-  return phase === "connecting" || phase === "loadingModel" || phase === "generating";
+  return (
+    phase === "connecting" ||
+    phase === "retrieving" ||
+    phase === "loadingModel" ||
+    phase === "generating"
+  );
 }
 
 /** フェーズ → i18n キー（spinner ラベル / inspector status）。 */
@@ -69,6 +80,8 @@ export function phaseLabelKey(phase: DraftUiPhase): string {
   switch (phase) {
     case "connecting":
       return "workshop.phase.connecting";
+    case "retrieving":
+      return "workshop.phase.retrieving";
     case "loadingModel":
       return "workshop.phase.loadingModel";
     case "generating":
@@ -78,4 +91,23 @@ export function phaseLabelKey(phase: DraftUiPhase): string {
     default:
       return "workshop.st.idle";
   }
+}
+
+/**
+ * source と draft の行差分（確定的・実測値。品質スコアのような偽装はしない）。
+ * 空白行と前後空白を無視し、draft だけにある行を added、source だけにある行を removed とする。
+ */
+export function lineDiff(source: string, draft: string): { added: number; removed: number } {
+  const lines = (text: string) =>
+    text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  const src = new Set(lines(source));
+  const dst = new Set(lines(draft));
+  let added = 0;
+  for (const line of dst) if (!src.has(line)) added += 1;
+  let removed = 0;
+  for (const line of src) if (!dst.has(line)) removed += 1;
+  return { added, removed };
 }
