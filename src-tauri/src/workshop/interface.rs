@@ -12,6 +12,8 @@ use crate::workshop::application;
 #[derive(Clone, Serialize)]
 #[serde(tag = "phase", rename_all = "camelCase")]
 pub enum DraftEvent {
+  /// 関連既存条目を FTS で検索中。
+  Retrieving,
   /// リクエスト送信済み・最初のトークン待ち（モデルのロード中を含む）。
   LoadingModel,
   /// トークン受信中。chars は累積文字数。
@@ -21,6 +23,7 @@ pub enum DraftEvent {
 impl From<StreamProgress> for DraftEvent {
   fn from(p: StreamProgress) -> Self {
     match p {
+      StreamProgress::Retrieving => DraftEvent::Retrieving,
       StreamProgress::LoadingModel => DraftEvent::LoadingModel,
       StreamProgress::Generating { chars } => DraftEvent::Generating { chars },
     }
@@ -95,5 +98,7 @@ mod tests {
     assert_eq!(gen["chars"], 7);
     let load = serde_json::to_value(DraftEvent::from(StreamProgress::LoadingModel)).unwrap();
     assert_eq!(load["phase"], "loadingModel");
+    let retr = serde_json::to_value(DraftEvent::from(StreamProgress::Retrieving)).unwrap();
+    assert_eq!(retr["phase"], "retrieving");
   }
 }

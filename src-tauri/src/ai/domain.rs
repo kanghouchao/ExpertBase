@@ -47,6 +47,8 @@ pub struct StructureResult {
 /// ストリーミング進捗。Tauri 非依存のドメイン値（interface 層が Channel へ橋渡しする）。
 #[derive(Clone, Debug, PartialEq)]
 pub enum StreamProgress {
+  /// 関連既存条目を FTS で検索中（モデル呼び出し前の確定的な段）。
+  Retrieving,
   /// リクエスト送信済み・最初のトークン待ち（モデルのロード中を含む）。
   LoadingModel,
   /// トークン受信中。chars は累積文字数。
