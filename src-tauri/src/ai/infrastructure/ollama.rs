@@ -54,6 +54,7 @@ pub struct OllamaModel {
 pub struct OllamaProvider {
   model: Option<String>,
   base_url: String,
+  think: bool,
 }
 
 impl OllamaProvider {
@@ -62,7 +63,7 @@ impl OllamaProvider {
       .ok()
       .filter(|s| !s.trim().is_empty())
       .map(|s| s.trim().to_string());
-    Self { model, base_url: API_BASE.to_string() }
+    Self { model, base_url: API_BASE.to_string(), think: false }
   }
 
   pub fn with_model(model: String) -> Self {
@@ -70,8 +71,15 @@ impl OllamaProvider {
     if selected.is_empty() {
       Self::new()
     } else {
-      Self { model: Some(selected.to_string()), base_url: API_BASE.to_string() }
+      Self { model: Some(selected.to_string()), base_url: API_BASE.to_string(), think: false }
     }
+  }
+
+  /// モデル指定 + thinking 有効化。capabilities に thinking がある場合のみ true を渡す。
+  pub fn with_model_think(model: String, think: bool) -> Self {
+    let mut provider = Self::with_model(model);
+    provider.think = think;
+    provider
   }
 
   pub fn available() -> bool {
@@ -156,8 +164,8 @@ fn chat_messages(req: &StructureRequest) -> Value {
   Value::Array(messages)
 }
 
-fn build_body(model: &str, req: &StructureRequest) -> Value {
-  json!({
+fn build_body(model: &str, req: &StructureRequest, think: bool) -> Value {
+  let mut body = json!({
     "model": model,
     "messages": chat_messages(req),
     "stream": true,
@@ -165,7 +173,11 @@ fn build_body(model: &str, req: &StructureRequest) -> Value {
     "options": {
       "temperature": 0.2
     }
-  })
+  });
+  if think {
+    body["think"] = json!(true);
+  }
+  body
 }
 
 #[derive(Deserialize)]
@@ -203,7 +215,10 @@ fn show_supports_thinking(body: &str) -> bool {
 
 #[derive(Deserialize)]
 struct ChatMessage {
+  #[serde(default)]
   content: String,
+  #[serde(default)]
+  thinking: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -230,7 +245,7 @@ fn consume_chat_stream(
   lines: impl Iterator<Item = std::io::Result<String>>,
   on_progress: &mut dyn FnMut(StreamProgress),
 ) -> Result<StructureResult, AiError> {
-  let mut acc = String::new();
+  let mut content = String::new();
   for line in lines {
     let line = line.map_err(|e| {
       // 本文読み取り中のタイムアウトはモデルのロード/生成が長いケース。提案つきで返す。
@@ -243,14 +258,22 @@ fn consume_chat_stream(
     }
     let chunk: StreamChunk =
       serde_json::from_str(&line).map_err(|e| AiError::Other(e.to_string()))?;
-    acc.push_str(&chunk.message.content);
-    on_progress(StreamProgress::Generating { chars: acc.chars().count() });
+    // 思考モデルは thinking が content より先に流れる。増分をそのまま上報する。
+    if let Some(thinking) = chunk.message.thinking {
+      if !thinking.is_empty() {
+        on_progress(StreamProgress::Thinking { delta: thinking });
+      }
+    }
+    if !chunk.message.content.is_empty() {
+      content.push_str(&chunk.message.content);
+      on_progress(StreamProgress::Generating { chars: content.chars().count() });
+    }
     if chunk.done {
       break;
     }
   }
   let raw: RawResult =
-    serde_json::from_str(&acc).map_err(|e| AiError::Other(e.to_string()))?;
+    serde_json::from_str(&content).map_err(|e| AiError::Other(e.to_string()))?;
   Ok(StructureResult {
     kind: raw.kind,
     title: raw.title,
@@ -271,7 +294,7 @@ impl AiProvider for OllamaProvider {
       None => Self::first_local_model()?
         .ok_or_else(|| AiError::Other("Ollama 没有可用模型，请先下载模型".into()))?,
     };
-    let body = build_body(&model, &req);
+    let body = build_body(&model, &req, self.think);
     // 接続は短く（未起動を即検知）、全体は長く（モデルのロード + 生成を許容）。
     let client = reqwest::blocking::Client::builder()
       .connect_timeout(Duration::from_secs(3))
@@ -327,7 +350,7 @@ mod tests {
 
   #[test]
   fn build_body_uses_ollama_chat_contract() {
-    let body = build_body("llama3.2", &req());
+    let body = build_body("llama3.2", &req(), false);
     assert_eq!(body["model"], "llama3.2");
     assert_eq!(body["stream"], true);
     assert_eq!(body["format"]["type"], "object");
@@ -343,7 +366,7 @@ mod tests {
   fn system_prompt_handles_chat_kind_and_relevant_links() {
     // kind（entry/chat）の判別・例示・関連性ルール・禁止事項を含む
     let system =
-      build_body("llama3.2", &req())["messages"][0]["content"].as_str().unwrap().to_lowercase();
+      build_body("llama3.2", &req(), false)["messages"][0]["content"].as_str().unwrap().to_lowercase();
     assert!(system.contains("kind"));
     assert!(system.contains("chat"));
     assert!(system.contains("entry"));
@@ -373,6 +396,25 @@ mod tests {
     // チャンク毎に Generating（累積文字数）が上報される
     assert!(matches!(events.first(), Some(StreamProgress::Generating { .. })));
     assert_eq!(events.len(), 2);
+  }
+
+  #[test]
+  fn consume_chat_stream_reports_thinking_then_content() {
+    let lines = vec![
+      Ok(r#"{"message":{"thinking":"考え中"},"done":false}"#.to_string()),
+      Ok(r#"{"message":{"content":"{\"kind\":\"chat\",\"title\":\"\",\"cat\":\"\",\"body_markdown\":\"hi\",\"suggested_links\":[]}"},"done":true}"#.to_string()),
+    ];
+    let mut events = Vec::new();
+    let result = consume_chat_stream(lines.into_iter(), &mut |p| events.push(p)).unwrap();
+    assert_eq!(result.body_markdown, "hi");
+    assert_eq!(events.first(), Some(&StreamProgress::Thinking { delta: "考え中".into() }));
+    assert!(events.iter().any(|e| matches!(e, StreamProgress::Generating { .. })));
+  }
+
+  #[test]
+  fn build_body_includes_think_when_enabled() {
+    assert_eq!(build_body("m", &req(), true)["think"], true);
+    assert_eq!(build_body("m", &req(), false).get("think"), None);
   }
 
   #[test]
