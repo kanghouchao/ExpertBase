@@ -76,6 +76,11 @@ export type ChatTurn = {
   content: string;
 };
 
+/** 草稿生成のフェーズイベント（Rust DraftEvent と一致）。 */
+export type DraftPhase =
+  | { phase: "loadingModel" }
+  | { phase: "generating"; chars: number };
+
 export type OllamaModel = {
   name: string;
 };
@@ -198,13 +203,16 @@ export async function listOllamaModels(): Promise<OllamaModel[]> {
   return invoke<OllamaModel[]>("ai_list_ollama_models");
 }
 
-/** 複数の受信箱素材 + 会話履歴から AI 応答（草稿 or 会話返信）を生成する。 */
+/** 複数の受信箱素材 + 会話履歴から AI 応答を生成する。onPhase で進捗フェーズを受け取る。 */
 export async function workshopDraft(
   inboxPaths: string[],
   messages: ChatTurn[],
-  model: string
+  model: string,
+  onPhase?: (phase: DraftPhase) => void
 ): Promise<StructureResult> {
-  return invoke<StructureResult>("workshop_draft", { inboxPaths, messages, model });
+  const channel = new Channel<DraftPhase>();
+  if (onPhase) channel.onmessage = onPhase;
+  return invoke<StructureResult>("workshop_draft", { inboxPaths, messages, model, onEvent: channel });
 }
 
 /** 承認内容を条目として確定する。確定した条目の相対パスを返す。 */
