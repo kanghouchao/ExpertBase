@@ -174,11 +174,14 @@ fn messages_with(prompt: &str, req: &StructureRequest) -> Value {
 }
 
 /// 非思考モデル: 単発で format 固定の構造化出力（従来の確実な経路）。
+/// think を明示的に false にする（思考可能モデルは think 省略時に既定 ON のため、
+/// format と組み合わさると content が壊れる。明示 off で確実に単発 JSON にする）。
 fn build_body(model: &str, req: &StructureRequest) -> Value {
   json!({
     "model": model,
     "messages": messages_with(SYSTEM_PROMPT, req),
     "stream": true,
+    "think": false,
     "format": output_schema(),
     "options": { "temperature": 0.2 }
   })
@@ -205,8 +208,10 @@ fn build_draft_body(model: &str, req: &StructureRequest) -> Value {
   })
 }
 
-/// Pass2(構造化パス): think なし・format あり。Pass1 の散文ドラフトを確実に
-/// StructureResult へ整形する（= 非思考の確実な経路を再利用）。
+/// Pass2(構造化パス): think 明示 off・format あり。Pass1 の散文ドラフトを確実に
+/// StructureResult へ整形する（= 非思考の確実な経路を再利用）。think を省略すると
+/// 思考可能モデルは既定 ON になり、Pass2 まで思考して think+format の壊れた組合せに
+/// 戻る（実機で 9000+ token 思考 + 出力の崩壊を確認）。必ず false を明示する。
 fn build_structure_body(model: &str, draft: &str) -> Value {
   json!({
     "model": model,
@@ -215,6 +220,7 @@ fn build_structure_body(model: &str, draft: &str) -> Value {
       { "role": "user", "content": format!("Convert the following draft into the JSON object as specified:\n\n{draft}") }
     ],
     "stream": true,
+    "think": false,
     "format": output_schema(),
     "options": { "temperature": 0.2 }
   })
@@ -504,11 +510,12 @@ mod tests {
   }
 
   #[test]
-  fn structure_body_uses_format_without_think() {
-    // Pass2: format あり・think なし。Pass1 のドラフトを user として渡す。
+  fn structure_body_disables_think_explicitly() {
+    // Pass2: format あり・think は明示 false。省略だと思考可能モデルが既定 ON になり
+    // think+format の壊れた組合せに戻る（実機で確認）。
     let body = build_structure_body("m", "杀青の本文");
     assert_eq!(body["format"]["type"], "object");
-    assert_eq!(body.get("think"), None);
+    assert_eq!(body["think"], false);
     assert!(body["messages"][1]["content"].as_str().unwrap().contains("杀青の本文"));
   }
 
