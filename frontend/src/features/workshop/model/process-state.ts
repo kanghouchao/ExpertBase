@@ -2,7 +2,7 @@ import type { ChatTurn, StructureResult } from "@/shared/api/tauri/client";
 
 export type ProcessMessage<Source = unknown> =
   | { role: "user"; text: string; sources?: Source[] }
-  | { role: "ai"; result: StructureResult };
+  | { role: "ai"; result: StructureResult; thinking?: string };
 
 type DraftSource = {
   id: string;
@@ -24,7 +24,9 @@ export function replaceLatestEntryResult<Source>(
     (message) => message.role === "ai" && message.result.kind === "entry"
   );
   if (index === -1) return messages;
-  return messages.map((message, current) => (current === index ? { role: "ai", result } : message));
+  return messages.map((message, current) =>
+    current === index && message.role === "ai" ? { ...message, result } : message
+  );
 }
 
 export function buildManualDraft(
@@ -62,6 +64,7 @@ export type DraftUiPhase =
   | "idle"
   | "connecting"
   | "retrieving"
+  | "thinking"
   | "loadingModel"
   | "generating"
   | "done";
@@ -70,6 +73,7 @@ export function isGeneratingPhase(phase: DraftUiPhase): boolean {
   return (
     phase === "connecting" ||
     phase === "retrieving" ||
+    phase === "thinking" ||
     phase === "loadingModel" ||
     phase === "generating"
   );
@@ -82,6 +86,8 @@ export function phaseLabelKey(phase: DraftUiPhase): string {
       return "workshop.phase.connecting";
     case "retrieving":
       return "workshop.phase.retrieving";
+    case "thinking":
+      return "workshop.phase.thinking";
     case "loadingModel":
       return "workshop.phase.loadingModel";
     case "generating":

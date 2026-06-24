@@ -71,6 +71,11 @@ test("isGeneratingPhase is true only while a turn is in flight", () => {
   assert.equal(isGeneratingPhase("done"), false);
 });
 
+test("thinking phase is generating and has its own label", () => {
+  assert.equal(isGeneratingPhase("thinking"), true);
+  assert.equal(phaseLabelKey("thinking"), "workshop.phase.thinking");
+});
+
 test("phaseLabelKey maps each phase to its own i18n key", () => {
   assert.equal(phaseLabelKey("retrieving"), "workshop.phase.retrieving");
   assert.equal(phaseLabelKey("loadingModel"), "workshop.phase.loadingModel");
