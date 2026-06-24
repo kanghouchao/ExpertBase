@@ -14,6 +14,8 @@ use crate::workshop::application;
 pub enum DraftEvent {
   /// 関連既存条目を FTS で検索中。
   Retrieving,
+  /// 推論トレース（thinking）の増分。
+  Thinking { delta: String },
   /// リクエスト送信済み・最初のトークン待ち（モデルのロード中を含む）。
   LoadingModel,
   /// トークン受信中。chars は累積文字数。
@@ -24,6 +26,7 @@ impl From<StreamProgress> for DraftEvent {
   fn from(p: StreamProgress) -> Self {
     match p {
       StreamProgress::Retrieving => DraftEvent::Retrieving,
+      StreamProgress::Thinking { delta } => DraftEvent::Thinking { delta },
       StreamProgress::LoadingModel => DraftEvent::LoadingModel,
       StreamProgress::Generating { chars } => DraftEvent::Generating { chars },
     }
@@ -40,6 +43,7 @@ pub async fn workshop_draft(
   inbox_paths: Vec<String>,
   messages: Vec<ChatTurn>,
   model: String,
+  think: bool,
   on_event: Channel<DraftEvent>,
 ) -> Result<StructureResult, String> {
   let home = app.path().home_dir().map_err(|e| e.to_string())?;
@@ -52,7 +56,7 @@ pub async fn workshop_draft(
       bodies.push(material::parse_material(&raw)?.body);
     }
     let source_text = bodies.join("\n\n---\n\n");
-    let provider = crate::ai::ollama::OllamaProvider::with_model(model);
+    let provider = crate::ai::ollama::OllamaProvider::with_model_think(model, think);
     let mut on_progress = |p: StreamProgress| {
       let _ = on_event.send(DraftEvent::from(p));
     };
@@ -100,5 +104,9 @@ mod tests {
     assert_eq!(load["phase"], "loadingModel");
     let retr = serde_json::to_value(DraftEvent::from(StreamProgress::Retrieving)).unwrap();
     assert_eq!(retr["phase"], "retrieving");
+    let think =
+      serde_json::to_value(DraftEvent::from(StreamProgress::Thinking { delta: "x".into() })).unwrap();
+    assert_eq!(think["phase"], "thinking");
+    assert_eq!(think["delta"], "x");
   }
 }

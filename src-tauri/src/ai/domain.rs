@@ -49,9 +49,11 @@ pub struct StructureResult {
 pub enum StreamProgress {
   /// 関連既存条目を FTS で検索中（モデル呼び出し前の確定的な段）。
   Retrieving,
+  /// 推論トレース（thinking）の増分。思考モデルのみ。
+  Thinking { delta: String },
   /// リクエスト送信済み・最初のトークン待ち（モデルのロード中を含む）。
   LoadingModel,
-  /// トークン受信中。chars は累積文字数。
+  /// 本文（content）受信中。chars は累積文字数。
   Generating { chars: usize },
 }
 
