@@ -82,7 +82,10 @@ const PREVIEW_POOL: RawMaterial[] = [
   },
 ];
 
-const PREVIEW_MODELS: OllamaModel[] = [{ name: "qwen3:8b" }, { name: "llama3.1:8b" }];
+const PREVIEW_MODELS: OllamaModel[] = [
+  { name: "qwen3:8b", thinking: true },
+  { name: "llama3.1:8b", thinking: false },
+];
 
 // プレビュー（Tauri 外）の加工パネルに見せる素材。入力素材から組み立てるだけで、
 // AI 生成結果（関連リンク等）は空のまま——出力は偽装しない。
@@ -172,6 +175,8 @@ export function WorkshopProcessView() {
   const visibleHasOllama = available ? hasOllama : true;
   const visibleModels = available ? models : PREVIEW_MODELS;
   const visibleSelectedModel = available ? selectedModel : selectedModel || PREVIEW_MODELS[0].name;
+  const selectedThinking =
+    visibleModels.find((model) => model.name === visibleSelectedModel)?.thinking ?? false;
   // 追加可能な素材プール = 未処理の inbox − すでに選択済みのもの。
   const pool = inbox
     .filter((candidate) => candidate.status !== "processed")
@@ -223,6 +228,7 @@ export function WorkshopProcessView() {
         sources.map((s) => s.id),
         history.map(toChatTurn),
         visibleSelectedModel,
+        selectedThinking,
         (p: DraftPhase) => {
           if (p.phase === "generating") {
             setPhase("generating");

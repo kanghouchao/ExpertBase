@@ -79,11 +79,13 @@ export type ChatTurn = {
 /** 草稿生成のフェーズイベント（Rust DraftEvent と一致）。 */
 export type DraftPhase =
   | { phase: "retrieving" }
+  | { phase: "thinking"; delta: string }
   | { phase: "loadingModel" }
   | { phase: "generating"; chars: number };
 
 export type OllamaModel = {
   name: string;
+  thinking: boolean;
 };
 
 /** インデックスをファイルから再構築する。 */
@@ -209,11 +211,18 @@ export async function workshopDraft(
   inboxPaths: string[],
   messages: ChatTurn[],
   model: string,
+  think: boolean,
   onPhase?: (phase: DraftPhase) => void
 ): Promise<StructureResult> {
   const channel = new Channel<DraftPhase>();
   if (onPhase) channel.onmessage = onPhase;
-  return invoke<StructureResult>("workshop_draft", { inboxPaths, messages, model, onEvent: channel });
+  return invoke<StructureResult>("workshop_draft", {
+    inboxPaths,
+    messages,
+    model,
+    think,
+    onEvent: channel,
+  });
 }
 
 /** 承認内容を条目として確定する。確定した条目の相対パスを返す。 */
