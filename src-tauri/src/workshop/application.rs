@@ -41,6 +41,7 @@ pub fn draft<P: AiProvider>(
   messages: Vec<ChatTurn>,
   on_progress: &mut dyn FnMut(StreamProgress),
 ) -> Result<StructureResult, AiError> {
+  on_progress(StreamProgress::Retrieving);
   let related = related_entries(conn, source_text, 5).map_err(AiError::Other)?;
   provider.structure(
     StructureRequest { source_text: source_text.to_string(), related, messages },
@@ -147,6 +148,8 @@ mod tests {
     index::ensure_schema(&conn).unwrap();
     let mut events = Vec::new();
     draft(&FakeProvider, &conn, "本文", vec![], &mut |p| events.push(p)).unwrap();
+    // 検索 → モデルロード の順。確定的な検索段が先に上報される。
+    assert_eq!(events.first(), Some(&StreamProgress::Retrieving));
     assert!(events.contains(&StreamProgress::LoadingModel));
   }
 
