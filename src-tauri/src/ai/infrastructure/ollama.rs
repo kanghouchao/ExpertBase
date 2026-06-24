@@ -146,7 +146,7 @@ fn build_body(model: &str, req: &StructureRequest) -> Value {
   json!({
     "model": model,
     "messages": chat_messages(req),
-    "stream": false,
+    "stream": true,
     "format": output_schema(),
     "options": {
       "temperature": 0.2
@@ -175,13 +175,15 @@ fn parse_models_response(body: &str) -> Result<Vec<OllamaModel>, AiError> {
 }
 
 #[derive(Deserialize)]
-struct ChatResponse {
-  message: ChatMessage,
+struct ChatMessage {
+  content: String,
 }
 
 #[derive(Deserialize)]
-struct ChatMessage {
-  content: String,
+struct StreamChunk {
+  message: ChatMessage,
+  #[serde(default)]
+  done: bool,
 }
 
 #[derive(Deserialize)]
@@ -194,11 +196,34 @@ struct RawResult {
   suggested_links: Vec<String>,
 }
 
-fn parse_response(body: &str) -> Result<StructureResult, AiError> {
-  let chat: ChatResponse =
-    serde_json::from_str(body).map_err(|e| AiError::Other(e.to_string()))?;
+/// NDJSON ストリーム（Ollama /api/chat stream=true）を消費し、本文を連結して構造化結果へ。
+/// チャンク毎に累積文字数を Generating として上報する。format スキーマ固定なので、
+/// 連結後の本文は 1 つの JSON オブジェクトになる。
+fn consume_chat_stream(
+  lines: impl Iterator<Item = std::io::Result<String>>,
+  on_progress: &mut dyn FnMut(StreamProgress),
+) -> Result<StructureResult, AiError> {
+  let mut acc = String::new();
+  for line in lines {
+    let line = line.map_err(|e| {
+      // 本文読み取り中のタイムアウトはモデルのロード/生成が長いケース。提案つきで返す。
+      AiError::Network(format!(
+        "读取 Ollama 响应失败（模型加载或生成可能超时，可先在终端 `ollama run` 预热）: {e}"
+      ))
+    })?;
+    if line.trim().is_empty() {
+      continue;
+    }
+    let chunk: StreamChunk =
+      serde_json::from_str(&line).map_err(|e| AiError::Other(e.to_string()))?;
+    acc.push_str(&chunk.message.content);
+    on_progress(StreamProgress::Generating { chars: acc.chars().count() });
+    if chunk.done {
+      break;
+    }
+  }
   let raw: RawResult =
-    serde_json::from_str(&chat.message.content).map_err(|e| AiError::Other(e.to_string()))?;
+    serde_json::from_str(&acc).map_err(|e| AiError::Other(e.to_string()))?;
   Ok(StructureResult {
     kind: raw.kind,
     title: raw.title,
@@ -220,25 +245,43 @@ impl AiProvider for OllamaProvider {
         .ok_or_else(|| AiError::Other("Ollama 没有可用模型，请先下载模型".into()))?,
     };
     let body = build_body(&model, &req);
+    // 接続は短く（未起動を即検知）、全体は長く（モデルのロード + 生成を許容）。
     let client = reqwest::blocking::Client::builder()
-      .timeout(Duration::from_secs(120))
+      .connect_timeout(Duration::from_secs(3))
+      .timeout(Duration::from_secs(180))
       .build()
       .map_err(|e| AiError::Network(e.to_string()))?;
+
     on_progress(StreamProgress::LoadingModel);
     let resp = client
       .post(format!("{}/api/chat", self.base_url))
       .header("content-type", "application/json")
       .json(&body)
       .send()
-      .map_err(|e| AiError::Network(e.to_string()))?;
+      .map_err(|e| {
+        if e.is_timeout() {
+          AiError::Network(format!(
+            "等待 Ollama 响应超时（模型可能正在加载，请先在终端执行 `ollama run {model}` 预热，或选择更小的模型）"
+          ))
+        } else {
+          AiError::Network(format!("无法连接 Ollama（请确认 `ollama serve` 正在运行）: {e}"))
+        }
+      })?;
 
     let status = resp.status();
-    let text = resp.text().map_err(|e| AiError::Network(e.to_string()))?;
-    match status.as_u16() {
-      200 => parse_response(&text),
-      404 => Err(AiError::Other(format!("Ollama 模型未找到: {model}"))),
-      _ => Err(AiError::Other(format!("Ollama API 错误({status}): {text}"))),
+    if status.as_u16() == 404 {
+      return Err(AiError::Other(format!(
+        "Ollama 模型未找到: {model}（请先执行 `ollama pull {model}`）"
+      )));
     }
+    if !status.is_success() {
+      let text = resp.text().unwrap_or_default();
+      return Err(AiError::Other(format!("Ollama API 错误({status}): {text}")));
+    }
+
+    use std::io::BufRead;
+    let reader = std::io::BufReader::new(resp);
+    consume_chat_stream(reader.lines(), on_progress)
   }
 }
 
@@ -259,7 +302,7 @@ mod tests {
   fn build_body_uses_ollama_chat_contract() {
     let body = build_body("llama3.2", &req());
     assert_eq!(body["model"], "llama3.2");
-    assert_eq!(body["stream"], false);
+    assert_eq!(body["stream"], true);
     assert_eq!(body["format"]["type"], "object");
     let messages = body["messages"].as_array().unwrap();
     // 先頭は system（指示 + 固定文脈）、続けて会話履歴。
@@ -289,21 +332,27 @@ mod tests {
   }
 
   #[test]
-  fn parse_response_extracts_entry_result() {
-    let sample = r#"{"message":{"content":"{\"kind\":\"entry\",\"title\":\"緑茶\",\"cat\":\"tea\",\"body_markdown\":\"本文\",\"suggested_links\":[\"煎茶\"]}"}}"#;
-    let result = parse_response(sample).unwrap();
+  fn consume_chat_stream_accumulates_content_and_reports_progress() {
+    // Ollama /api/chat stream=true は NDJSON。各行の message.content を連結すると JSON 本体になる。
+    let lines = vec![
+      Ok(r#"{"message":{"content":"{\"kind\":\"entry\",\"title\":\"緑"},"done":false}"#.to_string()),
+      Ok(r#"{"message":{"content":"茶\",\"cat\":\"tea\",\"body_markdown\":\"本文\",\"suggested_links\":[]}"},"done":true}"#.to_string()),
+    ];
+    let mut events = Vec::new();
+    let result = consume_chat_stream(lines.into_iter(), &mut |p| events.push(p)).unwrap();
     assert_eq!(result.kind, "entry");
     assert_eq!(result.title, "緑茶");
-    assert_eq!(result.suggested_links, vec!["煎茶".to_string()]);
+    assert_eq!(result.cat, "tea");
+    // チャンク毎に Generating（累積文字数）が上報される
+    assert!(matches!(events.first(), Some(StreamProgress::Generating { .. })));
+    assert_eq!(events.len(), 2);
   }
 
   #[test]
-  fn parse_response_extracts_chat_reply() {
-    let sample = r#"{"message":{"content":"{\"kind\":\"chat\",\"title\":\"\",\"cat\":\"\",\"body_markdown\":\"こんにちは\",\"suggested_links\":[]}"}}"#;
-    let result = parse_response(sample).unwrap();
-    assert_eq!(result.kind, "chat");
-    assert_eq!(result.body_markdown, "こんにちは");
-    assert!(result.suggested_links.is_empty());
+  fn consume_chat_stream_propagates_read_error_with_hint() {
+    let lines = vec![Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out"))];
+    let err = consume_chat_stream(lines.into_iter(), &mut |_| {}).unwrap_err();
+    assert!(matches!(err, AiError::Network(_)));
   }
 
   #[test]
