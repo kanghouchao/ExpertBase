@@ -8,12 +8,14 @@ import { EmptyState } from "@/shared/ui/empty-state";
 import { Icon } from "@/shared/ui/icon";
 import { Tag } from "@/shared/ui/tag";
 import { Button, buttonVariants } from "@/shared/ui/button";
+import { Drawer, DrawerContent } from "@/shared/ui/drawer";
 import { useI18n } from "@/shared/providers/providers";
 import {
   aiHasKey,
   listOllamaModels,
   listInbox,
   readInboxMaterial,
+  workshopCancel,
   workshopConfirm,
   workshopDraft,
   type DraftPhase,
@@ -28,7 +30,7 @@ import {
   canRemoveSource,
   isGeneratingPhase,
   lineDiff,
-  phaseLabelKey,
+  runningLabelKey,
   replaceLatestEntryResult,
   sameSourceIds,
   toChatTurn,
@@ -119,12 +121,18 @@ export function WorkshopProcessView() {
   const [draft, setDraft] = useState<StructureResult | null>(null);
   const [draftSourceIds, setDraftSourceIds] = useState<string[]>([]);
   const [phase, setPhase] = useState<DraftUiPhase>("idle");
-  const [genChars, setGenChars] = useState(0);
   const [thinkingBuf, setThinkingBuf] = useState("");
+  // 生成中に流れる「AI が今書いている本文」（思考モデルの Pass1 散文）。過程を可視化する。
+  const [narrationBuf, setNarrationBuf] = useState("");
+  const [draftOpen, setDraftOpen] = useState(false);
+  // ドロワーで読み取り専用表示する過去ターンのスナップショット（null＝最新草稿を編集モードで開く）。
+  const [snapshot, setSnapshot] = useState<StructureResult | null>(null);
   const generating = isGeneratingPhase(phase);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const threadEnd = useRef<HTMLDivElement>(null);
+  // 停止ボタン押下フラグ。中断は失敗扱いせず（赤エラーを出さず）idle へ戻すために使う。
+  const cancelRef = useRef(false);
 
   useEffect(() => {
     if (!inboxPath || !available) return;
@@ -222,11 +230,13 @@ export function WorkshopProcessView() {
     setInstruction("");
     setShowPicker(false);
     setPhase("connecting");
-    setGenChars(0);
     setThinkingBuf("");
+    setNarrationBuf("");
     setError(null);
+    cancelRef.current = false;
     try {
       let thinking = "";
+      let narration = "";
       const result = await workshopDraft(
         sources.map((s) => s.id),
         history.map(toChatTurn),
@@ -235,7 +245,12 @@ export function WorkshopProcessView() {
         (p: DraftPhase) => {
           if (p.phase === "generating") {
             setPhase("generating");
-            setGenChars(p.chars);
+          } else if (p.phase === "structuring") {
+            setPhase("structuring");
+          } else if (p.phase === "narration") {
+            setPhase("generating");
+            narration += p.delta;
+            setNarrationBuf(narration);
           } else if (p.phase === "retrieving") {
             setPhase("retrieving");
           } else if (p.phase === "thinking") {
@@ -247,20 +262,30 @@ export function WorkshopProcessView() {
           }
         }
       );
-      setMessages([...history, { role: "ai", result, thinking: thinking || undefined }]);
+      setMessages([
+        ...history,
+        { role: "ai", result, thinking: thinking || undefined, narration: narration || undefined },
+      ]);
       if (result.kind === "entry") {
         setDraft(result);
         setDraftSourceIds(sources.map((source) => source.id));
       }
       setPhase("idle");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      // 失敗したターンは履歴から外し、入力を戻して再試行できるようにする。
+      // 停止ボタンによる中断はエラー表示しない（ユーザーが意図した中断）。
+      if (!cancelRef.current) setError(e instanceof Error ? e.message : String(e));
+      // 失敗・中断したターンは履歴から外し、入力を戻して再試行できるようにする。
       const last = history[history.length - 1];
       setMessages(history.slice(0, -1));
       if (last?.role === "user") setInstruction(last.text);
       setPhase("idle");
     }
+  }
+
+  // 進行中の生成を止める。後端のフラグを立て、stream が次チャンク前に打ち切る。
+  function handleStop() {
+    cancelRef.current = true;
+    void workshopCancel();
   }
 
   async function handleSend() {
@@ -304,11 +329,20 @@ export function WorkshopProcessView() {
   }
 
   const notFound = !inboxPath || (visibleSources.length === 0 && !error);
-  // 会話に出た最後の entry 草稿だけを編集可能にする（それより前は読み取り専用スナップ）。
+  // 最新の entry ターンだけが編集可能な草稿（draft）。それより前は読み取り専用スナップ。
   const lastEntryIdx = messages.reduce(
     (acc, m, i) => (m.role === "ai" && m.result.kind === "entry" ? i : acc),
     -1
   );
+  // 草稿ドロワーを開く: 最新ターンは編集モード、過去ターンは m.result の読み取り専用。
+  const openDraftEditable = () => {
+    setSnapshot(null);
+    setDraftOpen(true);
+  };
+  const openDraftSnapshot = (result: StructureResult) => {
+    setSnapshot(result);
+    setDraftOpen(true);
+  };
   // Ollama が無いときは会話せず、素材から起こした草稿を直接編集して確定する手動経路。
   const showManualDraft = !visibleHasOllama && !!draft && messages.length === 0;
   const sourcesChanged = !sameSourceIds(
@@ -400,18 +434,24 @@ export function WorkshopProcessView() {
                 ) : (
                   <ChatRow key={i} ai>
                     {m.thinking && <ThinkingPanel text={m.thinking} streaming={false} />}
-                    {i === lastEntryIdx && draft ? (
-                      <DraftCard
-                        draft={draft}
-                        done
-                        onChange={handleDraftChange}
-                        onRegenerate={handleRegenerate}
-                        canRegenerate={canGenerate}
-                        busy={busy}
+                    {/* 生成過程の散文を折りたたんで残す（既定は閉。草稿は chip→ドロワーで編集）。 */}
+                    {m.narration && (
+                      <ThinkingPanel
+                        text={m.narration}
+                        streaming={false}
+                        label={t("workshop.narration.label")}
+                        mono={false}
                       />
-                    ) : (
-                      <DraftCard draft={m.result} done onChange={() => {}} readOnly />
                     )}
+                    {/* 各 entry ターンは自分の結果を開く。最新は編集、過去は読み取り専用。 */}
+                    <DraftChip
+                      label={t("workshop.draftChip")}
+                      onOpen={
+                        i === lastEntryIdx
+                          ? openDraftEditable
+                          : () => openDraftSnapshot(m.result)
+                      }
+                    />
                   </ChatRow>
                 )
               )}
@@ -422,24 +462,23 @@ export function WorkshopProcessView() {
                   {thinkingBuf && (
                     <ThinkingPanel text={thinkingBuf} streaming={phase === "thinking"} />
                   )}
+                  {/* 「AI が今書いている本文」を流式表示＝過程が見える（数字ではなく実テキスト）。 */}
+                  {narrationBuf && (
+                    <div className="mb-2.5 text-[14px] leading-relaxed whitespace-pre-wrap text-ink-soft">
+                      {narrationBuf}
+                    </div>
+                  )}
                   <div className="flex items-center gap-2.5 text-[13.5px] text-ink-soft">
                     <span className="size-4 animate-spin rounded-full border-2 border-ai-soft border-t-ai" />
-                    {phase === "generating"
-                      ? `${t("workshop.phase.generating")} · ${genChars}`
-                      : t(phaseLabelKey(phase))}
+                    {t(runningLabelKey(phase, selectedThinking))}
                   </div>
                 </ChatRow>
               )}
 
-              {/* 手動経路（Ollama 無し）: 素材から起こした草稿を直接編集して確定 */}
+              {/* 手動経路（Ollama 無し）: 素材から起こした草稿を抽屉で直接編集して確定 */}
               {showManualDraft && draft && (
                 <ChatRow ai>
-                  <DraftCard
-                    draft={draft}
-                    done={false}
-                    onChange={handleDraftChange}
-                    readOnly={false}
-                  />
+                  <DraftChip label={t("workshop.openDraft")} onOpen={openDraftEditable} />
                 </ChatRow>
               )}
 
@@ -567,14 +606,25 @@ export function WorkshopProcessView() {
                   <Icon name="chevD" size={14} className="text-ink-muted" />
                 </div>
                 <div className="flex-1" />
-                <Button
-                  className="h-9 bg-brand px-5 text-white hover:bg-brand/85"
-                  disabled={!canGenerate}
-                  onClick={handleSend}
-                >
-                  <Icon name="send" size={15} />
-                  {generating ? t("workshop.running") : t("workshop.send")}
-                </Button>
+                {generating ? (
+                  <Button
+                    variant="outline"
+                    className="h-9 px-5"
+                    onClick={handleStop}
+                  >
+                    <Icon name="x" size={15} />
+                    {t("workshop.stop")}
+                  </Button>
+                ) : (
+                  <Button
+                    className="h-9 bg-brand px-5 text-white hover:bg-brand/85"
+                    disabled={!canGenerate}
+                    onClick={handleSend}
+                  >
+                    <Icon name="send" size={15} />
+                    {t("workshop.send")}
+                  </Button>
+                )}
               </div>
               {!visibleHasOllama && (
                 <div className="mt-2 px-1 text-[12px] text-ink-faint">{t("workshop.noKey")}</div>
@@ -599,21 +649,61 @@ export function WorkshopProcessView() {
           <Inspector
             model={visibleSelectedModel}
             generating={generating}
-            runningLabel={
-              phase === "generating"
-                ? `${t("workshop.phase.generating")} · ${genChars}`
-                : t(phaseLabelKey(phase))
-            }
+            runningLabel={t(runningLabelKey(phase, selectedThinking))}
             draft={visibleDraft}
             added={changes.added}
             removed={changes.removed}
             canConfirm={canConfirm}
             sourcesChanged={sourcesChanged}
-            busy={busy}
-            onConfirm={handleConfirm}
+            onOpenDraft={openDraftEditable}
           />
         )}
       </div>
+
+      {/* 草稿のレビュー/編集/確定は右側ドロワーで行う（会話流には入口条だけ残す）。
+          snapshot あり＝過去ターンの読み取り専用、なし＝最新草稿の編集＋確定。 */}
+      {visibleDraft && (
+        <Drawer
+          open={draftOpen}
+          onOpenChange={(open) => {
+            setDraftOpen(open);
+            if (!open) setSnapshot(null);
+          }}
+        >
+          <DrawerContent>
+            <div className="flex flex-none items-center gap-2 border-b border-line px-5 py-3.5">
+              <Icon name="doc" size={16} className="text-ai" />
+              <div className="text-[14px] font-bold text-ink">{t("workshop.drawerTitle")}</div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto p-4">
+              {snapshot ? (
+                <DraftCard draft={snapshot} done onChange={() => {}} readOnly />
+              ) : (
+                <DraftCard
+                  draft={visibleDraft}
+                  done
+                  onChange={handleDraftChange}
+                  onRegenerate={handleRegenerate}
+                  canRegenerate={canGenerate}
+                  busy={busy}
+                />
+              )}
+            </div>
+            {!snapshot && (
+              <div className="flex-none border-t border-line p-3.5">
+                <Button
+                  className="w-full justify-center"
+                  disabled={!canConfirm}
+                  onClick={handleConfirm}
+                >
+                  <Icon name="check" size={15} />
+                  {busy ? t("workshop.running") : t("workshop.confirm")}
+                </Button>
+              </div>
+            )}
+          </DrawerContent>
+        </Drawer>
+      )}
     </div>
   );
 }
@@ -664,10 +754,21 @@ function ChatRow({ ai, children }: { ai?: boolean; children: ReactNode }) {
   );
 }
 
-// 思考モデルの推論(thinking)を映す折りたたみパネル。streaming 中は自動展開＋底部追従、
-// 終わったら自動的に「思考過程 · N 字」へ折りたたむ（再展開可）。
-function ThinkingPanel({ text, streaming }: { text: string; streaming: boolean }) {
+// 折りたたみパネル。thinking（推論・mono）にも narration（散文・通常字体）にも使う。
+// streaming 中は自動展開＋底部追従、終わったら自動的に「ラベル · N 字」へ折りたたむ（再展開可）。
+function ThinkingPanel({
+  text,
+  streaming,
+  label,
+  mono = true,
+}: {
+  text: string;
+  streaming: boolean;
+  label?: string;
+  mono?: boolean;
+}) {
   const { t } = useI18n();
+  const resolvedLabel = label ?? t("workshop.think.label");
   const [open, setOpen] = useState(streaming);
   const [wasStreaming, setWasStreaming] = useState(streaming);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -688,7 +789,7 @@ function ThinkingPanel({ text, streaming }: { text: string; streaming: boolean }
         className="flex w-full items-center gap-2 px-3 py-2 text-left"
       >
         <Icon name={open ? "chevD" : "chevR"} size={13} className="flex-none text-ai" />
-        <span className="text-[12px] font-bold text-ai">{t("workshop.think.label")}</span>
+        <span className="text-[12px] font-bold text-ai">{resolvedLabel}</span>
         {streaming ? (
           <span className="size-3 animate-spin rounded-full border-2 border-ai-soft border-t-ai" />
         ) : (
@@ -698,7 +799,9 @@ function ThinkingPanel({ text, streaming }: { text: string; streaming: boolean }
       {open && (
         <div
           ref={bodyRef}
-          className="max-h-48 overflow-auto border-t border-ai-soft px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-ink-soft"
+          className={`max-h-48 overflow-auto border-t border-ai-soft px-3 py-2 leading-relaxed whitespace-pre-wrap text-ink-soft ${
+            mono ? "font-mono text-[12px]" : "text-[13.5px]"
+          }`}
         >
           {text}
         </div>
@@ -781,6 +884,23 @@ function DraftCard({
   );
 }
 
+// 会話流に出る草稿の入口条。クリックで右側ドロワー（レビュー/編集/確定）を開く。
+function DraftChip({ label, onOpen }: { label: string; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="inline-flex items-center gap-2 rounded-xl border border-ai-soft bg-ai-wash/40 px-3.5 py-2.5 text-left transition-colors hover:bg-ai-wash"
+    >
+      <span className="grid size-7 flex-none place-items-center rounded-lg bg-surface text-ai">
+        <Icon name="doc" size={15} />
+      </span>
+      <span className="text-[13px] font-semibold text-ink">{label}</span>
+      <Icon name="chevR" size={14} className="text-ink-muted" />
+    </button>
+  );
+}
+
 // コンポーザー内の添付チップ。onRemove があれば × で外せる。
 function SourceChip({ material, onRemove }: { material: RawMaterial; onRemove?: () => void }) {
   const type = RAW_TYPE[material.type];
@@ -845,8 +965,7 @@ function Inspector({
   removed,
   canConfirm,
   sourcesChanged,
-  busy,
-  onConfirm,
+  onOpenDraft,
 }: {
   model: string;
   generating: boolean;
@@ -856,8 +975,7 @@ function Inspector({
   removed: number;
   canConfirm: boolean;
   sourcesChanged: boolean;
-  busy: boolean;
-  onConfirm: () => void;
+  onOpenDraft: () => void;
 }) {
   const { t } = useI18n();
   const status = generating
@@ -978,9 +1096,9 @@ function Inspector({
       </div>
 
       <div className="mt-auto border-t border-line p-3.5">
-        <Button className="w-full justify-center" disabled={!canConfirm} onClick={onConfirm}>
-          <Icon name="check" size={15} />
-          {busy ? t("workshop.running") : t("workshop.confirm")}
+        <Button variant="outline" className="w-full justify-center" onClick={onOpenDraft}>
+          <Icon name="edit" size={15} />
+          {t("workshop.openDraft")}
         </Button>
       </div>
     </aside>

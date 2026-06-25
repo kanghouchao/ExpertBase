@@ -81,7 +81,9 @@ export type DraftPhase =
   | { phase: "retrieving" }
   | { phase: "thinking"; delta: string }
   | { phase: "loadingModel" }
-  | { phase: "generating"; chars: number };
+  | { phase: "generating"; chars: number }
+  | { phase: "structuring"; chars: number }
+  | { phase: "narration"; delta: string };
 
 export type OllamaModel = {
   name: string;
@@ -223,6 +225,12 @@ export async function workshopDraft(
     think,
     onEvent: channel,
   });
+}
+
+/** 進行中の生成を中断する（停止ボタン）。共有フラグを立てるだけで即返る。 */
+export async function workshopCancel(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("workshop_cancel");
 }
 
 /** 承認内容を条目として確定する。確定した条目の相対パスを返す。 */

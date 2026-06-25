@@ -2,7 +2,7 @@ import type { ChatTurn, StructureResult } from "@/shared/api/tauri/client";
 
 export type ProcessMessage<Source = unknown> =
   | { role: "user"; text: string; sources?: Source[] }
-  | { role: "ai"; result: StructureResult; thinking?: string };
+  | { role: "ai"; result: StructureResult; thinking?: string; narration?: string };
 
 type DraftSource = {
   id: string;
@@ -67,6 +67,7 @@ export type DraftUiPhase =
   | "thinking"
   | "loadingModel"
   | "generating"
+  | "structuring"
   | "done";
 
 export function isGeneratingPhase(phase: DraftUiPhase): boolean {
@@ -75,7 +76,8 @@ export function isGeneratingPhase(phase: DraftUiPhase): boolean {
     phase === "retrieving" ||
     phase === "thinking" ||
     phase === "loadingModel" ||
-    phase === "generating"
+    phase === "generating" ||
+    phase === "structuring"
   );
 }
 
@@ -92,11 +94,25 @@ export function phaseLabelKey(phase: DraftUiPhase): string {
       return "workshop.phase.loadingModel";
     case "generating":
       return "workshop.phase.generating";
+    case "structuring":
+      return "workshop.phase.structuring";
     case "done":
       return "workshop.st.done";
     default:
       return "workshop.st.idle";
   }
+}
+
+/**
+ * 実行中ラベルの i18n キー。数字は出さない。
+ * 二段式（思考モデル）は generating=起草 / structuring=整理 と段で区別し、
+ * 非思考モデルの単段 generating は素直に「生成中」を出す。
+ */
+export function runningLabelKey(phase: DraftUiPhase, thinking: boolean): string {
+  if (phase === "generating") {
+    return thinking ? "workshop.phase.drafting" : "workshop.phase.generating";
+  }
+  return phaseLabelKey(phase);
 }
 
 /**
