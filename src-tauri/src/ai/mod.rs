@@ -10,7 +10,8 @@ pub mod interface;
 // ai 機能の公開 API（workshop 等が参照する安定面）。
 // 他機能はこの面のみを参照し、各レイヤ内部へ直接到達しない。
 pub use domain::{
-  AiError, AiProvider, ChatTurn, EntrySummary, StreamProgress, StructureRequest, StructureResult,
+  AgentMsg, AiError, AiProvider, ChatTurn, EntrySummary, StreamProgress, StructureRequest,
+  StructureResult, ToolCall, ToolDef, TurnOutcome,
 };
 pub use infrastructure::ollama;
 #[cfg(test)]

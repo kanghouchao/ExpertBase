@@ -2,6 +2,7 @@
 //! 具体的な HTTP/プロバイダ実装には依存しない。
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// FTS で引いた関連既存条目の要約（title + excerpt）。
 #[derive(Clone, Debug)]
@@ -60,6 +61,44 @@ pub enum StreamProgress {
   /// ユーザー向けナレーションの増分（思考モデルの Pass1 散文＝「AI が今書いている本文」）。
   /// 数字ではなく実テキストを流し、会話で過程を見せる。delta は新着分のみ。
   Narration { delta: String },
+  /// エージェントがツールを呼び出した（検索など）。会話にカードで見せる。args は表示用 JSON 文字列。
+  ToolCall { name: String, args: String },
+  /// ツール実行結果の要約（件数など）。呼び出しカードに続けて見せる。
+  ToolResult { name: String, summary: String },
+}
+
+/// エージェント会話の 1 メッセージ（プロバイダ非依存）。provider が各 API の wire 形式へ変換する。
+#[derive(Clone, Debug, PartialEq)]
+pub enum AgentMsg {
+  User(String),
+  /// モデルの応答（本文 + ツール呼び出し）。ツール結果を返す前に履歴へ積む。
+  Assistant { content: String, tool_calls: Vec<ToolCall> },
+  /// ツール実行結果。name はどのツールか、content は結果テキスト。
+  Tool { name: String, content: String },
+}
+
+/// モデルが要求したツール呼び出し。args はツールの引数（JSON オブジェクト）。
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolCall {
+  pub name: String,
+  pub args: Value,
+}
+
+/// agent_turn の出力。thinking / narration は on_progress で流し済み。
+/// tool_calls が空＝モデルが最終応答（draft 本文）を返した、と解釈する。
+#[derive(Clone, Debug, PartialEq)]
+pub struct TurnOutcome {
+  pub content: String,
+  pub tool_calls: Vec<ToolCall>,
+}
+
+/// プロバイダ非依存のツール定義。各 API の wire 形式（OpenAI 互換 function ラッパ等）へ
+/// 包むのは infra の責務。parameters は引数の JSON スキーマ（中立な記述言語なので domain に置く）。
+#[derive(Clone, Debug)]
+pub struct ToolDef {
+  pub name: String,
+  pub description: String,
+  pub parameters: Value,
 }
 
 /// AI エラー。UI で区別して表示し、手動パスへ退避できるようにする。
@@ -86,9 +125,28 @@ impl std::fmt::Display for AiError {
 /// AI プロバイダ接合面。ワークショップはこの trait の裏でのみ AI を呼ぶ。
 /// 将来のローカル LLM / マルチモーダルは別実装として差し込む（下流は変更不要）。
 pub trait AiProvider {
+  /// 非エージェント経路（ツール非対応モデルのフォールバック）。素材から直接構造化する。
   fn structure(
     &self,
     req: StructureRequest,
+    on_progress: &mut dyn FnMut(StreamProgress),
+  ) -> Result<StructureResult, AiError>;
+
+  /// エージェントの 1 ターン。system + tools + 会話を渡し、本文 + ツール呼び出しを返す。
+  /// tools は中立な ToolDef 列で渡し、wire 形式への変換は実装（infra）が行う。
+  /// thinking / narration は on_progress で流す。中断は実装側が内部フラグで処理する。
+  fn agent_turn(
+    &self,
+    system: &str,
+    tools: &[ToolDef],
+    messages: &[AgentMsg],
+    on_progress: &mut dyn FnMut(StreamProgress),
+  ) -> Result<TurnOutcome, AiError>;
+
+  /// エージェントが書いた散文ドラフトを最終 StructureResult へ整形する（＝ Pass2 を再利用）。
+  fn structure_draft(
+    &self,
+    draft: &str,
     on_progress: &mut dyn FnMut(StreamProgress),
   ) -> Result<StructureResult, AiError>;
 }
@@ -114,6 +172,43 @@ impl AiProvider for FakeProvider {
       cat: "uncategorized".into(),
       body_markdown: req.source_text.clone(),
       suggested_links,
+    })
+  }
+
+  /// 既定では即座に最終応答を返す（ツールを使わない）。ループ自体の検証は
+  /// workshop テストの脚本化プロバイダで行う。content は直近 User 発話のエコー。
+  fn agent_turn(
+    &self,
+    _system: &str,
+    _tools: &[ToolDef],
+    messages: &[AgentMsg],
+    on_progress: &mut dyn FnMut(StreamProgress),
+  ) -> Result<TurnOutcome, AiError> {
+    on_progress(StreamProgress::LoadingModel);
+    let content = messages
+      .iter()
+      .rev()
+      .find_map(|m| match m {
+        AgentMsg::User(text) => Some(text.clone()),
+        _ => None,
+      })
+      .unwrap_or_default();
+    Ok(TurnOutcome { content, tool_calls: vec![] })
+  }
+
+  fn structure_draft(
+    &self,
+    draft: &str,
+    on_progress: &mut dyn FnMut(StreamProgress),
+  ) -> Result<StructureResult, AiError> {
+    on_progress(StreamProgress::Structuring { chars: draft.chars().count() });
+    let title = draft.lines().next().unwrap_or("").trim().to_string();
+    Ok(StructureResult {
+      kind: "entry".into(),
+      title: if title.is_empty() { "無題".into() } else { title },
+      cat: "uncategorized".into(),
+      body_markdown: draft.to_string(),
+      suggested_links: vec![],
     })
   }
 }

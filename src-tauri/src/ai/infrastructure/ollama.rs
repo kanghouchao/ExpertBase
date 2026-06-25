@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::ai::agent::{output_schema, DRAFT_PROMPT, SYSTEM_PROMPT};
-use crate::ai::domain::{AiError, AiProvider, StreamProgress, StructureRequest, StructureResult};
+use crate::ai::{
+  AgentMsg, AiError, AiProvider, StreamProgress, StructureRequest, StructureResult, ToolCall,
+  ToolDef, TurnOutcome,
+};
 
 /// kind が欠落したモデル出力への安全な既定値（信頼境界の堅牢化）。
 fn default_kind() -> String {
@@ -26,6 +29,8 @@ pub struct OllamaModel {
   pub name: String,
   /// thinking（推論トレース）能力を持つか。/api/show の capabilities で判定。
   pub thinking: bool,
+  /// tools（関数呼び出し）能力を持つか。これが true のモデルだけ agent ループに乗せる。
+  pub tools: bool,
 }
 
 pub struct OllamaProvider {
@@ -97,7 +102,7 @@ impl OllamaProvider {
       return Err(AiError::Other(format!("Ollama 模型列表读取失败({status}): {text}")));
     }
     let mut models = parse_models_response(&text)?;
-    // 各モデルの thinking 能力を /api/show で補う（ローカル・高速）。
+    // 各モデルの thinking / tools 能力を /api/show で補う（ローカル・高速、1 リクエストで両方）。
     for model in &mut models {
       if let Ok(show) = client
         .post(format!("{API_BASE}/api/show"))
@@ -106,6 +111,7 @@ impl OllamaProvider {
         .and_then(|r| r.text())
       {
         model.thinking = show_supports_thinking(&show);
+        model.tools = show_supports_tools(&show);
       }
     }
     Ok(models)
@@ -113,6 +119,84 @@ impl OllamaProvider {
 
   pub fn first_local_model() -> Result<Option<String>, AiError> {
     Ok(Self::list_models()?.into_iter().next().map(|model| model.name))
+  }
+
+  /// 使用モデル名を解決する（明示指定が無ければローカル先頭）。
+  fn resolve_model(&self) -> Result<String, AiError> {
+    match &self.model {
+      Some(model) => Ok(model.clone()),
+      None => Self::first_local_model()?
+        .ok_or_else(|| AiError::Other("Ollama 没有可用模型，请先下载模型".into())),
+    }
+  }
+
+  /// 生成用クライアント。接続は短く（未起動を即検知）、全体は長く（ロード + 生成を許容）。
+  fn build_client() -> Result<reqwest::blocking::Client, AiError> {
+    reqwest::blocking::Client::builder()
+      .connect_timeout(Duration::from_secs(3))
+      .timeout(Duration::from_secs(180))
+      .build()
+      .map_err(|e| AiError::Network(e.to_string()))
+  }
+}
+
+/// エージェント 1 ターンのリクエスト本体。system + tools + 会話を渡す。think はモデル能力に従う。
+/// num_predict で 1 ターンの暴走を抑える（ツール呼び出し or ドラフトのどちらでも十分な予算）。
+fn build_agent_body(
+  model: &str,
+  system: &str,
+  tools: &[ToolDef],
+  messages: &[AgentMsg],
+  think: bool,
+) -> Value {
+  let mut msgs = vec![json!({ "role": "system", "content": system })];
+  for m in messages {
+    msgs.push(render_agent_msg(m));
+  }
+  json!({
+    "model": model,
+    "messages": msgs,
+    "tools": render_tools(tools),
+    "stream": true,
+    "think": think,
+    "options": { "temperature": 0.6, "num_ctx": 16384, "num_predict": 2048 }
+  })
+}
+
+/// 中立な ToolDef 列を Ollama（OpenAI 互換）の tools wire 形式へ包む。wire 形状はここに閉じる。
+fn render_tools(tools: &[ToolDef]) -> Value {
+  Value::Array(
+    tools
+      .iter()
+      .map(|t| {
+        json!({
+          "type": "function",
+          "function": {
+            "name": t.name,
+            "description": t.description,
+            "parameters": t.parameters
+          }
+        })
+      })
+      .collect(),
+  )
+}
+
+/// AgentMsg を Ollama の /api/chat メッセージ形式へ変換する（wire 形式はここに閉じる）。
+fn render_agent_msg(m: &AgentMsg) -> Value {
+  match m {
+    AgentMsg::User(content) => json!({ "role": "user", "content": content }),
+    AgentMsg::Assistant { content, tool_calls } => json!({
+      "role": "assistant",
+      "content": content,
+      "tool_calls": tool_calls
+        .iter()
+        .map(|tc| json!({ "function": { "name": tc.name, "arguments": tc.args } }))
+        .collect::<Vec<_>>()
+    }),
+    AgentMsg::Tool { name, content } => {
+      json!({ "role": "tool", "tool_name": name, "content": content })
+    }
   }
 }
 
@@ -212,7 +296,7 @@ fn parse_models_response(body: &str) -> Result<Vec<OllamaModel>, AiError> {
     .models
     .into_iter()
     .filter(|model| !model.name.trim().is_empty())
-    .map(|model| OllamaModel { name: model.name, thinking: false })
+    .map(|model| OllamaModel { name: model.name, thinking: false, tools: false })
     .collect())
 }
 
@@ -224,8 +308,17 @@ struct ShowResponse {
 
 /// /api/show のレスポンスから thinking 能力の有無を読む。
 fn show_supports_thinking(body: &str) -> bool {
+  show_has_capability(body, "thinking")
+}
+
+/// /api/show のレスポンスから tools（関数呼び出し）能力の有無を読む。
+fn show_supports_tools(body: &str) -> bool {
+  show_has_capability(body, "tools")
+}
+
+fn show_has_capability(body: &str, cap: &str) -> bool {
   serde_json::from_str::<ShowResponse>(body)
-    .map(|s| s.capabilities.iter().any(|c| c == "thinking"))
+    .map(|s| s.capabilities.iter().any(|c| c == cap))
     .unwrap_or(false)
 }
 
@@ -235,6 +328,21 @@ struct ChatMessage {
   content: String,
   #[serde(default)]
   thinking: Option<String>,
+  #[serde(default)]
+  tool_calls: Vec<RawToolCall>,
+}
+
+/// Ollama のツール呼び出し（message.tool_calls[]）。arguments はオブジェクト（文字列ではない）。
+#[derive(Deserialize)]
+struct RawToolCall {
+  function: RawToolFn,
+}
+
+#[derive(Deserialize)]
+struct RawToolFn {
+  name: String,
+  #[serde(default)]
+  arguments: Value,
 }
 
 #[derive(Deserialize)]
@@ -300,6 +408,48 @@ fn consume_chat_stream(
   Ok(content)
 }
 
+/// エージェント 1 ターンの NDJSON ストリームを消費する。thinking→Thinking、content→Narration を
+/// 流しつつ、message.tool_calls を集めて (本文, ツール呼び出し列) を返す。
+fn consume_agent_stream(
+  lines: impl Iterator<Item = std::io::Result<String>>,
+  should_cancel: &dyn Fn() -> bool,
+  on_progress: &mut dyn FnMut(StreamProgress),
+) -> Result<(String, Vec<ToolCall>), AiError> {
+  let mut content = String::new();
+  let mut tool_calls: Vec<ToolCall> = Vec::new();
+  for line in lines {
+    if should_cancel() {
+      return Err(AiError::Cancelled);
+    }
+    let line = line.map_err(|e| {
+      AiError::Network(format!(
+        "读取 Ollama 响应失败（模型加载或生成可能超时，可先在终端 `ollama run` 预热）: {e}"
+      ))
+    })?;
+    if line.trim().is_empty() {
+      continue;
+    }
+    let chunk: StreamChunk =
+      serde_json::from_str(&line).map_err(|e| AiError::Other(e.to_string()))?;
+    if let Some(thinking) = chunk.message.thinking {
+      if !thinking.is_empty() {
+        on_progress(StreamProgress::Thinking { delta: thinking });
+      }
+    }
+    if !chunk.message.content.is_empty() {
+      content.push_str(&chunk.message.content);
+      on_progress(StreamProgress::Narration { delta: chunk.message.content.clone() });
+    }
+    for tc in chunk.message.tool_calls {
+      tool_calls.push(ToolCall { name: tc.function.name, args: tc.function.arguments });
+    }
+    if chunk.done {
+      break;
+    }
+  }
+  Ok((content, tool_calls))
+}
+
 /// モデル出力から JSON オブジェクトを取り出して構造化結果へ。Pass2 は format 固定で
 /// 通常そのまま JSON だが、コードフェンスや前後の文字が混じっても拾えるよう、
 /// 最初の `{` から最後の `}` までを抽出してから解析する。
@@ -329,23 +479,13 @@ impl AiProvider for OllamaProvider {
     req: StructureRequest,
     on_progress: &mut dyn FnMut(StreamProgress),
   ) -> Result<StructureResult, AiError> {
-    let model = match &self.model {
-      Some(model) => model.clone(),
-      None => Self::first_local_model()?
-        .ok_or_else(|| AiError::Other("Ollama 没有可用模型，请先下载模型".into()))?,
-    };
-    // 接続は短く（未起動を即検知）、全体は長く（モデルのロード + 生成を許容）。
-    let client = reqwest::blocking::Client::builder()
-      .connect_timeout(Duration::from_secs(3))
-      .timeout(Duration::from_secs(180))
-      .build()
-      .map_err(|e| AiError::Network(e.to_string()))?;
+    let model = self.resolve_model()?;
+    let client = Self::build_client()?;
 
     on_progress(StreamProgress::LoadingModel);
     // Pass1（思考モデルの散文）は実テキストを Narration で流す＝過程を見せる。
     let narrating = |delta: &str, _c: usize| StreamProgress::Narration { delta: delta.to_string() };
-    // Pass2 と非思考単発は JSON を起こす段。表示用テキストは無いので数字で済ます。
-    let structuring = |_d: &str, c: usize| StreamProgress::Structuring { chars: c };
+    // 非思考単発は JSON を起こす段。表示用テキストは無いので数字で済ます。
     let generating = |_d: &str, c: usize| StreamProgress::Generating { chars: c };
     let should_cancel = || self.cancel.load(Ordering::Relaxed);
     if self.think {
@@ -361,16 +501,7 @@ impl AiProvider for OllamaProvider {
         on_progress,
       )?;
       // Pass2: ドラフトを構造化（format あり・think なし＝確実な経路）＝整理。
-      let content = post_chat(
-        &client,
-        &self.base_url,
-        &model,
-        build_structure_body(&model, &draft),
-        &structuring,
-        &should_cancel,
-        on_progress,
-      )?;
-      parse_structure(&content)
+      self.structure_draft(&draft, on_progress)
     } else {
       // 非思考は 1 段で直接 JSON を起こす＝生成。
       let content = post_chat(
@@ -385,18 +516,54 @@ impl AiProvider for OllamaProvider {
       parse_structure(&content)
     }
   }
+
+  fn agent_turn(
+    &self,
+    system: &str,
+    tools: &[ToolDef],
+    messages: &[AgentMsg],
+    on_progress: &mut dyn FnMut(StreamProgress),
+  ) -> Result<TurnOutcome, AiError> {
+    let model = self.resolve_model()?;
+    let client = Self::build_client()?;
+    on_progress(StreamProgress::LoadingModel);
+    let should_cancel = || self.cancel.load(Ordering::Relaxed);
+    let body = build_agent_body(&model, system, tools, messages, self.think);
+    let (content, tool_calls) =
+      post_agent(&client, &self.base_url, &model, body, &should_cancel, on_progress)?;
+    Ok(TurnOutcome { content, tool_calls })
+  }
+
+  fn structure_draft(
+    &self,
+    draft: &str,
+    on_progress: &mut dyn FnMut(StreamProgress),
+  ) -> Result<StructureResult, AiError> {
+    let model = self.resolve_model()?;
+    let client = Self::build_client()?;
+    let should_cancel = || self.cancel.load(Ordering::Relaxed);
+    // 整理段（Pass2 を再利用）。format 固定で散文ドラフトを StructureResult へ。
+    let structuring = |_d: &str, c: usize| StreamProgress::Structuring { chars: c };
+    let content = post_chat(
+      &client,
+      &self.base_url,
+      &model,
+      build_structure_body(&model, draft),
+      &structuring,
+      &should_cancel,
+      on_progress,
+    )?;
+    parse_structure(&content)
+  }
 }
 
-/// /api/chat に 1 リクエストを投げ、ストリームを消費して連結 content を返す。
-fn post_chat(
+/// /api/chat に POST してストリーミング応答（status 検証済み）を返す。
+fn send_chat(
   client: &reqwest::blocking::Client,
   base_url: &str,
   model: &str,
   body: Value,
-  content_event: &dyn Fn(&str, usize) -> StreamProgress,
-  should_cancel: &dyn Fn() -> bool,
-  on_progress: &mut dyn FnMut(StreamProgress),
-) -> Result<String, AiError> {
+) -> Result<reqwest::blocking::Response, AiError> {
   let resp = client
     .post(format!("{base_url}/api/chat"))
     .header("content-type", "application/json")
@@ -422,10 +589,38 @@ fn post_chat(
     let text = resp.text().unwrap_or_default();
     return Err(AiError::Other(format!("Ollama API 错误({status}): {text}")));
   }
+  Ok(resp)
+}
 
+/// /api/chat に 1 リクエストを投げ、ストリームを消費して連結 content を返す。
+fn post_chat(
+  client: &reqwest::blocking::Client,
+  base_url: &str,
+  model: &str,
+  body: Value,
+  content_event: &dyn Fn(&str, usize) -> StreamProgress,
+  should_cancel: &dyn Fn() -> bool,
+  on_progress: &mut dyn FnMut(StreamProgress),
+) -> Result<String, AiError> {
+  let resp = send_chat(client, base_url, model, body)?;
   use std::io::BufRead;
   let reader = std::io::BufReader::new(resp);
   consume_chat_stream(reader.lines(), content_event, should_cancel, on_progress)
+}
+
+/// /api/chat（tools 付き）に 1 リクエストを投げ、本文 + ツール呼び出しを返す。
+fn post_agent(
+  client: &reqwest::blocking::Client,
+  base_url: &str,
+  model: &str,
+  body: Value,
+  should_cancel: &dyn Fn() -> bool,
+  on_progress: &mut dyn FnMut(StreamProgress),
+) -> Result<(String, Vec<ToolCall>), AiError> {
+  let resp = send_chat(client, base_url, model, body)?;
+  use std::io::BufRead;
+  let reader = std::io::BufReader::new(resp);
+  consume_agent_stream(reader.lines(), should_cancel, on_progress)
 }
 
 #[cfg(test)]
@@ -531,6 +726,60 @@ mod tests {
   }
 
   #[test]
+  fn render_tools_wraps_tooldef_in_function_envelope() {
+    // 中立 ToolDef → Ollama/OpenAI 互換の {type:function, function:{...}} へ包む（wire 形状は infra）。
+    let tools = vec![ToolDef {
+      name: "search_kb".into(),
+      description: "find entries".into(),
+      parameters: json!({ "type": "object", "properties": { "query": { "type": "string" } } }),
+    }];
+    let wire = render_tools(&tools);
+    assert_eq!(wire[0]["type"], "function");
+    assert_eq!(wire[0]["function"]["name"], "search_kb");
+    assert_eq!(wire[0]["function"]["description"], "find entries");
+    assert_eq!(wire[0]["function"]["parameters"]["properties"]["query"]["type"], "string");
+  }
+
+  #[test]
+  fn consume_agent_stream_collects_content_and_tool_calls() {
+    // Ollama の tool_calls wire 形式（message.tool_calls[].function.{name,arguments}）を正しく拾う。
+    // arguments はオブジェクト（文字列ではない）。thinking→Thinking、content→Narration も流す。
+    let lines = vec![
+      Ok(r#"{"message":{"thinking":"考え中","content":""},"done":false}"#.to_string()),
+      Ok(
+        r#"{"message":{"content":"検索します","tool_calls":[{"function":{"name":"search_kb","arguments":{"query":"茶"}}}]},"done":false}"#
+          .to_string(),
+      ),
+      Ok(r#"{"message":{"content":""},"done":true}"#.to_string()),
+    ];
+    let mut events = Vec::new();
+    let (content, tool_calls) =
+      consume_agent_stream(lines.into_iter(), &|| false, &mut |p| events.push(p)).unwrap();
+    assert_eq!(content, "検索します");
+    assert_eq!(tool_calls.len(), 1);
+    assert_eq!(tool_calls[0].name, "search_kb");
+    assert_eq!(tool_calls[0].args["query"], "茶");
+    assert!(events.iter().any(|e| matches!(e, StreamProgress::Thinking { .. })));
+    assert!(events.iter().any(|e| matches!(e, StreamProgress::Narration { .. })));
+  }
+
+  #[test]
+  fn consume_agent_stream_stops_when_cancelled() {
+    // 停止ボタン: エージェントターンも次チャンク前に中断できる。
+    let lines = vec![
+      Ok(r#"{"message":{"content":"a"},"done":false}"#.to_string()),
+      Ok(r#"{"message":{"content":"b"},"done":false}"#.to_string()),
+    ];
+    let calls = std::cell::Cell::new(0);
+    let cancel = || {
+      calls.set(calls.get() + 1);
+      calls.get() > 1
+    };
+    let result = consume_agent_stream(lines.into_iter(), &cancel, &mut |_| {});
+    assert!(matches!(result, Err(AiError::Cancelled)));
+  }
+
+  #[test]
   fn consume_chat_stream_stops_when_cancelled() {
     // 停止ボタン: should_cancel が途中で true になったら、残りの行は消費せず Cancelled で返す。
     let lines = vec![
@@ -620,6 +869,15 @@ mod tests {
   }
 
   #[test]
+  fn show_supports_tools_reads_capabilities() {
+    let yes = r#"{"capabilities":["completion","tools"]}"#;
+    let no = r#"{"capabilities":["completion","thinking"]}"#;
+    assert!(show_supports_tools(yes));
+    assert!(!show_supports_tools(no));
+    assert!(!show_supports_tools("{}"));
+  }
+
+  #[test]
   fn parse_models_response_returns_downloaded_model_names() {
     let sample = r#"{
       "models": [
@@ -631,8 +889,8 @@ mod tests {
     assert_eq!(
       models,
       vec![
-        OllamaModel { name: "qwen3:8b".into(), thinking: false },
-        OllamaModel { name: "llama3.1:8b".into(), thinking: false },
+        OllamaModel { name: "qwen3:8b".into(), thinking: false, tools: false },
+        OllamaModel { name: "llama3.1:8b".into(), thinking: false, tools: false },
       ]
     );
   }

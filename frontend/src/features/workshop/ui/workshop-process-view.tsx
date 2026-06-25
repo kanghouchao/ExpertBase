@@ -36,6 +36,7 @@ import {
   toChatTurn,
   type DraftUiPhase,
   type ProcessMessage,
+  type ToolEvent,
 } from "../model/process-state";
 
 // Tauri 外（静的プレビュー）で会話シェルだけを見せるための素材。AI 出力は偽装しない。
@@ -85,8 +86,8 @@ const PREVIEW_POOL: RawMaterial[] = [
 ];
 
 const PREVIEW_MODELS: OllamaModel[] = [
-  { name: "qwen3:8b", thinking: true },
-  { name: "llama3.1:8b", thinking: false },
+  { name: "qwen3:8b", thinking: true, tools: true },
+  { name: "llama3.1:8b", thinking: false, tools: false },
 ];
 
 // プレビュー（Tauri 外）の加工パネルに見せる素材。入力素材から組み立てるだけで、
@@ -124,6 +125,8 @@ export function WorkshopProcessView() {
   const [thinkingBuf, setThinkingBuf] = useState("");
   // 生成中に流れる「AI が今書いている本文」（思考モデルの Pass1 散文）。過程を可視化する。
   const [narrationBuf, setNarrationBuf] = useState("");
+  // 生成中のツール呼び出しログ（検索など）。会話にカードで見せる。
+  const [toolLog, setToolLog] = useState<ToolEvent[]>([]);
   const [draftOpen, setDraftOpen] = useState(false);
   // ドロワーで読み取り専用表示する過去ターンのスナップショット（null＝最新草稿を編集モードで開く）。
   const [snapshot, setSnapshot] = useState<StructureResult | null>(null);
@@ -184,8 +187,9 @@ export function WorkshopProcessView() {
   const visibleHasOllama = available ? hasOllama : true;
   const visibleModels = available ? models : PREVIEW_MODELS;
   const visibleSelectedModel = available ? selectedModel : selectedModel || PREVIEW_MODELS[0].name;
-  const selectedThinking =
-    visibleModels.find((model) => model.name === visibleSelectedModel)?.thinking ?? false;
+  const selectedModelInfo = visibleModels.find((model) => model.name === visibleSelectedModel);
+  const selectedThinking = selectedModelInfo?.thinking ?? false;
+  const selectedTools = selectedModelInfo?.tools ?? false;
   // 追加可能な素材プール = 未処理の inbox − すでに選択済みのもの。
   const pool = inbox
     .filter((candidate) => candidate.status !== "processed")
@@ -232,16 +236,19 @@ export function WorkshopProcessView() {
     setPhase("connecting");
     setThinkingBuf("");
     setNarrationBuf("");
+    setToolLog([]);
     setError(null);
     cancelRef.current = false;
     try {
       let thinking = "";
       let narration = "";
+      const tools: ToolEvent[] = [];
       const result = await workshopDraft(
         sources.map((s) => s.id),
         history.map(toChatTurn),
         visibleSelectedModel,
         selectedThinking,
+        selectedTools,
         (p: DraftPhase) => {
           if (p.phase === "generating") {
             setPhase("generating");
@@ -251,6 +258,14 @@ export function WorkshopProcessView() {
             setPhase("generating");
             narration += p.delta;
             setNarrationBuf(narration);
+          } else if (p.phase === "toolCall") {
+            tools.push({ name: p.name, args: p.args });
+            setToolLog([...tools]);
+          } else if (p.phase === "toolResult") {
+            // 直近の同名・未完了の呼び出しに結果サマリを埋める。
+            const target = [...tools].reverse().find((t) => t.name === p.name && !t.summary);
+            if (target) target.summary = p.summary;
+            setToolLog([...tools]);
           } else if (p.phase === "retrieving") {
             setPhase("retrieving");
           } else if (p.phase === "thinking") {
@@ -264,7 +279,13 @@ export function WorkshopProcessView() {
       );
       setMessages([
         ...history,
-        { role: "ai", result, thinking: thinking || undefined, narration: narration || undefined },
+        {
+          role: "ai",
+          result,
+          thinking: thinking || undefined,
+          narration: narration || undefined,
+          tools: tools.length ? tools : undefined,
+        },
       ]);
       if (result.kind === "entry") {
         setDraft(result);
@@ -427,6 +448,7 @@ export function WorkshopProcessView() {
                 ) : m.result.kind === "chat" ? (
                   <ChatRow key={i} ai>
                     {m.thinking && <ThinkingPanel text={m.thinking} streaming={false} />}
+                    {m.tools && m.tools.length > 0 && <ToolCallLog tools={m.tools} />}
                     <div className="text-[14.5px] leading-relaxed whitespace-pre-wrap text-ink-soft">
                       {m.result.bodyMarkdown}
                     </div>
@@ -434,6 +456,7 @@ export function WorkshopProcessView() {
                 ) : (
                   <ChatRow key={i} ai>
                     {m.thinking && <ThinkingPanel text={m.thinking} streaming={false} />}
+                    {m.tools && m.tools.length > 0 && <ToolCallLog tools={m.tools} />}
                     {/* 生成過程の散文を折りたたんで残す（既定は閉。草稿は chip→ドロワーで編集）。 */}
                     {m.narration && (
                       <ThinkingPanel
@@ -461,6 +484,14 @@ export function WorkshopProcessView() {
                 <ChatRow ai>
                   {thinkingBuf && (
                     <ThinkingPanel text={thinkingBuf} streaming={phase === "thinking"} />
+                  )}
+                  {/* エージェントのツール呼び出し（検索など）をカードで見せる。 */}
+                  {toolLog.length > 0 && (
+                    <div className="mb-2.5 flex flex-col gap-1.5">
+                      {toolLog.map((tool, idx) => (
+                        <ToolCallCard key={idx} tool={tool} />
+                      ))}
+                    </div>
                   )}
                   {/* 「AI が今書いている本文」を流式表示＝過程が見える（数字ではなく実テキスト）。 */}
                   {narrationBuf && (
@@ -596,9 +627,13 @@ export function WorkshopProcessView() {
                     ) : (
                       visibleModels.map((model) => (
                         <option key={model.name} value={model.name}>
-                          {model.thinking
-                            ? `${model.name} · ${t("workshop.think.badge")}`
-                            : model.name}
+                          {[
+                            model.name,
+                            model.thinking ? t("workshop.think.badge") : null,
+                            model.tools ? t("workshop.tools.badge") : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </option>
                       ))
                     )}
@@ -880,6 +915,38 @@ function DraftCard({
           <span className="text-[12px] leading-snug text-ink-faint">{t("workshop.draftHint")}</span>
         </div>
       )}
+    </div>
+  );
+}
+
+// エージェントのツール呼び出し 1 件のカード（検索など）。args は JSON 文字列なので値だけ抜いて表示。
+function ToolCallCard({ tool }: { tool: ToolEvent }) {
+  let argText = tool.args;
+  try {
+    const parsed = JSON.parse(tool.args);
+    argText = Object.values(parsed)
+      .map((v) => String(v))
+      .join(", ");
+  } catch {
+    /* JSON でなければ生文字列のまま表示 */
+  }
+  return (
+    <div className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-[12.5px]">
+      <Icon name="search" size={13} className="flex-none text-ai" />
+      <span className="font-mono font-semibold text-ink">{tool.name}</span>
+      {argText && <span className="truncate text-ink-soft">{argText}</span>}
+      {tool.summary && <span className="flex-none text-ink-faint">· {tool.summary}</span>}
+    </div>
+  );
+}
+
+// 完成したターンに残すツール呼び出しログ。
+function ToolCallLog({ tools }: { tools: ToolEvent[] }) {
+  return (
+    <div className="mb-2.5 flex flex-col gap-1.5">
+      {tools.map((tool, idx) => (
+        <ToolCallCard key={idx} tool={tool} />
+      ))}
     </div>
   );
 }

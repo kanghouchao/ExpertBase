@@ -1,8 +1,17 @@
 import type { ChatTurn, StructureResult } from "@/shared/api/tauri/client";
 
+// エージェントのツール呼び出し 1 件（表示用）。summary はツール結果到着後に埋まる。
+export type ToolEvent = { name: string; args: string; summary?: string };
+
 export type ProcessMessage<Source = unknown> =
   | { role: "user"; text: string; sources?: Source[] }
-  | { role: "ai"; result: StructureResult; thinking?: string; narration?: string };
+  | {
+      role: "ai";
+      result: StructureResult;
+      thinking?: string;
+      narration?: string;
+      tools?: ToolEvent[];
+    };
 
 type DraftSource = {
   id: string;
