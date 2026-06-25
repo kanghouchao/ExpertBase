@@ -8,6 +8,7 @@ mod workshop;
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
+    .manage(workshop::interface::WorkshopCancel::default())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -42,6 +43,7 @@ pub fn run() {
       ai::interface::ai_has_key,
       ai::interface::ai_list_ollama_models,
       workshop::interface::workshop_draft,
+      workshop::interface::workshop_cancel,
       workshop::interface::workshop_confirm,
       asr::interface::transcribe_material
     ])

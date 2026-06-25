@@ -1,8 +1,11 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::ai::agent::{output_schema, DRAFT_PROMPT, SYSTEM_PROMPT};
 use crate::ai::domain::{AiError, AiProvider, StreamProgress, StructureRequest, StructureResult};
 
 /// kind が欠落したモデル出力への安全な既定値（信頼境界の堅牢化）。
@@ -10,47 +13,12 @@ fn default_kind() -> String {
   "entry".to_string()
 }
 
+/// 既定の中断フラグ（決して立たない）。テスト・単発呼び出し用。
+fn never_cancel() -> Arc<AtomicBool> {
+  Arc::new(AtomicBool::new(false))
+}
+
 const API_BASE: &str = "http://127.0.0.1:11434";
-
-/// Ollama に渡す system プロンプト。出力は JSON スキーマで固定する。
-const SYSTEM_PROMPT: &str = r###"You are a knowledge base editor chatting with the user about the provided Material. Every reply MUST be a single JSON object with the fields below.
-
-Fields:
-- kind: "entry" or "chat". Use "entry" when the user asks you to produce or revise a knowledge entry from the Material. Use "chat" when the user is greeting, asking a question, or just talking and has not asked for an entry yet.
-- title: a concise heading; empty string when kind is "chat".
-- cat: a category as a short lowercase English word, e.g. tea, finance, privacy; empty string when kind is "chat".
-- body_markdown: for "entry", the reorganized entry body in valid Markdown; for "chat", your conversational reply.
-- suggested_links: for "entry", titles chosen ONLY from the Related existing entries that are genuinely relevant; [] when none are relevant or the list is empty. Always [] for "chat".
-
-Example (chat)
-User: Hi, what is this material about?
-Output:
-{"kind":"chat","title":"","cat":"","body_markdown":"It is an interview with a tea master about pan-firing temperature. Want me to turn it into an entry?","suggested_links":[]}
-
-Example (entry)
-User: Organize this into a clean entry.
-Material: Oolong tea is semi-oxidized. Steep at 90-95C for about one minute; it can be re-steeped several times.
-Related existing entries:
-- Green tea brewing: steeping notes for green tea
-Output:
-{"kind":"entry","title":"Oolong tea brewing","cat":"tea","body_markdown":"## Overview\nOolong is a semi-oxidized tea.\n\n## Brewing\n- Water: 90-95C\n- Time: about 1 minute\n- Can be re-steeped several times","suggested_links":["Green tea brewing"]}
-
-Do not:
-- Do not add facts that are not supported by the Material.
-- Do not output anything outside the JSON object (no explanations, no code fences).
-- Do not link unrelated entries just to fill suggested_links; use [] instead.
-- Do not leave broken Markdown such as unmatched ** markers.
-
-Reply with JSON only."###;
-
-/// Pass1(思考パス)用プロンプト。JSON を要求せず、推論しながら散文ドラフトを書かせる。
-/// format grammar と think を同時に使うと content が壊れるため、思考時は構造化を
-/// Pass2 に分離する。ここは"良いドラフト"を出すことだけに集中させる。
-const DRAFT_PROMPT: &str = r###"You are a knowledge base editor chatting with the user about the provided Material.
-Read the Material and the conversation, think it through, then write the best response in Markdown:
-- If the user wants a knowledge entry created or revised, write a clean, well-structured Markdown entry grounded ONLY in the Material.
-- Otherwise, reply conversationally.
-Do not add facts that are not supported by the Material. Output only the response itself — no JSON, no code fences, no meta commentary."###;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +32,9 @@ pub struct OllamaProvider {
   model: Option<String>,
   base_url: String,
   think: bool,
+  /// 停止ボタン用の中断フラグ。stream 消費中に true になったら生成を打ち切る。
+  /// 既定は never-cancel（テスト・単発呼び出し用）。workshop_draft が実フラグを注入する。
+  cancel: Arc<AtomicBool>,
 }
 
 impl OllamaProvider {
@@ -72,7 +43,7 @@ impl OllamaProvider {
       .ok()
       .filter(|s| !s.trim().is_empty())
       .map(|s| s.trim().to_string());
-    Self { model, base_url: API_BASE.to_string(), think: false }
+    Self { model, base_url: API_BASE.to_string(), think: false, cancel: never_cancel() }
   }
 
   pub fn with_model(model: String) -> Self {
@@ -80,7 +51,12 @@ impl OllamaProvider {
     if selected.is_empty() {
       Self::new()
     } else {
-      Self { model: Some(selected.to_string()), base_url: API_BASE.to_string(), think: false }
+      Self {
+        model: Some(selected.to_string()),
+        base_url: API_BASE.to_string(),
+        think: false,
+        cancel: never_cancel(),
+      }
     }
   }
 
@@ -89,6 +65,12 @@ impl OllamaProvider {
     let mut provider = Self::with_model(model);
     provider.think = think;
     provider
+  }
+
+  /// 中断フラグを注入する（停止ボタンと共有する Arc<AtomicBool>）。
+  pub fn with_cancel(mut self, cancel: Arc<AtomicBool>) -> Self {
+    self.cancel = cancel;
+    self
   }
 
   pub fn available() -> bool {
@@ -132,21 +114,6 @@ impl OllamaProvider {
   pub fn first_local_model() -> Result<Option<String>, AiError> {
     Ok(Self::list_models()?.into_iter().next().map(|model| model.name))
   }
-}
-
-fn output_schema() -> Value {
-  json!({
-    "type": "object",
-    "properties": {
-      "kind": { "type": "string", "enum": ["entry", "chat"] },
-      "title": { "type": "string" },
-      "cat": { "type": "string" },
-      "body_markdown": { "type": "string" },
-      "suggested_links": { "type": "array", "items": { "type": "string" } }
-    },
-    "required": ["kind", "title", "cat", "body_markdown", "suggested_links"],
-    "additionalProperties": false
-  })
 }
 
 /// 素材と関連条目は会話全体で固定の文脈。指定プロンプトの後に pin する。
@@ -212,6 +179,9 @@ fn build_draft_body(model: &str, req: &StructureRequest) -> Value {
 /// StructureResult へ整形する（= 非思考の確実な経路を再利用）。think を省略すると
 /// 思考可能モデルは既定 ON になり、Pass2 まで思考して think+format の壊れた組合せに
 /// 戻る（実機で 9000+ token 思考 + 出力の崩壊を確認）。必ず false を明示する。
+/// num_predict で暴走を抑える: format 文法のみだと上限がなく、空/巨大ドラフトや
+/// モデルの癖で JSON を閉じずに 180s 超時まで生成し続ける（＝「整理中…停まらない」）。
+/// Pass1 の本文上限 2048 token を JSON で包み直す余裕として 4096 を取る。
 fn build_structure_body(model: &str, draft: &str) -> Value {
   json!({
     "model": model,
@@ -222,7 +192,7 @@ fn build_structure_body(model: &str, draft: &str) -> Value {
     "stream": true,
     "think": false,
     "format": output_schema(),
-    "options": { "temperature": 0.2 }
+    "options": { "temperature": 0.2, "num_predict": 4096 }
   })
 }
 
@@ -285,14 +255,23 @@ struct RawResult {
 }
 
 /// NDJSON ストリーム（Ollama /api/chat stream=true）を消費し、message.content を連結して返す。
-/// thinking は Thinking として、content の累積文字数は Generating として上報する。
+/// thinking は Thinking として上報する。content の各チャンクは content_event で上報する
+/// （引数は (新着分 delta, 累積文字数)）。段ごとに表現を変える: Pass1＝Narration（実テキスト）、
+/// Pass2＝Structuring（数字）、非思考単発＝Generating（数字）。
 /// JSON への整形は呼び出し側（parse_structure）に分離する（思考パスは散文を返すため）。
 fn consume_chat_stream(
   lines: impl Iterator<Item = std::io::Result<String>>,
+  content_event: &dyn Fn(&str, usize) -> StreamProgress,
+  should_cancel: &dyn Fn() -> bool,
   on_progress: &mut dyn FnMut(StreamProgress),
 ) -> Result<String, AiError> {
   let mut content = String::new();
   for line in lines {
+    // 停止ボタン: 各チャンクの前に確認。立っていれば読み取りを止めて即返す。
+    // ここで return すると呼び出し側で reader（＝接続）が drop され、Ollama 側の生成も中断される。
+    if should_cancel() {
+      return Err(AiError::Cancelled);
+    }
     let line = line.map_err(|e| {
       // 本文読み取り中のタイムアウトはモデルのロード/生成が長いケース。提案つきで返す。
       AiError::Network(format!(
@@ -312,7 +291,7 @@ fn consume_chat_stream(
     }
     if !chunk.message.content.is_empty() {
       content.push_str(&chunk.message.content);
-      on_progress(StreamProgress::Generating { chars: content.chars().count() });
+      on_progress(content_event(&chunk.message.content, content.chars().count()));
     }
     if chunk.done {
       break;
@@ -363,16 +342,46 @@ impl AiProvider for OllamaProvider {
       .map_err(|e| AiError::Network(e.to_string()))?;
 
     on_progress(StreamProgress::LoadingModel);
+    // Pass1（思考モデルの散文）は実テキストを Narration で流す＝過程を見せる。
+    let narrating = |delta: &str, _c: usize| StreamProgress::Narration { delta: delta.to_string() };
+    // Pass2 と非思考単発は JSON を起こす段。表示用テキストは無いので数字で済ます。
+    let structuring = |_d: &str, c: usize| StreamProgress::Structuring { chars: c };
+    let generating = |_d: &str, c: usize| StreamProgress::Generating { chars: c };
+    let should_cancel = || self.cancel.load(Ordering::Relaxed);
     if self.think {
       // 思考モデルは 2 段階。format grammar と think の同時使用が content を壊すため。
-      // Pass1: 推論 + 散文ドラフト（think あり・format なし）。推論は面板へ流れる。
-      let draft = post_chat(&client, &self.base_url, &model, build_draft_body(&model, &req), on_progress)?;
-      // Pass2: ドラフトを構造化（format あり・think なし＝確実な経路）。
-      let content =
-        post_chat(&client, &self.base_url, &model, build_structure_body(&model, &draft), on_progress)?;
+      // Pass1: 推論 + 散文ドラフト（think あり・format なし）。散文は Narration として会話へ流れる。
+      let draft = post_chat(
+        &client,
+        &self.base_url,
+        &model,
+        build_draft_body(&model, &req),
+        &narrating,
+        &should_cancel,
+        on_progress,
+      )?;
+      // Pass2: ドラフトを構造化（format あり・think なし＝確実な経路）＝整理。
+      let content = post_chat(
+        &client,
+        &self.base_url,
+        &model,
+        build_structure_body(&model, &draft),
+        &structuring,
+        &should_cancel,
+        on_progress,
+      )?;
       parse_structure(&content)
     } else {
-      let content = post_chat(&client, &self.base_url, &model, build_body(&model, &req), on_progress)?;
+      // 非思考は 1 段で直接 JSON を起こす＝生成。
+      let content = post_chat(
+        &client,
+        &self.base_url,
+        &model,
+        build_body(&model, &req),
+        &generating,
+        &should_cancel,
+        on_progress,
+      )?;
       parse_structure(&content)
     }
   }
@@ -384,6 +393,8 @@ fn post_chat(
   base_url: &str,
   model: &str,
   body: Value,
+  content_event: &dyn Fn(&str, usize) -> StreamProgress,
+  should_cancel: &dyn Fn() -> bool,
   on_progress: &mut dyn FnMut(StreamProgress),
 ) -> Result<String, AiError> {
   let resp = client
@@ -414,7 +425,7 @@ fn post_chat(
 
   use std::io::BufRead;
   let reader = std::io::BufReader::new(resp);
-  consume_chat_stream(reader.lines(), on_progress)
+  consume_chat_stream(reader.lines(), content_event, should_cancel, on_progress)
 }
 
 #[cfg(test)]
@@ -471,7 +482,9 @@ mod tests {
       Ok(r#"{"message":{"content":"茶\",\"cat\":\"tea\",\"body_markdown\":\"本文\",\"suggested_links\":[]}"},"done":true}"#.to_string()),
     ];
     let mut events = Vec::new();
-    let content = consume_chat_stream(lines.into_iter(), &mut |p| events.push(p)).unwrap();
+    let gen = |_: &str, c: usize| StreamProgress::Generating { chars: c };
+    let content =
+      consume_chat_stream(lines.into_iter(), &gen, &|| false, &mut |p| events.push(p)).unwrap();
     // consume は content を連結して返すだけ。整形は parse_structure に分離。
     let result = parse_structure(&content).unwrap();
     assert_eq!(result.kind, "entry");
@@ -483,13 +496,71 @@ mod tests {
   }
 
   #[test]
+  fn consume_chat_stream_uses_content_event_for_structuring() {
+    // Pass2 は Structuring 閉包を渡す＝整理段として区別できる。
+    let lines = vec![Ok(
+      r#"{"message":{"content":"{\"kind\":\"entry\",\"title\":\"t\",\"cat\":\"\",\"body_markdown\":\"b\",\"suggested_links\":[]}"},"done":true}"#
+        .to_string(),
+    )];
+    let mut events = Vec::new();
+    let structuring = |_: &str, c: usize| StreamProgress::Structuring { chars: c };
+    consume_chat_stream(lines.into_iter(), &structuring, &|| false, &mut |p| events.push(p)).unwrap();
+    assert!(events.iter().all(|e| matches!(e, StreamProgress::Structuring { .. })));
+    assert!(!events.is_empty());
+  }
+
+  #[test]
+  fn consume_chat_stream_narration_carries_delta_text() {
+    // Pass1（散文）は各チャンクの実テキスト（delta）を Narration として流す＝過程表示の素。
+    let lines = vec![
+      Ok(r#"{"message":{"content":"こん"},"done":false}"#.to_string()),
+      Ok(r#"{"message":{"content":"にちは"},"done":true}"#.to_string()),
+    ];
+    let mut events = Vec::new();
+    let narrating =
+      |delta: &str, _c: usize| StreamProgress::Narration { delta: delta.to_string() };
+    consume_chat_stream(lines.into_iter(), &narrating, &|| false, &mut |p| events.push(p)).unwrap();
+    let deltas: Vec<String> = events
+      .iter()
+      .filter_map(|e| match e {
+        StreamProgress::Narration { delta } => Some(delta.clone()),
+        _ => None,
+      })
+      .collect();
+    assert_eq!(deltas, vec!["こん".to_string(), "にちは".to_string()]);
+  }
+
+  #[test]
+  fn consume_chat_stream_stops_when_cancelled() {
+    // 停止ボタン: should_cancel が途中で true になったら、残りの行は消費せず Cancelled で返す。
+    let lines = vec![
+      Ok(r#"{"message":{"content":"a"},"done":false}"#.to_string()),
+      Ok(r#"{"message":{"content":"b"},"done":false}"#.to_string()),
+    ];
+    let mut events = Vec::new();
+    let gen = |_: &str, c: usize| StreamProgress::Generating { chars: c };
+    // 1 回目の確認は false（1 行目を処理）、2 回目で true（2 行目の前で中断）。
+    let calls = std::cell::Cell::new(0);
+    let cancel = || {
+      calls.set(calls.get() + 1);
+      calls.get() > 1
+    };
+    let result = consume_chat_stream(lines.into_iter(), &gen, &cancel, &mut |p| events.push(p));
+    assert!(matches!(result, Err(AiError::Cancelled)));
+    // 2 行目は処理されない（進捗は 1 件のみ）。
+    assert_eq!(events.len(), 1);
+  }
+
+  #[test]
   fn consume_chat_stream_reports_thinking_then_content() {
     let lines = vec![
       Ok(r#"{"message":{"thinking":"考え中"},"done":false}"#.to_string()),
       Ok(r#"{"message":{"content":"{\"kind\":\"chat\",\"title\":\"\",\"cat\":\"\",\"body_markdown\":\"hi\",\"suggested_links\":[]}"},"done":true}"#.to_string()),
     ];
     let mut events = Vec::new();
-    let content = consume_chat_stream(lines.into_iter(), &mut |p| events.push(p)).unwrap();
+    let gen = |_: &str, c: usize| StreamProgress::Generating { chars: c };
+    let content =
+      consume_chat_stream(lines.into_iter(), &gen, &|| false, &mut |p| events.push(p)).unwrap();
     assert_eq!(parse_structure(&content).unwrap().body_markdown, "hi");
     assert_eq!(events.first(), Some(&StreamProgress::Thinking { delta: "考え中".into() }));
     assert!(events.iter().any(|e| matches!(e, StreamProgress::Generating { .. })));
@@ -516,6 +587,8 @@ mod tests {
     let body = build_structure_body("m", "杀青の本文");
     assert_eq!(body["format"]["type"], "object");
     assert_eq!(body["think"], false);
+    // num_predict で整理段の暴走を抑える（format 文法のみだと上限なしで 180s 超時まで生成しうる）。
+    assert_eq!(body["options"]["num_predict"], 4096);
     assert!(body["messages"][1]["content"].as_str().unwrap().contains("杀青の本文"));
   }
 
@@ -532,7 +605,8 @@ mod tests {
   #[test]
   fn consume_chat_stream_propagates_read_error_with_hint() {
     let lines = vec![Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out"))];
-    let err = consume_chat_stream(lines.into_iter(), &mut |_| {}).unwrap_err();
+    let gen = |_: &str, c: usize| StreamProgress::Generating { chars: c };
+    let err = consume_chat_stream(lines.into_iter(), &gen, &|| false, &mut |_| {}).unwrap_err();
     assert!(matches!(err, AiError::Network(_)));
   }
 

@@ -1,12 +1,21 @@
 //! workshop インターフェイス層。Tauri コマンド（IPC アダプタ）。
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use serde::Serialize;
 use tauri::ipc::Channel;
-use tauri::Manager;
+use tauri::{Manager, State};
 
 use crate::ai::{ChatTurn, StreamProgress, StructureResult};
 use crate::kb::material;
 use crate::workshop::application;
+
+/// 停止ボタン用の共有中断フラグ。lib.rs で app.manage する。
+/// Ollama は直列なので生成は同時に 1 本だけ ＝ 単一フラグで足りる。
+/// ponytail: 単飛フラグ。並列生成が要るようになったら per-run の登録表に替える。
+#[derive(Default)]
+pub struct WorkshopCancel(pub Arc<AtomicBool>);
 
 /// 草稿生成の進捗イベント。フロントの Channel へ送る（右側 status バーのフェーズ表示）。
 #[derive(Clone, Serialize)]
@@ -18,8 +27,12 @@ pub enum DraftEvent {
   Thinking { delta: String },
   /// リクエスト送信済み・最初のトークン待ち（モデルのロード中を含む）。
   LoadingModel,
-  /// トークン受信中。chars は累積文字数。
+  /// 起草（Pass1）のトークン受信中。chars は累積文字数。
   Generating { chars: usize },
+  /// 整理（Pass2）のトークン受信中。起草と区別してフェーズ表示する。
+  Structuring { chars: usize },
+  /// ユーザー向けナレーションの増分（思考モデルの散文）。会話に過程テキストを流す。
+  Narration { delta: String },
 }
 
 impl From<StreamProgress> for DraftEvent {
@@ -29,6 +42,8 @@ impl From<StreamProgress> for DraftEvent {
       StreamProgress::Thinking { delta } => DraftEvent::Thinking { delta },
       StreamProgress::LoadingModel => DraftEvent::LoadingModel,
       StreamProgress::Generating { chars } => DraftEvent::Generating { chars },
+      StreamProgress::Structuring { chars } => DraftEvent::Structuring { chars },
+      StreamProgress::Narration { delta } => DraftEvent::Narration { delta },
     }
   }
 }
@@ -40,6 +55,7 @@ impl From<StreamProgress> for DraftEvent {
 #[tauri::command]
 pub async fn workshop_draft(
   app: tauri::AppHandle,
+  cancel: State<'_, WorkshopCancel>,
   inbox_paths: Vec<String>,
   messages: Vec<ChatTurn>,
   model: String,
@@ -47,6 +63,9 @@ pub async fn workshop_draft(
   on_event: Channel<DraftEvent>,
 ) -> Result<StructureResult, String> {
   let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  // 新しい生成の開始時にフラグを倒す（前回の停止が残らないように）。
+  cancel.0.store(false, Ordering::Relaxed);
+  let cancel_flag = cancel.0.clone();
   let joined = tauri::async_runtime::spawn_blocking(move || -> Result<StructureResult, String> {
     let (root, conn) = crate::kb::open_active(&home)?;
     let mut bodies = Vec::with_capacity(inbox_paths.len());
@@ -56,7 +75,8 @@ pub async fn workshop_draft(
       bodies.push(material::parse_material(&raw)?.body);
     }
     let source_text = bodies.join("\n\n---\n\n");
-    let provider = crate::ai::ollama::OllamaProvider::with_model_think(model, think);
+    let provider =
+      crate::ai::ollama::OllamaProvider::with_model_think(model, think).with_cancel(cancel_flag);
     let mut on_progress = |p: StreamProgress| {
       let _ = on_event.send(DraftEvent::from(p));
     };
@@ -69,6 +89,13 @@ pub async fn workshop_draft(
     Ok(inner) => inner,
     Err(e) => Err(e.to_string()),
   }
+}
+
+/// 進行中の生成を中断する（停止ボタン）。共有フラグを立てるだけ。
+/// stream 消費ループが次のチャンク前に検知して打ち切り、接続を drop して Ollama 側も止める。
+#[tauri::command]
+pub fn workshop_cancel(cancel: State<'_, WorkshopCancel>) {
+  cancel.0.store(true, Ordering::Relaxed);
 }
 
 /// 承認内容を条目として確定する（UI で手編集済みの値を受け取る）。
@@ -108,5 +135,16 @@ mod tests {
       serde_json::to_value(DraftEvent::from(StreamProgress::Thinking { delta: "x".into() })).unwrap();
     assert_eq!(think["phase"], "thinking");
     assert_eq!(think["delta"], "x");
+    // Pass2（整理）は Structuring として上報し、起草と区別できる。
+    let struc =
+      serde_json::to_value(DraftEvent::from(StreamProgress::Structuring { chars: 5 })).unwrap();
+    assert_eq!(struc["phase"], "structuring");
+    assert_eq!(struc["chars"], 5);
+    // ナレーションは実テキスト（delta）を運ぶ。
+    let narr =
+      serde_json::to_value(DraftEvent::from(StreamProgress::Narration { delta: "本文".into() }))
+        .unwrap();
+    assert_eq!(narr["phase"], "narration");
+    assert_eq!(narr["delta"], "本文");
   }
 }

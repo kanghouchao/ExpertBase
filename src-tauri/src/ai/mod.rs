@@ -1,6 +1,8 @@
 //! AI 機能。DDD レイヤ構成（domain ポート / infrastructure アダプタ / interface）。
 //! application 層は持たない（AI を編成するユースケースは workshop が担う）。
+//! agent: プロバイダ非依存の指示層（プロンプト + 出力スキーマ）。transport から切り離す。
 
+pub mod agent;
 mod domain;
 mod infrastructure;
 pub mod interface;

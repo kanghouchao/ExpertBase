@@ -53,8 +53,13 @@ pub enum StreamProgress {
   Thinking { delta: String },
   /// リクエスト送信済み・最初のトークン待ち（モデルのロード中を含む）。
   LoadingModel,
-  /// 本文（content）受信中。chars は累積文字数。
+  /// 起草（Pass1）の本文受信中。chars は累積文字数。
   Generating { chars: usize },
+  /// 整理（Pass2）の本文受信中。format 固定でドラフトを構造化する段。
+  Structuring { chars: usize },
+  /// ユーザー向けナレーションの増分（思考モデルの Pass1 散文＝「AI が今書いている本文」）。
+  /// 数字ではなく実テキストを流し、会話で過程を見せる。delta は新着分のみ。
+  Narration { delta: String },
 }
 
 /// AI エラー。UI で区別して表示し、手動パスへ退避できるようにする。
@@ -64,6 +69,8 @@ pub enum AiError {
   Network(String),
   /// その他（API エラー応答・解析失敗など）。
   Other(String),
+  /// ユーザーが生成を中断した（停止ボタン）。UI はエラー表示せず idle へ戻す。
+  Cancelled,
 }
 
 impl std::fmt::Display for AiError {
@@ -71,6 +78,7 @@ impl std::fmt::Display for AiError {
     match self {
       AiError::Network(m) => write!(f, "网络错误: {m}"),
       AiError::Other(m) => write!(f, "{m}"),
+      AiError::Cancelled => write!(f, "已取消"),
     }
   }
 }
