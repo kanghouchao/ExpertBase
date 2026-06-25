@@ -83,11 +83,14 @@ export type DraftPhase =
   | { phase: "loadingModel" }
   | { phase: "generating"; chars: number }
   | { phase: "structuring"; chars: number }
-  | { phase: "narration"; delta: string };
+  | { phase: "narration"; delta: string }
+  | { phase: "toolCall"; name: string; args: string }
+  | { phase: "toolResult"; name: string; summary: string };
 
 export type OllamaModel = {
   name: string;
   thinking: boolean;
+  tools: boolean;
 };
 
 /** インデックスをファイルから再構築する。 */
@@ -214,6 +217,7 @@ export async function workshopDraft(
   messages: ChatTurn[],
   model: string,
   think: boolean,
+  tools: boolean,
   onPhase?: (phase: DraftPhase) => void
 ): Promise<StructureResult> {
   const channel = new Channel<DraftPhase>();
@@ -223,6 +227,7 @@ export async function workshopDraft(
     messages,
     model,
     think,
+    tools,
     onEvent: channel,
   });
 }

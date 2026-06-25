@@ -33,6 +33,10 @@ pub enum DraftEvent {
   Structuring { chars: usize },
   /// ユーザー向けナレーションの増分（思考モデルの散文）。会話に過程テキストを流す。
   Narration { delta: String },
+  /// エージェントがツールを呼び出した。会話にカードで見せる。args は表示用 JSON 文字列。
+  ToolCall { name: String, args: String },
+  /// ツール実行結果の要約。呼び出しカードに続けて見せる。
+  ToolResult { name: String, summary: String },
 }
 
 impl From<StreamProgress> for DraftEvent {
@@ -44,6 +48,8 @@ impl From<StreamProgress> for DraftEvent {
       StreamProgress::Generating { chars } => DraftEvent::Generating { chars },
       StreamProgress::Structuring { chars } => DraftEvent::Structuring { chars },
       StreamProgress::Narration { delta } => DraftEvent::Narration { delta },
+      StreamProgress::ToolCall { name, args } => DraftEvent::ToolCall { name, args },
+      StreamProgress::ToolResult { name, summary } => DraftEvent::ToolResult { name, summary },
     }
   }
 }
@@ -60,6 +66,7 @@ pub async fn workshop_draft(
   messages: Vec<ChatTurn>,
   model: String,
   think: bool,
+  tools: bool,
   on_event: Channel<DraftEvent>,
 ) -> Result<StructureResult, String> {
   let home = app.path().home_dir().map_err(|e| e.to_string())?;
@@ -80,8 +87,13 @@ pub async fn workshop_draft(
     let mut on_progress = |p: StreamProgress| {
       let _ = on_event.send(DraftEvent::from(p));
     };
-    application::draft(&provider, &conn, &source_text, messages, &mut on_progress)
-      .map_err(|e| e.to_string())
+    // tools 対応モデルはエージェント経路（検索ツール + 逐次上報）。非対応は従来の RAG 直結。
+    let result = if tools {
+      application::agent_draft(&provider, &conn, &source_text, messages, &mut on_progress)
+    } else {
+      application::draft(&provider, &conn, &source_text, messages, &mut on_progress)
+    };
+    result.map_err(|e| e.to_string())
   })
   .await;
 
