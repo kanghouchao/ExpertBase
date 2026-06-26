@@ -8,6 +8,7 @@ import { PageHead } from "@/shared/ui/page-head";
 import { Panel } from "@/shared/ui/panel";
 import { Tag } from "@/shared/ui/tag";
 import { Button, buttonVariants } from "@/shared/ui/button";
+import { Markdown } from "@/shared/ui/markdown";
 import { useI18n } from "@/shared/providers/providers";
 import { EmptyState } from "@/shared/ui/empty-state";
 import {
@@ -213,9 +214,9 @@ export function WikiView() {
                   className="min-h-100 w-full resize-y rounded-xl border border-line-strong bg-surface-2 p-3.5 font-mono text-[13.5px] leading-relaxed text-ink outline-none"
                 />
               ) : (
-                <article className="text-[15.5px] leading-[1.85] whitespace-pre-wrap text-ink-soft">
-                  {body}
-                </article>
+                <Markdown className="text-[15.5px] leading-[1.85] text-ink-soft">
+                  {stripFrontmatter(body)}
+                </Markdown>
               )}
               <div className="mt-7">
                 <div className="mb-2.5 font-mono text-xs font-bold tracking-widest text-ink-muted uppercase">
@@ -241,4 +242,12 @@ export function WikiView() {
       )}
     </div>
   );
+}
+
+// 条目の生 Markdown から frontmatter（先頭の --- ブロック）を外して本文だけ表示する。
+function stripFrontmatter(markdown: string): string {
+  if (!markdown.startsWith("---")) return markdown.trim();
+  const end = markdown.indexOf("\n---", 3);
+  if (end === -1) return markdown.trim();
+  return markdown.slice(end + 4).trim();
 }
