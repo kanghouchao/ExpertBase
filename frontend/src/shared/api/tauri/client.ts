@@ -61,28 +61,16 @@ export type InboxItem = {
   capturedAt: string;
 };
 
-/** AI の応答。kind="chat" のときは bodyMarkdown に会話返信が入り、他は空。 */
-export type StructureResult = {
-  kind: "entry" | "chat";
-  title: string;
-  cat: string;
-  bodyMarkdown: string;
-  suggestedLinks: string[];
-};
-
 /** 会話の 1 ターン（多輪・記憶のためフロントが履歴を組み立てて渡す）。 */
 export type ChatTurn = {
   role: "user" | "assistant";
   content: string;
 };
 
-/** 草稿生成のフェーズイベント（Rust DraftEvent と一致）。 */
-export type DraftPhase =
-  | { phase: "retrieving" }
+/** 対話の進捗イベント（Rust ChatEvent と一致）。 */
+export type ChatPhase =
   | { phase: "thinking"; delta: string }
   | { phase: "loadingModel" }
-  | { phase: "generating"; chars: number }
-  | { phase: "structuring"; chars: number }
   | { phase: "narration"; delta: string }
   | { phase: "toolCall"; name: string; args: string }
   | { phase: "toolResult"; name: string; summary: string };
@@ -211,18 +199,18 @@ export async function listOllamaModels(): Promise<OllamaModel[]> {
   return invoke<OllamaModel[]>("ai_list_ollama_models");
 }
 
-/** 複数の受信箱素材 + 会話履歴から AI 応答を生成する。onPhase で進捗フェーズを受け取る。 */
-export async function workshopDraft(
+/** 複数の受信箱素材 + 会話履歴で対話エージェントを 1 ターン回す。最終返信本文を返す。onPhase で進捗を受け取る。 */
+export async function workshopChat(
   inboxPaths: string[],
   messages: ChatTurn[],
   model: string,
   think: boolean,
   tools: boolean,
-  onPhase?: (phase: DraftPhase) => void
-): Promise<StructureResult> {
-  const channel = new Channel<DraftPhase>();
+  onPhase?: (phase: ChatPhase) => void
+): Promise<string> {
+  const channel = new Channel<ChatPhase>();
   if (onPhase) channel.onmessage = onPhase;
-  return invoke<StructureResult>("workshop_draft", {
+  return invoke<string>("workshop_chat", {
     inboxPaths,
     messages,
     model,
@@ -236,14 +224,4 @@ export async function workshopDraft(
 export async function workshopCancel(): Promise<void> {
   if (!isTauri()) return;
   await invoke("workshop_cancel");
-}
-
-/** 承認内容を条目として確定する。確定した条目の相対パスを返す。 */
-export async function workshopConfirm(input: {
-  inboxPaths: string[];
-  title: string;
-  cat: string;
-  body: string;
-}): Promise<string> {
-  return invoke<string>("workshop_confirm", input);
 }

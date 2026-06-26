@@ -4,10 +4,10 @@ use crate::ai::infrastructure::ollama;
 
 #[tauri::command]
 pub fn ai_has_key() -> Result<bool, String> {
-  Ok(ollama::OllamaProvider::available())
+  Ok(ollama::available())
 }
 
 #[tauri::command]
 pub fn ai_list_ollama_models() -> Result<Vec<ollama::OllamaModel>, String> {
-  ollama::OllamaProvider::list_models().map_err(|e| e.to_string())
+  ollama::list_models().map_err(|e| e.to_string())
 }

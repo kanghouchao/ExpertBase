@@ -42,9 +42,8 @@ pub fn run() {
       capture::interface::capture_web,
       ai::interface::ai_has_key,
       ai::interface::ai_list_ollama_models,
-      workshop::interface::workshop_draft,
+      workshop::interface::workshop_chat,
       workshop::interface::workshop_cancel,
-      workshop::interface::workshop_confirm,
       asr::interface::transcribe_material
     ])
     .run(tauri::generate_context!())

@@ -1,40 +1,33 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { EmptyState } from "@/shared/ui/empty-state";
 import { Icon } from "@/shared/ui/icon";
 import { Tag } from "@/shared/ui/tag";
 import { Button, buttonVariants } from "@/shared/ui/button";
-import { Drawer, DrawerContent } from "@/shared/ui/drawer";
+import { Markdown } from "@/shared/ui/markdown";
 import { useI18n } from "@/shared/providers/providers";
 import {
   aiHasKey,
   listOllamaModels,
   listInbox,
-  readInboxMaterial,
   workshopCancel,
-  workshopConfirm,
-  workshopDraft,
-  type DraftPhase,
+  workshopChat,
+  type ChatPhase,
   type InboxItem,
   type OllamaModel,
-  type StructureResult,
 } from "@/shared/api/tauri/client";
 import { inboxToMaterial, RAW_TYPE, type RawMaterial } from "@/entities/material";
 import { useKbStore } from "@/entities/knowledge-base";
 import {
-  buildManualDraft,
   canRemoveSource,
   isGeneratingPhase,
-  lineDiff,
   runningLabelKey,
-  replaceLatestEntryResult,
-  sameSourceIds,
   toChatTurn,
-  type DraftUiPhase,
+  type ChatUiPhase,
   type ProcessMessage,
   type ToolEvent,
 } from "../model/process-state";
@@ -54,9 +47,7 @@ const PREVIEW_SOURCE: RawMaterial = {
   tags: [],
 };
 
-const PREVIEW_RAW = `……所以你看，杀青的温度其实没有一个死数字，要看茶青的含水量。手摸下去，第一遍要“高温杀透”，让它快速失水；第二遍才看香气和叶色。`;
-
-// Tauri 外プレビューで「+」素材選択を見せるための候補プール（!available 時のみ）。
+// Tauri 外プレビューで「+」素材選択を見せるための候補プール（!available 时のみ）。
 const PREVIEW_POOL: RawMaterial[] = [
   {
     id: "inbox/whitepaper.md",
@@ -90,28 +81,16 @@ const PREVIEW_MODELS: OllamaModel[] = [
   { name: "llama3.1:8b", thinking: false, tools: false },
 ];
 
-// プレビュー（Tauri 外）の加工パネルに見せる素材。入力素材から組み立てるだけで、
-// AI 生成結果（関連リンク等）は空のまま——出力は偽装しない。
-const PREVIEW_DRAFT: StructureResult = {
-  kind: "entry",
-  title: PREVIEW_SOURCE.title,
-  cat: "",
-  bodyMarkdown: PREVIEW_RAW,
-  suggestedLinks: [],
-};
-
-// 会話メッセージ。ユーザー発話 or AI 応答（草稿 entry / 会話返信 chat）。
-type Msg = ProcessMessage<RawMaterial>;
+// 会話メッセージ。ユーザー発話 or AI 応答。
+type Msg = ProcessMessage;
 
 export function WorkshopProcessView() {
   const { t } = useI18n();
-  const router = useRouter();
   const params = useSearchParams();
   const { available } = useKbStore();
   const inboxPath = params.get("path") ?? "";
 
   const [sources, setSources] = useState<RawMaterial[]>([]);
-  const [rawByPath, setRawByPath] = useState<Record<string, string>>({});
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [showPicker, setShowPicker] = useState(false);
   const [instruction, setInstruction] = useState("");
@@ -119,21 +98,16 @@ export function WorkshopProcessView() {
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
-  const [draft, setDraft] = useState<StructureResult | null>(null);
-  const [draftSourceIds, setDraftSourceIds] = useState<string[]>([]);
-  const [phase, setPhase] = useState<DraftUiPhase>("idle");
+  const [phase, setPhase] = useState<ChatUiPhase>("idle");
   const [thinkingBuf, setThinkingBuf] = useState("");
-  // 生成中に流れる「AI が今書いている本文」（思考モデルの Pass1 散文）。過程を可視化する。
+  // 生成中に流れる「AI が今書いている本文」。過程を可視化する。
   const [narrationBuf, setNarrationBuf] = useState("");
-  // 生成中のツール呼び出しログ（検索など）。会話にカードで見せる。
+  // 生成中のツール呼び出しログ（検索・書き込みなど）。会話にカードで見せる。
   const [toolLog, setToolLog] = useState<ToolEvent[]>([]);
-  const [draftOpen, setDraftOpen] = useState(false);
-  // ドロワーで読み取り専用表示する過去ターンのスナップショット（null＝最新草稿を編集モードで開く）。
-  const [snapshot, setSnapshot] = useState<StructureResult | null>(null);
   const generating = isGeneratingPhase(phase);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const threadEnd = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   // 停止ボタン押下フラグ。中断は失敗扱いせず（赤エラーを出さず）idle へ戻すために使う。
   const cancelRef = useRef(false);
 
@@ -142,16 +116,11 @@ export function WorkshopProcessView() {
     void (async () => {
       setError(null);
       try {
-        const [inboxList, raw] = await Promise.all([listInbox(), readInboxMaterial(inboxPath)]);
+        const inboxList = await listInbox();
         setInbox(inboxList);
         const found = inboxList.find((candidate) => candidate.path === inboxPath) ?? null;
-        const initialSources = found ? [materialFromInbox(found)] : [];
-        const initialRaw = { [inboxPath]: raw };
-        setSources(initialSources);
-        setRawByPath(initialRaw);
+        setSources(found ? [materialFromInbox(found)] : []);
         setMessages([]);
-        setDraft(buildManualDraft(initialSources, initialRaw));
-        setDraftSourceIds(initialSources.map((source) => source.id));
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -181,7 +150,15 @@ export function WorkshopProcessView() {
   // 新しいメッセージが出たら会話を最下部に追従させる。
   useEffect(() => {
     threadEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, generating, draft]);
+  }, [messages, generating]);
+
+  // 入力欄は 1 行から始まり、内容に合わせて自動的に伸びる（送信後は空＝1 行に戻る）。
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [instruction]);
 
   const visibleSources = available ? sources : [PREVIEW_SOURCE];
   const visibleHasOllama = available ? hasOllama : true;
@@ -199,36 +176,18 @@ export function WorkshopProcessView() {
   const canGenerate =
     visibleSources.length > 0 && visibleHasOllama && !!visibleSelectedModel && !generating;
 
-  async function addSource(material: RawMaterial) {
+  function addSource(material: RawMaterial) {
     setShowPicker(false);
     if (!available || sources.some((s) => s.id === material.id)) return;
-    let nextRawByPath = rawByPath;
-    if (!rawByPath[material.id]) {
-      try {
-        const raw = await readInboxMaterial(material.id);
-        nextRawByPath = { ...rawByPath, [material.id]: raw };
-        setRawByPath(nextRawByPath);
-      } catch {
-        /* 本文取得の失敗は致命的でない（カードは material.preview にフォールバック）。 */
-      }
-    }
-    const nextSources = [...sources, material];
-    setSources(nextSources);
-    if (messages.length === 0) {
-      setDraft(buildManualDraft(nextSources, nextRawByPath));
-      setDraftSourceIds(nextSources.map((source) => source.id));
-    }
+    setSources((current) => [...current, material]);
   }
 
   function removeSource(id: string) {
     if (!available || messages.length > 0) return;
-    const nextSources = sources.filter((source) => source.id !== id);
-    setSources(nextSources);
-    setDraft(buildManualDraft(nextSources, rawByPath));
-    setDraftSourceIds(nextSources.map((source) => source.id));
+    setSources((current) => current.filter((source) => source.id !== id));
   }
 
-  // 会話履歴つきで AI を呼ぶ。entry なら草稿を更新、chat なら会話気泡として表示。
+  // 会話履歴つきで対話エージェントを 1 ターン回す。思考・ツール・本文を流式表示し、最終返信を会話へ積む。
   async function runTurn(history: Msg[]) {
     setMessages(history);
     setInstruction("");
@@ -243,18 +202,14 @@ export function WorkshopProcessView() {
       let thinking = "";
       let narration = "";
       const tools: ToolEvent[] = [];
-      const result = await workshopDraft(
+      const reply = await workshopChat(
         sources.map((s) => s.id),
         history.map(toChatTurn),
         visibleSelectedModel,
         selectedThinking,
         selectedTools,
-        (p: DraftPhase) => {
-          if (p.phase === "generating") {
-            setPhase("generating");
-          } else if (p.phase === "structuring") {
-            setPhase("structuring");
-          } else if (p.phase === "narration") {
+        (p: ChatPhase) => {
+          if (p.phase === "narration") {
             setPhase("generating");
             narration += p.delta;
             setNarrationBuf(narration);
@@ -263,11 +218,11 @@ export function WorkshopProcessView() {
             setToolLog([...tools]);
           } else if (p.phase === "toolResult") {
             // 直近の同名・未完了の呼び出しに結果サマリを埋める。
-            const target = [...tools].reverse().find((t) => t.name === p.name && !t.summary);
+            const target = [...tools]
+              .reverse()
+              .find((tool) => tool.name === p.name && !tool.summary);
             if (target) target.summary = p.summary;
             setToolLog([...tools]);
-          } else if (p.phase === "retrieving") {
-            setPhase("retrieving");
           } else if (p.phase === "thinking") {
             setPhase("thinking");
             thinking += p.delta;
@@ -281,16 +236,11 @@ export function WorkshopProcessView() {
         ...history,
         {
           role: "ai",
-          result,
+          text: reply || narration,
           thinking: thinking || undefined,
-          narration: narration || undefined,
           tools: tools.length ? tools : undefined,
         },
       ]);
-      if (result.kind === "entry") {
-        setDraft(result);
-        setDraftSourceIds(sources.map((source) => source.id));
-      }
       setPhase("idle");
     } catch (e) {
       // 停止ボタンによる中断はエラー表示しない（ユーザーが意図した中断）。
@@ -310,81 +260,11 @@ export function WorkshopProcessView() {
   }
 
   async function handleSend() {
-    if (!canGenerate) return;
-    const userMsg: Msg =
-      messages.length === 0
-        ? { role: "user", text: instruction.trim(), sources: visibleSources }
-        : { role: "user", text: instruction.trim() };
-    void runTurn([...messages, userMsg]);
-  }
-
-  // 末尾の AI 応答を捨てて、直前のユーザー発話まででやり直す。
-  function handleRegenerate() {
-    if (!canGenerate || messages.length === 0) return;
-    const last = messages[messages.length - 1];
-    void runTurn(last.role === "ai" ? messages.slice(0, -1) : messages);
-  }
-
-  async function handleConfirm() {
-    if (sources.length === 0 || !draft?.title.trim() || !draft.bodyMarkdown.trim()) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await workshopConfirm({
-        inboxPaths: sources.map((s) => s.id),
-        title: draft.title,
-        cat: draft.cat,
-        body: draft.bodyMarkdown,
-      });
-      router.push("/workshop");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function handleDraftChange(next: StructureResult) {
-    setDraft(next);
-    setMessages((current) => replaceLatestEntryResult(current, next));
+    if (!canGenerate || !instruction.trim()) return;
+    void runTurn([...messages, { role: "user", text: instruction.trim() }]);
   }
 
   const notFound = !inboxPath || (visibleSources.length === 0 && !error);
-  // 最新の entry ターンだけが編集可能な草稿（draft）。それより前は読み取り専用スナップ。
-  const lastEntryIdx = messages.reduce(
-    (acc, m, i) => (m.role === "ai" && m.result.kind === "entry" ? i : acc),
-    -1
-  );
-  // 草稿ドロワーを開く: 最新ターンは編集モード、過去ターンは m.result の読み取り専用。
-  const openDraftEditable = () => {
-    setSnapshot(null);
-    setDraftOpen(true);
-  };
-  const openDraftSnapshot = (result: StructureResult) => {
-    setSnapshot(result);
-    setDraftOpen(true);
-  };
-  // Ollama が無いときは会話せず、素材から起こした草稿を直接編集して確定する手動経路。
-  const showManualDraft = !visibleHasOllama && !!draft && messages.length === 0;
-  const sourcesChanged = !sameSourceIds(
-    draftSourceIds,
-    sources.map((source) => source.id)
-  );
-  const canConfirm =
-    sources.length > 0 &&
-    !sourcesChanged &&
-    !!draft?.title.trim() &&
-    !!draft?.bodyMarkdown.trim() &&
-    !busy;
-  // 実データの draft が無いプレビューでは、パネルの体裁だけ見せる（確認は無効）。
-  const visibleDraft = draft ?? (available ? null : PREVIEW_DRAFT);
-  // 行差分は実測値: 素材本文 vs 現在の草稿（品質スコアのような偽装はしない）。
-  const sourceText = visibleSources
-    .map((source) => stripFrontmatter(rawByPath[source.id] ?? source.preview))
-    .join("\n\n---\n\n");
-  const changes = visibleDraft
-    ? lineDiff(sourceText, visibleDraft.bodyMarkdown)
-    : { added: 0, removed: 0 };
 
   if (notFound) {
     return (
@@ -401,7 +281,7 @@ export function WorkshopProcessView() {
     <div className="view-enter flex flex-col lg:h-full">
       <ProcessTopBar t={t} />
 
-      {/* lg 以上は全高 2 カラム（会話は内部スクロール）、それ未満は 1 カラムでページ全体スクロール。 */}
+      {/* lg 以上は 2 カラム（会話は内部スクロール）、それ未満は 1 カラムでページ全体スクロール。 */}
       <div className="flex flex-col gap-5 pt-5 lg:min-h-0 lg:flex-1 lg:flex-row">
         {/* ── 会話列 ── */}
         <div className="flex min-w-0 flex-1 flex-col">
@@ -422,59 +302,21 @@ export function WorkshopProcessView() {
                 </ChatRow>
               )}
 
-              {/* 会話（多輪）。AI entry は草稿カード、AI chat は会話気泡。 */}
+              {/* 会話（多輪）。 */}
               {messages.map((m, i) =>
                 m.role === "user" ? (
                   <div key={i} className="flex justify-end">
-                    <div className="flex max-w-[84%] flex-col items-end gap-2.5">
-                      {m.sources && m.sources.length > 0 && (
-                        <div className="flex w-full flex-col gap-2.5">
-                          {m.sources.map((s) => (
-                            <SourceCard key={s.id} material={s} source={rawByPath[s.id] ?? ""} />
-                          ))}
-                        </div>
-                      )}
-                      {m.text ? (
-                        <div className="rounded-[14px_14px_4px_14px] bg-brand px-4 py-2.5 text-[14px] leading-relaxed text-white">
-                          {m.text}
-                        </div>
-                      ) : (
-                        <div className="font-mono text-[12.5px] text-ink-faint">
-                          {t("workshop.attached")}
-                        </div>
-                      )}
+                    {/* 素材は右パネル/コンポーザーで示すので会話には出さない（履歴で常に文脈に入る）。 */}
+                    <div className="max-w-[84%] rounded-[14px_14px_4px_14px] bg-brand px-4 py-2.5 text-[14px] leading-relaxed whitespace-pre-wrap text-white">
+                      {m.text}
                     </div>
                   </div>
-                ) : m.result.kind === "chat" ? (
-                  <ChatRow key={i} ai>
-                    {m.thinking && <ThinkingPanel text={m.thinking} streaming={false} />}
-                    {m.tools && m.tools.length > 0 && <ToolCallLog tools={m.tools} />}
-                    <div className="text-[14.5px] leading-relaxed whitespace-pre-wrap text-ink-soft">
-                      {m.result.bodyMarkdown}
-                    </div>
-                  </ChatRow>
                 ) : (
                   <ChatRow key={i} ai>
                     {m.thinking && <ThinkingPanel text={m.thinking} streaming={false} />}
                     {m.tools && m.tools.length > 0 && <ToolCallLog tools={m.tools} />}
-                    {/* 生成過程の散文を折りたたんで残す（既定は閉。草稿は chip→ドロワーで編集）。 */}
-                    {m.narration && (
-                      <ThinkingPanel
-                        text={m.narration}
-                        streaming={false}
-                        label={t("workshop.narration.label")}
-                        mono={false}
-                      />
-                    )}
-                    {/* 各 entry ターンは自分の結果を開く。最新は編集、過去は読み取り専用。 */}
-                    <DraftChip
-                      label={t("workshop.draftChip")}
-                      onOpen={
-                        i === lastEntryIdx
-                          ? openDraftEditable
-                          : () => openDraftSnapshot(m.result)
-                      }
-                    />
+                    {/* AI 出力は Markdown。表示時にレンダリングする（保存は Markdown のまま）。 */}
+                    <Markdown className="text-[14.5px] text-ink-soft">{m.text}</Markdown>
                   </ChatRow>
                 )
               )}
@@ -485,7 +327,7 @@ export function WorkshopProcessView() {
                   {thinkingBuf && (
                     <ThinkingPanel text={thinkingBuf} streaming={phase === "thinking"} />
                   )}
-                  {/* エージェントのツール呼び出し（検索など）をカードで見せる。 */}
+                  {/* エージェントのツール呼び出し（検索・書き込み）をカードで見せる。 */}
                   {toolLog.length > 0 && (
                     <div className="mb-2.5 flex flex-col gap-1.5">
                       {toolLog.map((tool, idx) => (
@@ -503,13 +345,6 @@ export function WorkshopProcessView() {
                     <span className="size-4 animate-spin rounded-full border-2 border-ai-soft border-t-ai" />
                     {t(runningLabelKey(phase, selectedThinking))}
                   </div>
-                </ChatRow>
-              )}
-
-              {/* 手動経路（Ollama 無し）: 素材から起こした草稿を抽屉で直接編集して確定 */}
-              {showManualDraft && draft && (
-                <ChatRow ai>
-                  <DraftChip label={t("workshop.openDraft")} onOpen={openDraftEditable} />
                 </ChatRow>
               )}
 
@@ -539,7 +374,8 @@ export function WorkshopProcessView() {
             )}
 
             <div className="rounded-[18px] border border-line-strong bg-surface p-3 shadow-(--shadow-md)">
-              {visibleSources.length > 0 && !generating && (
+              {/* 関連文档は会話開始前だけ示す。最初の送信で文脈に入るので以降は隠す（+ は常に追加可）。 */}
+              {visibleSources.length > 0 && messages.length === 0 && (
                 <div className="mb-2.5 flex flex-wrap gap-2">
                   {visibleSources.map((m) => (
                     <SourceChip
@@ -555,17 +391,19 @@ export function WorkshopProcessView() {
                 </div>
               )}
               <textarea
+                ref={composerRef}
                 value={instruction}
                 onChange={(event) => setInstruction(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                  // Enter で送信、Shift+Enter で改行（複数行入力）。
+                  if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
                     void handleSend();
                   }
                 }}
                 placeholder={t("workshop.composerPh")}
-                rows={2}
-                className="w-full resize-none bg-transparent px-1 text-[14.5px] leading-relaxed text-ink outline-none"
+                rows={1}
+                className="max-h-40 w-full resize-none overflow-y-auto bg-transparent px-1 text-[14.5px] leading-relaxed text-ink outline-none"
               />
               <div className="mt-2 flex items-center gap-2.5">
                 {/* ＋ 素材を追加（未処理 inbox から選ぶ） */}
@@ -642,11 +480,7 @@ export function WorkshopProcessView() {
                 </div>
                 <div className="flex-1" />
                 {generating ? (
-                  <Button
-                    variant="outline"
-                    className="h-9 px-5"
-                    onClick={handleStop}
-                  >
+                  <Button variant="outline" className="h-9 px-5" onClick={handleStop}>
                     <Icon name="x" size={15} />
                     {t("workshop.stop")}
                   </Button>
@@ -673,72 +507,19 @@ export function WorkshopProcessView() {
                 <div className="mt-2 px-1 text-[12.5px] font-semibold text-brand">{error}</div>
               )}
             </div>
-            <div className="mt-2 text-center font-mono text-[11px] text-ink-faint">
-              ⌘↵ {t("workshop.send")}
-            </div>
           </div>
         </div>
 
-        {/* ── インスペクタ（実データのみ） ── */}
-        {visibleDraft && (
-          <Inspector
-            model={visibleSelectedModel}
-            generating={generating}
-            runningLabel={t(runningLabelKey(phase, selectedThinking))}
-            draft={visibleDraft}
-            added={changes.added}
-            removed={changes.removed}
-            canConfirm={canConfirm}
-            sourcesChanged={sourcesChanged}
-            onOpenDraft={openDraftEditable}
-          />
-        )}
+        {/* ── 右側ステータス（実行状態 + モデル + 在席素材。草稿は出さない） ── */}
+        <Inspector
+          model={visibleSelectedModel}
+          generating={generating}
+          runningLabel={t(runningLabelKey(phase, selectedThinking))}
+          thinking={selectedThinking}
+          tools={selectedTools}
+          sources={visibleSources}
+        />
       </div>
-
-      {/* 草稿のレビュー/編集/確定は右側ドロワーで行う（会話流には入口条だけ残す）。
-          snapshot あり＝過去ターンの読み取り専用、なし＝最新草稿の編集＋確定。 */}
-      {visibleDraft && (
-        <Drawer
-          open={draftOpen}
-          onOpenChange={(open) => {
-            setDraftOpen(open);
-            if (!open) setSnapshot(null);
-          }}
-        >
-          <DrawerContent>
-            <div className="flex flex-none items-center gap-2 border-b border-line px-5 py-3.5">
-              <Icon name="doc" size={16} className="text-ai" />
-              <div className="text-[14px] font-bold text-ink">{t("workshop.drawerTitle")}</div>
-            </div>
-            <div className="min-h-0 flex-1 overflow-auto p-4">
-              {snapshot ? (
-                <DraftCard draft={snapshot} done onChange={() => {}} readOnly />
-              ) : (
-                <DraftCard
-                  draft={visibleDraft}
-                  done
-                  onChange={handleDraftChange}
-                  onRegenerate={handleRegenerate}
-                  canRegenerate={canGenerate}
-                  busy={busy}
-                />
-              )}
-            </div>
-            {!snapshot && (
-              <div className="flex-none border-t border-line p-3.5">
-                <Button
-                  className="w-full justify-center"
-                  disabled={!canConfirm}
-                  onClick={handleConfirm}
-                >
-                  <Icon name="check" size={15} />
-                  {busy ? t("workshop.running") : t("workshop.confirm")}
-                </Button>
-              </div>
-            )}
-          </DrawerContent>
-        </Drawer>
-      )}
     </div>
   );
 }
@@ -789,21 +570,10 @@ function ChatRow({ ai, children }: { ai?: boolean; children: ReactNode }) {
   );
 }
 
-// 折りたたみパネル。thinking（推論・mono）にも narration（散文・通常字体）にも使う。
+// 折りたたみパネル。思考トレース（推論・mono）を表示する。
 // streaming 中は自動展開＋底部追従、終わったら自動的に「ラベル · N 字」へ折りたたむ（再展開可）。
-function ThinkingPanel({
-  text,
-  streaming,
-  label,
-  mono = true,
-}: {
-  text: string;
-  streaming: boolean;
-  label?: string;
-  mono?: boolean;
-}) {
+function ThinkingPanel({ text, streaming }: { text: string; streaming: boolean }) {
   const { t } = useI18n();
-  const resolvedLabel = label ?? t("workshop.think.label");
   const [open, setOpen] = useState(streaming);
   const [wasStreaming, setWasStreaming] = useState(streaming);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -824,7 +594,7 @@ function ThinkingPanel({
         className="flex w-full items-center gap-2 px-3 py-2 text-left"
       >
         <Icon name={open ? "chevD" : "chevR"} size={13} className="flex-none text-ai" />
-        <span className="text-[12px] font-bold text-ai">{resolvedLabel}</span>
+        <span className="text-[12px] font-bold text-ai">{t("workshop.think.label")}</span>
         {streaming ? (
           <span className="size-3 animate-spin rounded-full border-2 border-ai-soft border-t-ai" />
         ) : (
@@ -834,9 +604,7 @@ function ThinkingPanel({
       {open && (
         <div
           ref={bodyRef}
-          className={`max-h-48 overflow-auto border-t border-ai-soft px-3 py-2 leading-relaxed whitespace-pre-wrap text-ink-soft ${
-            mono ? "font-mono text-[12px]" : "text-[13.5px]"
-          }`}
+          className="max-h-48 overflow-auto border-t border-ai-soft px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-ink-soft"
         >
           {text}
         </div>
@@ -845,81 +613,7 @@ function ThinkingPanel({
   );
 }
 
-function DraftCard({
-  draft,
-  done,
-  onChange,
-  onRegenerate,
-  canRegenerate,
-  busy,
-  readOnly = false,
-}: {
-  draft: StructureResult;
-  done: boolean;
-  onChange: (draft: StructureResult) => void;
-  onRegenerate?: () => void;
-  canRegenerate?: boolean;
-  busy?: boolean;
-  readOnly?: boolean;
-}) {
-  const { t } = useI18n();
-  return (
-    <div className="overflow-hidden rounded-xl border border-ai-soft bg-surface shadow-(--shadow-md)">
-      <div className="flex items-center gap-2 border-b border-line px-5 py-3 font-mono text-[11.5px] font-bold text-ink-muted">
-        {done ? t("workshop.draftReady") : t("workshop.draftTitle")}
-      </div>
-      <div className="px-5 py-4">
-        <input
-          value={draft.title}
-          onChange={(event) => onChange({ ...draft, title: event.target.value })}
-          readOnly={readOnly}
-          placeholder={t("workshop.titleField")}
-          className="w-full bg-transparent font-serif text-[22px] font-semibold text-ink outline-none"
-        />
-        <input
-          value={draft.cat}
-          onChange={(event) => onChange({ ...draft, cat: event.target.value })}
-          readOnly={readOnly}
-          placeholder={t("workshop.catField")}
-          className="mt-2 w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-[13px] text-ink outline-none"
-        />
-        <textarea
-          value={draft.bodyMarkdown}
-          onChange={(event) => onChange({ ...draft, bodyMarkdown: event.target.value })}
-          readOnly={readOnly}
-          placeholder={t("workshop.prepareSub")}
-          className="mt-3.5 min-h-64 w-full resize-y rounded-lg border border-line-strong bg-surface-2 p-3.5 font-mono text-[13.5px] leading-relaxed text-ink outline-none"
-        />
-        {draft.suggestedLinks.length > 0 && (
-          <div className="mt-4 rounded-xl bg-ai-wash p-3.5">
-            <div className="mb-2 flex items-center gap-1.5 text-[12px] font-bold text-ai">
-              <Icon name="link" size={14} />
-              {t("workshop.suggestedLinks")}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {draft.suggestedLinks.map((link) => (
-                <Tag key={link} tone="ai">
-                  [[{link}]]
-                </Tag>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-      {!readOnly && (
-        <div className="flex items-center gap-2.5 border-t border-line p-3.5">
-          <Button variant="outline" disabled={busy || !canRegenerate} onClick={onRegenerate}>
-            <Icon name="refresh" size={15} />
-            {t("workshop.regen")}
-          </Button>
-          <span className="text-[12px] leading-snug text-ink-faint">{t("workshop.draftHint")}</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// エージェントのツール呼び出し 1 件のカード（検索など）。args は JSON 文字列なので値だけ抜いて表示。
+// エージェントのツール呼び出し 1 件のカード（検索・書き込み）。args は JSON 文字列なので値だけ抜いて表示。
 function ToolCallCard({ tool }: { tool: ToolEvent }) {
   let argText = tool.args;
   try {
@@ -930,9 +624,10 @@ function ToolCallCard({ tool }: { tool: ToolEvent }) {
   } catch {
     /* JSON でなければ生文字列のまま表示 */
   }
+  const icon = tool.name === "write_entry" ? "doc" : "search";
   return (
     <div className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-[12.5px]">
-      <Icon name="search" size={13} className="flex-none text-ai" />
+      <Icon name={icon} size={13} className="flex-none text-ai" />
       <span className="font-mono font-semibold text-ink">{tool.name}</span>
       {argText && <span className="truncate text-ink-soft">{argText}</span>}
       {tool.summary && <span className="flex-none text-ink-faint">· {tool.summary}</span>}
@@ -951,112 +646,26 @@ function ToolCallLog({ tools }: { tools: ToolEvent[] }) {
   );
 }
 
-// 会話流に出る草稿の入口条。クリックで右側ドロワー（レビュー/編集/確定）を開く。
-function DraftChip({ label, onOpen }: { label: string; onOpen: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="inline-flex items-center gap-2 rounded-xl border border-ai-soft bg-ai-wash/40 px-3.5 py-2.5 text-left transition-colors hover:bg-ai-wash"
-    >
-      <span className="grid size-7 flex-none place-items-center rounded-lg bg-surface text-ai">
-        <Icon name="doc" size={15} />
-      </span>
-      <span className="text-[13px] font-semibold text-ink">{label}</span>
-      <Icon name="chevR" size={14} className="text-ink-muted" />
-    </button>
-  );
-}
-
-// コンポーザー内の添付チップ。onRemove があれば × で外せる。
-function SourceChip({ material, onRemove }: { material: RawMaterial; onRemove?: () => void }) {
-  const type = RAW_TYPE[material.type];
-  return (
-    <span className="inline-flex max-w-[260px] items-center gap-2 rounded-[9px] border border-line bg-surface-2 py-1.5 pr-2 pl-2.5">
-      <span
-        className="grid size-5 flex-none place-items-center rounded-md bg-surface"
-        style={{ color: type.color }}
-      >
-        <Icon name={type.icon} size={13} />
-      </span>
-      <span className="truncate text-[12.5px] font-semibold text-ink">{material.title}</span>
-      {onRemove && (
-        <button
-          type="button"
-          onClick={onRemove}
-          title={material.title}
-          className="grid flex-none place-items-center text-ink-faint transition-colors hover:text-ink"
-        >
-          <Icon name="x" size={14} />
-        </button>
-      )}
-    </span>
-  );
-}
-
-function SourceCard({ material, source }: { material: RawMaterial; source: string }) {
-  const type = RAW_TYPE[material.type];
-  const visibleSource = stripFrontmatter(source) || material.preview;
-  return (
-    <div className="overflow-hidden rounded-xl border border-line bg-surface">
-      <div className="flex items-center gap-3 border-b border-line px-4 py-3">
-        <span
-          className="grid size-8 flex-none place-items-center rounded-lg bg-surface-2"
-          style={{ color: type.color }}
-        >
-          <Icon name={type.icon} size={16} />
-        </span>
-        <div className="min-w-0">
-          <div className="truncate text-[14px] font-bold text-ink">{material.title}</div>
-          <div className="mt-0.5 truncate font-mono text-[11.5px] text-ink-faint">
-            {material.source} · {material.date}
-          </div>
-        </div>
-      </div>
-      <div className="max-h-40 overflow-auto px-4 py-3 text-[13px] leading-relaxed whitespace-pre-wrap text-ink-soft">
-        {visibleSource}
-      </div>
-    </div>
-  );
-}
-
-// 右側の加工パネル。実際に得られる情報だけを映す：選択モデル・出力先・
-// 生成後の suggestedLinks・確定アクション。品質スコアや行差分のような
-// バックエンドが返さない指標は出さない（AI 出力を偽装しない方針）。
+// 右側のステータス面板。草稿は無くなったので、実行状態・モデル・在席素材だけを映す。
 function Inspector({
   model,
   generating,
   runningLabel,
-  draft,
-  added,
-  removed,
-  canConfirm,
-  sourcesChanged,
-  onOpenDraft,
+  thinking,
+  tools,
+  sources,
 }: {
   model: string;
   generating: boolean;
   runningLabel: string;
-  draft: StructureResult;
-  added: number;
-  removed: number;
-  canConfirm: boolean;
-  sourcesChanged: boolean;
-  onOpenDraft: () => void;
+  thinking: boolean;
+  tools: boolean;
+  sources: RawMaterial[];
 }) {
   const { t } = useI18n();
   const status = generating
     ? { label: runningLabel, color: "var(--gold)" }
-    : canConfirm
-      ? { label: t("workshop.st.done"), color: "var(--ai)" }
-      : { label: t("workshop.st.idle"), color: "var(--ink-muted)" };
-  const slug = (draft.title || "untitled")
-    .trim()
-    .toLowerCase()
-    .replace(/\.md$/, "")
-    .replace(/\s+/g, "-");
-  const linksReady = !generating && draft.suggestedLinks.length > 0;
-
+    : { label: t("workshop.st.idle"), color: "var(--ink-muted)" };
   return (
     <aside className="flex w-full flex-none flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-(--shadow-sm) lg:w-80">
       <div className="flex items-center gap-2.5 border-b border-line px-4.5 py-3.5">
@@ -1088,85 +697,41 @@ function Inspector({
               <div className="truncate text-[13.5px] font-semibold text-ink">
                 {model || "Ollama"}
               </div>
-              <div className="text-[11px] text-ink-muted">{t("workshop.insp.modelSub")}</div>
+              {(thinking || tools) && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {thinking && <Tag tone="ai">{t("workshop.think.badge")}</Tag>}
+                  {tools && <Tag tone="ai">{t("workshop.tools.badge")}</Tag>}
+                </div>
+              )}
             </div>
           </div>
         </InspRow>
 
-        <InspRow label={t("workshop.insp.target")}>
-          <div className="flex items-baseline gap-2">
-            <span className="truncate font-serif text-[17px] font-semibold text-ink">
-              {draft.title || t("workshop.titleField")}
-            </span>
-          </div>
-          <div className="mt-2 flex items-center gap-2">
-            <Icon name="doc" size={13} className="flex-none text-ink-faint" />
-            <span className="truncate font-mono text-[11.5px] text-ink-muted">
-              {`wiki/${slug}.md`}
-            </span>
-            <Tag tone="ai" className="flex-none">
-              {t("workshop.insp.new")}
-            </Tag>
-          </div>
-          {draft.cat && (
-            <div className="mt-2">
-              <Tag tone="accent">{draft.cat}</Tag>
+        {sources.length > 0 && (
+          <InspRow label={t("workshop.insp.sources")}>
+            <div className="flex flex-col gap-2">
+              {sources.map((s) => {
+                const type = RAW_TYPE[s.type];
+                return (
+                  <div key={s.id} className="flex items-center gap-2.5">
+                    <span
+                      className="grid size-7 flex-none place-items-center rounded-lg bg-surface-2"
+                      style={{ color: type.color }}
+                    >
+                      <Icon name={type.icon} size={14} />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="truncate text-[13px] font-semibold text-ink">{s.title}</div>
+                      <div className="truncate font-mono text-[10.5px] text-ink-faint">
+                        {s.source}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          )}
-        </InspRow>
-
-        <InspRow label={t("workshop.insp.changes")}>
-          <div className="flex items-baseline gap-3">
-            <span className="font-mono text-[19px] font-bold text-ai">+{added}</span>
-            <span
-              className={`font-mono text-[19px] font-bold ${removed ? "text-brand" : "text-ink-faint"}`}
-            >
-              −{removed}
-            </span>
-            <span className="text-[11.5px] text-ink-faint">{t("workshop.insp.lines")}</span>
-          </div>
-          <div className="mt-2.5 flex h-1.5 overflow-hidden rounded-full bg-surface-2">
-            <div
-              className="bg-ai transition-[width] duration-500"
-              style={{
-                width: `${added + removed > 0 ? (added / (added + removed)) * 100 : 100}%`,
-              }}
-            />
-            {removed > 0 && (
-              <div
-                className="bg-brand transition-[width] duration-500"
-                style={{ width: `${(removed / (added + removed)) * 100}%` }}
-              />
-            )}
-          </div>
-        </InspRow>
-
-        <InspRow label={t("workshop.suggestedLinks")}>
-          {linksReady ? (
-            <div className="flex flex-wrap gap-1.5">
-              {draft.suggestedLinks.map((link) => (
-                <Tag key={link} tone="ai">
-                  [[{link}]]
-                </Tag>
-              ))}
-            </div>
-          ) : (
-            <span className="text-[12.5px] text-ink-faint">{t("workshop.insp.linksPending")}</span>
-          )}
-        </InspRow>
-
-        {!generating && !canConfirm && (
-          <p className="mt-3.5 text-[12px] leading-relaxed text-ink-faint">
-            {t(sourcesChanged ? "workshop.insp.sourcesChanged" : "workshop.insp.hint")}
-          </p>
+          </InspRow>
         )}
-      </div>
-
-      <div className="mt-auto border-t border-line p-3.5">
-        <Button variant="outline" className="w-full justify-center" onClick={onOpenDraft}>
-          <Icon name="edit" size={15} />
-          {t("workshop.openDraft")}
-        </Button>
       </div>
     </aside>
   );
@@ -1191,9 +756,28 @@ function InspRow({
   );
 }
 
-function stripFrontmatter(markdown: string): string {
-  if (!markdown.startsWith("---")) return markdown.trim();
-  const end = markdown.indexOf("\n---", 3);
-  if (end === -1) return markdown.trim();
-  return markdown.slice(end + 4).trim();
+// コンポーザー内の添付チップ。onRemove があれば × で外せる。
+function SourceChip({ material, onRemove }: { material: RawMaterial; onRemove?: () => void }) {
+  const type = RAW_TYPE[material.type];
+  return (
+    <span className="inline-flex max-w-[260px] items-center gap-2 rounded-[9px] border border-line bg-surface-2 py-1.5 pr-2 pl-2.5">
+      <span
+        className="grid size-5 flex-none place-items-center rounded-md bg-surface"
+        style={{ color: type.color }}
+      >
+        <Icon name={type.icon} size={13} />
+      </span>
+      <span className="truncate text-[12.5px] font-semibold text-ink">{material.title}</span>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          title={material.title}
+          className="grid flex-none place-items-center text-ink-faint transition-colors hover:text-ink"
+        >
+          <Icon name="x" size={14} />
+        </button>
+      )}
+    </span>
+  );
 }
