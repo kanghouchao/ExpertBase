@@ -499,7 +499,6 @@ export function WorkshopProcessView() {
                         <option key={model.name} value={model.name}>
                           {[
                             model.name,
-                            model.thinking ? t("workshop.think.badge") : null,
                             model.tools ? t("workshop.tools.badge") : null,
                           ]
                             .filter(Boolean)
@@ -553,7 +552,6 @@ export function WorkshopProcessView() {
           model={visibleSelectedModel}
           generating={generating}
           runningLabel={t(runningLabelKey(phase, selectedThinking))}
-          thinking={selectedThinking}
           tools={selectedTools}
           sources={visibleSources}
         />
@@ -725,14 +723,12 @@ function Inspector({
   model,
   generating,
   runningLabel,
-  thinking,
   tools,
   sources,
 }: {
   model: string;
   generating: boolean;
   runningLabel: string;
-  thinking: boolean;
   tools: boolean;
   sources: RawMaterial[];
 }) {
@@ -771,10 +767,9 @@ function Inspector({
               <div className="truncate text-[13.5px] font-semibold text-ink">
                 {model || "Ollama"}
               </div>
-              {(thinking || tools) && (
+              {tools && (
                 <div className="mt-1 flex flex-wrap gap-1">
-                  {thinking && <Tag tone="ai">{t("workshop.think.badge")}</Tag>}
-                  {tools && <Tag tone="ai">{t("workshop.tools.badge")}</Tag>}
+                  <Tag tone="ai">{t("workshop.tools.badge")}</Tag>
                 </div>
               )}
             </div>

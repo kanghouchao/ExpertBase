@@ -60,7 +60,7 @@ pub(crate) async fn run(
     .agent(model)
     .preamble(system)
     .temperature(0.6)
-    .additional_params(json!({ "num_ctx": 16384, "think": think }))
+    .additional_params(agent_params(think))
     .tools(tools)
     .build();
 
@@ -124,6 +124,17 @@ pub(crate) async fn run(
   Ok(final_text)
 }
 
+/// エージェントの additional_params を組む。num_ctx は常に、think は明示 true のときだけ送る。
+/// think:false は送らない: capabilities が thinking を漏らす HF GGUF 等でも、モデル既定の
+/// 思考（省略時 ON）を殺さないため。明示 true は thinking 非対応モデルでは Ollama が弾く。
+fn agent_params(think: bool) -> serde_json::Value {
+  let mut params = json!({ "num_ctx": 16384 });
+  if think {
+    params["think"] = json!(true);
+  }
+  params
+}
+
 /// ChatTurn を Rig の Message へ。role が user 以外は assistant 扱い。
 fn turn_to_message(turn: &ChatTurn) -> Message {
   if turn.role == "user" {
@@ -142,4 +153,17 @@ fn first_text(content: &OneOrMany<ToolResultContent>) -> String {
       _ => None,
     })
     .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn agent_params_omits_think_when_false() {
+    // false は送らない（モデル既定の思考を尊重）。true のときだけ最上位へ。
+    assert!(agent_params(false).get("think").is_none());
+    assert_eq!(agent_params(true)["think"], json!(true));
+    assert_eq!(agent_params(false)["num_ctx"], json!(16384));
+  }
 }
