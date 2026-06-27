@@ -9,7 +9,6 @@ use tauri::ipc::Channel;
 use tauri::{Manager, State};
 
 use crate::ai::{ChatTurn, StreamProgress};
-use crate::kb::material;
 use crate::workshop::application;
 
 /// 停止ボタン用の共有中断フラグ。lib.rs で app.manage する。
@@ -46,42 +45,46 @@ impl From<StreamProgress> for ChatEvent {
   }
 }
 
-/// 複数の受信箱素材 + 会話履歴で対話エージェントを 1 会話分回す。各素材の本文を区切り線で
-/// 連結し、1 つの素材文脈として system に pin する。会話の記憶はフロントが組み立てた messages。
-/// tools 対応モデルは search_kb / write_entry を使える（書き込みはユーザーが対話で頼んだとき）。
-/// 受信箱読み込みはブロッキングなので別スレッドへ。Rig エージェント（async）は spawn し、進捗を
-/// mpsc 経由で受けて Channel へ転送する（ストリームのコールバック Send 制約を回避）。
-/// 戻り値は最終的な助手の返信本文。
+/// 添付素材 + 会話履歴で対話エージェントを 1 会話分回す。素材は本文を注入せず、検証済みの id
+/// 一覧（sources）として渡し、AI が read_source で自分で読む。会話の記憶はフロントが組み立てた
+/// messages。tools 対応モデル必須で read_source / search_kb / write_entry を使える（書き込みは
+/// ユーザーが対話で頼んだとき）。素材 id の検証はブロッキングなので別スレッドへ。Rig エージェント
+/// （async）は spawn し、進捗を mpsc 経由で受けて Channel へ転送する（ストリームのコールバック
+/// Send 制約を回避）。戻り値は最終的な助手の返信本文。
+/// `tools` は前端の互換のため受けるが分岐しない（Phase 3 で前端が tools モデルを必須化する）。
 #[tauri::command]
 pub async fn workshop_chat(
   app: tauri::AppHandle,
   cancel: State<'_, WorkshopCancel>,
-  inbox_paths: Vec<String>,
+  source_ids: Vec<String>,
   messages: Vec<ChatTurn>,
   model: String,
   think: bool,
   tools: bool,
   on_event: Channel<ChatEvent>,
 ) -> Result<String, String> {
+  let _ = tools;
   let home = app.path().home_dir().map_err(|e| e.to_string())?;
   // 新しい生成の開始時にフラグを倒す（前回の停止が残らないように）。
   cancel.0.store(false, Ordering::Relaxed);
   let cancel_flag = cancel.0.clone();
 
-  // 受信箱素材の読み込みはブロッキング IO。root + 連結素材 + inbox_rels を別スレッドで用意する。
-  let (root, source_text, inbox_rels) =
-    tauri::async_runtime::spawn_blocking(move || -> Result<(PathBuf, String, Vec<String>), String> {
+  // 素材 id の検証はブロッキング寄り。root + 検証済み sources を別スレッドで用意。
+  // 本文はここでは読まない＝AI が read_source で個別に読む。id は inbox 相対 | ファイル絶対の混在：
+  // 絶対パスはユーザーがダイアログで選んだ外部ファイルとしてそのまま許可、それ以外は inbox 内に限定検証。
+  let (root, sources) =
+    tauri::async_runtime::spawn_blocking(move || -> Result<(PathBuf, Vec<String>), String> {
       let (root, _conn) = crate::kb::open_active(&home)?;
-      let mut bodies = Vec::with_capacity(inbox_paths.len());
-      let mut inbox_rels = Vec::with_capacity(inbox_paths.len());
-      for inbox_path in &inbox_paths {
-        let inbox_rel = crate::kb::checked_kb_markdown_path(inbox_path, "inbox")?;
-        let rel_str = inbox_rel.to_string_lossy().to_string();
-        let raw = std::fs::read_to_string(root.join(&inbox_rel)).map_err(|e| e.to_string())?;
-        bodies.push(material::parse_material(&raw)?.body);
-        inbox_rels.push(rel_str);
+      let mut sources = Vec::with_capacity(source_ids.len());
+      for id in &source_ids {
+        if std::path::Path::new(id).is_absolute() {
+          sources.push(id.clone());
+        } else {
+          let inbox_rel = crate::kb::checked_kb_markdown_path(id, "inbox")?;
+          sources.push(inbox_rel.to_string_lossy().to_string());
+        }
       }
-      Ok((root, bodies.join("\n\n---\n\n"), inbox_rels))
+      Ok((root, sources))
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -89,7 +92,7 @@ pub async fn workshop_chat(
   // Rig エージェントを spawn し、進捗 mpsc を Channel へ排出する。tx が drop されると rx が閉じる。
   let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<StreamProgress>();
   let agent = tauri::async_runtime::spawn(application::chat(
-    model, think, root, source_text, inbox_rels, messages, tools, cancel_flag, tx,
+    model, think, root, sources, messages, cancel_flag, tx,
   ));
   while let Some(p) = rx.recv().await {
     let _ = on_event.send(ChatEvent::from(p));

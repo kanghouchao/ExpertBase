@@ -181,6 +181,8 @@ const zh: Dict = {
   "workshop.chat.greeting":
     "把这条素材交给我。你可以让我解读、翻译、改写或整理它，需要时我帮你存成条目。给我一句指令吧。",
   "workshop.addMaterial": "添加素材",
+  "workshop.addLocalFile": "添加本地文件",
+  "workshop.toolsRequired": "请选择支持工具调用的模型",
   "workshop.thinking": "正在整理…",
   "workshop.phase.connecting": "连接中…",
   "workshop.phase.loadingModel": "加载模型中…",
@@ -507,6 +509,8 @@ const en: Dict = {
   "workshop.chat.greeting":
     "Hand me this material. Ask me to read, translate, rewrite, or organize it — and I'll save it as an entry when you want. Just give me an instruction.",
   "workshop.addMaterial": "Add material",
+  "workshop.addLocalFile": "Add local file",
+  "workshop.toolsRequired": "Select a model that supports tool calling",
   "workshop.thinking": "Organizing…",
   "workshop.phase.connecting": "Connecting…",
   "workshop.phase.loadingModel": "Loading model…",
@@ -832,6 +836,8 @@ const ja: Dict = {
   "workshop.chat.greeting":
     "この素材を任せてください。解説・翻訳・書き換え・整理など、ご指示どおりに対応し、必要なときは条目として保存します。指示を一言どうぞ。",
   "workshop.addMaterial": "素材を追加",
+  "workshop.addLocalFile": "ローカルファイルを追加",
+  "workshop.toolsRequired": "ツール呼び出し対応のモデルを選んでください",
   "workshop.thinking": "整理中…",
   "workshop.phase.connecting": "接続中…",
   "workshop.phase.loadingModel": "モデル読み込み中…",
