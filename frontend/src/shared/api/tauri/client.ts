@@ -1,4 +1,5 @@
 import { invoke, isTauri, Channel } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 
 // ナレッジベースはパスを一意な識別子として扱う（Rust 側と同じ契約）。
 export type Kb = {
@@ -199,9 +200,10 @@ export async function listOllamaModels(): Promise<OllamaModel[]> {
   return invoke<OllamaModel[]>("ai_list_ollama_models");
 }
 
-/** 複数の受信箱素材 + 会話履歴で対話エージェントを 1 ターン回す。最終返信本文を返す。onPhase で進捗を受け取る。 */
+/** 添付素材（inbox 相対 | ファイル絶対の混在 id）+ 会話履歴で対話エージェントを 1 ターン回す。
+ * 最終返信本文を返す。onPhase で進捗を受け取る。 */
 export async function workshopChat(
-  inboxPaths: string[],
+  sourceIds: string[],
   messages: ChatTurn[],
   model: string,
   think: boolean,
@@ -211,7 +213,7 @@ export async function workshopChat(
   const channel = new Channel<ChatPhase>();
   if (onPhase) channel.onmessage = onPhase;
   return invoke<string>("workshop_chat", {
-    inboxPaths,
+    sourceIds,
     messages,
     model,
     think,
@@ -224,4 +226,11 @@ export async function workshopChat(
 export async function workshopCancel(): Promise<void> {
   if (!isTauri()) return;
   await invoke("workshop_cancel");
+}
+
+/** ローカルファイルを 1 つ選ぶ（素材として添付する用）。選ばなければ null（Tauri 外も null）。 */
+export async function pickLocalFile(): Promise<string | null> {
+  if (!isTauri()) return null;
+  const picked = await open({ multiple: false, directory: false });
+  return typeof picked === "string" ? picked : null;
 }

@@ -22,7 +22,7 @@ use rig_core::streaming::{StreamedAssistantContent, StreamedUserContent, Streami
 use rig_core::tool::ToolDyn;
 use rig_core::OneOrMany;
 
-use super::tools::{SearchKb, WriteEntry};
+use super::tools::{ReadSource, SearchKb, WriteEntry};
 use crate::ai::{AiError, ChatTurn, StreamProgress};
 
 /// エージェントの暴走（無限ツール呼び出し）を抑える反復上限。
@@ -35,8 +35,8 @@ pub(crate) async fn run(
   think: bool,
   system: &str,
   root: &Path,
+  sources: &[String],
   inbox_rels: &[String],
-  with_tools: bool,
   messages: Vec<ChatTurn>,
   cancel: Arc<AtomicBool>,
   tx: &UnboundedSender<StreamProgress>,
@@ -48,15 +48,12 @@ pub(crate) async fn run(
 
   let client = ollama::Client::new(Nothing).map_err(|e| AiError::Network(e.to_string()))?;
 
-  // tools 非対応モデルでは空の工具集合（Phase 2 で純チャット分岐は撤去予定）。
-  let tools: Vec<Box<dyn ToolDyn>> = if with_tools {
-    vec![
-      Box::new(SearchKb { root: root.to_path_buf() }),
-      Box::new(WriteEntry { root: root.to_path_buf(), inbox_rels: inbox_rels.to_vec() }),
-    ]
-  } else {
-    vec![]
-  };
+  // 工作坊は tools 対応モデル必須。read_source（素材読み取り）・search_kb・write_entry を常に登録する。
+  let tools: Vec<Box<dyn ToolDyn>> = vec![
+    Box::new(ReadSource { root: root.to_path_buf(), sources: sources.to_vec() }),
+    Box::new(SearchKb { root: root.to_path_buf() }),
+    Box::new(WriteEntry { root: root.to_path_buf(), inbox_rels: inbox_rels.to_vec() }),
+  ];
 
   // num_ctx は options へ、think は最上位へ（Ollama provider が additional_params を仕分ける）。
   let agent = client

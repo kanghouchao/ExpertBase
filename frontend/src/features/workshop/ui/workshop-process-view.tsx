@@ -9,18 +9,20 @@ import { Icon } from "@/shared/ui/icon";
 import { Tag } from "@/shared/ui/tag";
 import { Button, buttonVariants } from "@/shared/ui/button";
 import { Markdown } from "@/shared/ui/markdown";
+import { cn } from "@/shared/lib/utils";
 import { useI18n } from "@/shared/providers/providers";
 import {
   aiHasKey,
   listOllamaModels,
   listInbox,
+  pickLocalFile,
   workshopCancel,
   workshopChat,
   type ChatPhase,
   type InboxItem,
   type OllamaModel,
 } from "@/shared/api/tauri/client";
-import { inboxToMaterial, RAW_TYPE, type RawMaterial } from "@/entities/material";
+import { inboxToMaterial, RAW_TYPE, type RawMaterial, type RawType } from "@/entities/material";
 import { useKbStore } from "@/entities/knowledge-base";
 import {
   canRemoveSource,
@@ -134,10 +136,14 @@ export function WorkshopProcessView() {
         const [ollama, modelList] = await Promise.all([aiHasKey(), listOllamaModels()]);
         setHasOllama(ollama);
         setModels(modelList);
+        // 既定モデルの nudge: Qwen3（2026 本地工具调用最稳）→ 任意の tools 対応 → 先頭。
         setSelectedModel((current) =>
           current && modelList.some((model) => model.name === current)
             ? current
-            : (modelList[0]?.name ?? "")
+            : (modelList.find((model) => /qwen3/i.test(model.name))?.name ??
+              modelList.find((model) => model.tools)?.name ??
+              modelList[0]?.name ??
+              "")
         );
       } catch {
         setHasOllama(false);
@@ -173,13 +179,26 @@ export function WorkshopProcessView() {
     .map(materialFromInbox)
     .filter((candidate) => !sources.some((s) => s.id === candidate.id));
   const visiblePool = available ? pool : PREVIEW_POOL;
+  // 工作坊は tools 対応モデル必須（素材を read_source で読む・条目を write_entry で書くため）。
   const canGenerate =
-    visibleSources.length > 0 && visibleHasOllama && !!visibleSelectedModel && !generating;
+    visibleSources.length > 0 &&
+    visibleHasOllama &&
+    !!visibleSelectedModel &&
+    selectedTools &&
+    !generating;
 
   function addSource(material: RawMaterial) {
     setShowPicker(false);
     if (!available || sources.some((s) => s.id === material.id)) return;
     setSources((current) => [...current, material]);
+  }
+
+  // 外部のローカルファイルを素材に追加する（id は絶対パス。AI が read_source で読む、KB へは落とさない）。
+  async function addLocalFile() {
+    setShowPicker(false);
+    const path = await pickLocalFile();
+    if (!path) return;
+    addSource(materialFromFile(path, t("workshop.addLocalFile")));
   }
 
   function removeSource(id: string) {
@@ -411,17 +430,30 @@ export function WorkshopProcessView() {
                   <button
                     type="button"
                     onClick={() => setShowPicker((prev) => !prev)}
-                    disabled={visiblePool.length === 0 || generating}
+                    disabled={generating}
                     title={t("workshop.addMaterial")}
                     className="grid size-9 place-items-center rounded-[10px] border border-line-strong bg-surface text-ink-soft transition-colors hover:bg-surface-2 disabled:opacity-40"
                   >
                     <Icon name="plus" size={18} />
                   </button>
-                  {showPicker && visiblePool.length > 0 && (
+                  {showPicker && (
                     <div className="absolute bottom-[calc(100%+9px)] left-0 z-30 w-[300px] rounded-xl border border-line bg-surface p-1.5 shadow-(--shadow-lg)">
                       <div className="px-2 py-1.5 font-mono text-[10.5px] font-bold tracking-[0.1em] text-ink-muted uppercase">
                         {t("workshop.addMaterial")}
                       </div>
+                      {/* 外部ローカルファイルを追加（OS のファイル選択ダイアログ）。 */}
+                      <button
+                        type="button"
+                        onClick={() => void addLocalFile()}
+                        className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-2"
+                      >
+                        <span className="grid size-7 flex-none place-items-center rounded-md bg-surface-2 text-ink-soft">
+                          <Icon name="plus" size={14} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">
+                          {t("workshop.addLocalFile")}
+                        </span>
+                      </button>
                       {visiblePool.map((m) => {
                         const poolType = RAW_TYPE[m.type];
                         return (
@@ -503,6 +535,12 @@ export function WorkshopProcessView() {
                   {t("workshop.noModelsHint")}
                 </div>
               )}
+              {/* tools 非対応モデルでは送信不可＝素材読み取り/書き込みが回らない。理由を提示する。 */}
+              {visibleHasOllama && visibleModels.length > 0 && visibleSelectedModel && !selectedTools && (
+                <div className="mt-2 px-1 text-[12px] text-ink-faint">
+                  {t("workshop.toolsRequired")}
+                </div>
+              )}
               {error && (
                 <div className="mt-2 px-1 text-[12.5px] font-semibold text-brand">{error}</div>
               )}
@@ -530,6 +568,25 @@ function materialFromInbox(item: InboxItem): RawMaterial {
     ...material,
     status: item.type === "audio" || item.type === "video" ? "transcribed" : material.status,
     preview: item.source || material.title,
+  };
+}
+
+// 外部ローカルファイルを素材チップへ。id は絶対パス、拡張子で表示型を決める（pdf/doc/その他=note）。
+function materialFromFile(path: string, label: string): RawMaterial {
+  const name = path.split(/[\\/]/).pop() || path;
+  const ext = name.includes(".") ? (name.split(".").pop() ?? "").toLowerCase() : "";
+  const type: RawType = ext === "pdf" ? "pdf" : ext === "docx" || ext === "doc" ? "doc" : "note";
+  return {
+    id: path,
+    type,
+    title: name,
+    source: label,
+    date: "",
+    status: "pending",
+    size: "",
+    preview: "",
+    words: 0,
+    tags: [],
   };
 }
 
@@ -613,8 +670,10 @@ function ThinkingPanel({ text, streaming }: { text: string; streaming: boolean }
   );
 }
 
-// エージェントのツール呼び出し 1 件のカード（検索・書き込み）。args は JSON 文字列なので値だけ抜いて表示。
+// エージェントのツール呼び出し 1 件のカード（検索・読み取り・書き込み）。args は JSON 文字列なので値だけ抜いて表示。
+// 結果（read_source なら素材本文）は長くなるので折りたたみ、ヘッダは浅色。クリックで展開する。
 function ToolCallCard({ tool }: { tool: ToolEvent }) {
+  const [open, setOpen] = useState(false);
   let argText = tool.args;
   try {
     const parsed = JSON.parse(tool.args);
@@ -624,13 +683,28 @@ function ToolCallCard({ tool }: { tool: ToolEvent }) {
   } catch {
     /* JSON でなければ生文字列のまま表示 */
   }
-  const icon = tool.name === "write_entry" ? "doc" : "search";
+  const icon = tool.name === "search_kb" ? "search" : "doc";
+  const hasResult = Boolean(tool.summary);
   return (
-    <div className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-[12.5px]">
-      <Icon name={icon} size={13} className="flex-none text-ai" />
-      <span className="font-mono font-semibold text-ink">{tool.name}</span>
-      {argText && <span className="truncate text-ink-soft">{argText}</span>}
-      {tool.summary && <span className="flex-none text-ink-faint">· {tool.summary}</span>}
+    <div className="overflow-hidden rounded-lg border border-line bg-surface-2 text-[12.5px]">
+      <button
+        type="button"
+        onClick={() => hasResult && setOpen((prev) => !prev)}
+        className={cn(
+          "flex w-full items-center gap-2 px-3 py-1.5 text-left text-ink-faint",
+          hasResult ? "cursor-pointer" : "cursor-default"
+        )}
+      >
+        {hasResult && <Icon name={open ? "chevD" : "chevR"} size={12} className="flex-none" />}
+        <Icon name={icon} size={13} className="flex-none text-ai" />
+        <span className="font-mono font-semibold text-ink-soft">{tool.name}</span>
+        {argText && <span className="truncate">{argText}</span>}
+      </button>
+      {open && hasResult && (
+        <div className="max-h-48 overflow-auto border-t border-line px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-pre-wrap break-words text-ink-soft">
+          {tool.summary}
+        </div>
+      )}
     </div>
   );
 }

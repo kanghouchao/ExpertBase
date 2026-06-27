@@ -15,23 +15,25 @@ use crate::kb::{index, store};
 
 use super::infrastructure::rig_agent;
 
-/// 対話エージェント経路。素材を system に pin し、Rig で 1 会話分回す。進捗（思考・本文・
-/// ツール呼び出し/結果）は tx へ流し、最終的な助手の返信本文を返す。書き込みは write_entry
-/// ツール経由で「ユーザーが保存を頼んだとき」だけ起きる＝確定の主導権はユーザー。
+/// 対話エージェント経路。素材は本文を注入せず id の目録だけ system に置き、AI が read_source で
+/// 自分で読む。Rig で 1 会話分回し、進捗（思考・本文・ツール呼び出し/結果）を tx へ流して、
+/// 最終的な助手の返信本文を返す。書き込みは write_entry ツール経由で「ユーザーが保存を頼んだとき」
+/// だけ起きる＝確定の主導権はユーザー。inbox_rels（書き込み時に processed にする素材）は sources の
+/// うち inbox 内のものだけ＝外部ファイルは KB に落とさない。
 #[allow(clippy::too_many_arguments)]
 pub async fn chat(
   model: String,
   think: bool,
   root: PathBuf,
-  source_text: String,
-  inbox_rels: Vec<String>,
+  sources: Vec<String>,
   messages: Vec<ChatTurn>,
-  with_tools: bool,
   cancel: Arc<AtomicBool>,
   tx: UnboundedSender<StreamProgress>,
 ) -> Result<String, AiError> {
-  let system = agent_system_with(&source_text);
-  rig_agent::run(&model, think, &system, &root, &inbox_rels, with_tools, messages, cancel, &tx).await
+  let system = agent_system_with(&sources);
+  let inbox_rels: Vec<String> =
+    sources.iter().filter(|s| s.starts_with("inbox/")).cloned().collect();
+  rig_agent::run(&model, think, &system, &root, &sources, &inbox_rels, messages, cancel, &tx).await
 }
 
 /// 承認された内容を `entries/` に確定し、インデックス更新 + source の受信箱を全て processed にする。
