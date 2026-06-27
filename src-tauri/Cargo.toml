@@ -45,3 +45,10 @@ whisper = ["dep:whisper-rs", "dep:hound"]
 
 [dev-dependencies]
 tempfile = "3"
+
+# rig-core の Ollama provider は think 未設定でも `"think": false` を必ず送り、モデル既定の思考を
+# 殺す（capabilities が thinking を漏らす HF GGUF 等は思考できなくなる）。think を Option 化して
+# 未設定なら省略する fork を当てるためのプレースホルダ。fork を push 後に URL/branch を埋め、
+# 下 2 行のコメントを外す。上流 PR がマージされたらこのセクションごと削除する。
+# [patch.crates-io]
+# rig-core = { git = "https://github.com/<your-fork>/rig", branch = "ollama-omit-think" }

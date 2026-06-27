@@ -125,8 +125,14 @@ pub(crate) async fn run(
 }
 
 /// エージェントの additional_params を組む。num_ctx は常に、think は明示 true のときだけ送る。
-/// think:false は送らない: capabilities が thinking を漏らす HF GGUF 等でも、モデル既定の
-/// 思考（省略時 ON）を殺さないため。明示 true は thinking 非対応モデルでは Ollama が弾く。
+/// think=true（capabilities が thinking を報告するモデル）→ `"think": true`。
+/// think=false → think を省略し、モデル/サーバ既定に委ねる（capabilities が thinking を漏らす
+/// HF GGUF 等は既定で思考 ON なのでそのまま思考する）。明示 false を送らないのは、それが
+/// モデル既定の思考を殺すため。明示 true は thinking 非対応モデルでは Ollama が弾く。
+///
+/// ponytail: 省略が効くのは patch 済み rig-core 前提。素の rig-core 0.39 は think 未設定でも
+/// `"think": false` を必ず送るので、この省略は no-op になり HF GGUF は思考しないまま。
+/// 上流修正（think を Option 化し未設定なら省略）が入るまで保留。Cargo.toml の [patch.crates-io] 参照。
 fn agent_params(think: bool) -> serde_json::Value {
   let mut params = json!({ "num_ctx": 16384 });
   if think {
