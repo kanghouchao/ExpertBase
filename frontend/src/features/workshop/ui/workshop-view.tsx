@@ -119,6 +119,8 @@ export function WorkshopView() {
   const composerRef = useRef<HTMLTextAreaElement>(null);
   // 停止ボタン押下フラグ。中断は失敗扱いせず（赤エラーを出さず）idle へ戻すために使う。
   const cancelRef = useRef(false);
+  // 「新しい対話」押下フラグ。進行中ターンの解決が選択態をクリアした状態を上書きしないようにする。
+  const resetRef = useRef(false);
 
   // 受信箱を読み込み、選択リストの母数にする（path 引数は廃止）。
   useEffect(() => {
@@ -232,10 +234,14 @@ export function WorkshopView() {
 
   // 対話を終えて選択態へ戻す（「新しい対話」）。状態は揮発的なので破棄でよい。
   function reset() {
+    // 生成中でも押せる。後端を止め、進行中ターンの解決でこのクリアが上書きされないよう resetRef を立てる。
+    resetRef.current = true;
+    void workshopCancel();
     setMessages([]);
     setSources([]);
     setInstruction("");
     setShowPicker(false);
+    setPhase("idle");
     setError(null);
   }
 
@@ -250,6 +256,7 @@ export function WorkshopView() {
     setToolLog([]);
     setError(null);
     cancelRef.current = false;
+    resetRef.current = false;
     try {
       let thinking = "";
       let narration = "";
@@ -284,6 +291,8 @@ export function WorkshopView() {
           }
         }
       );
+      // 「新しい対話」で破棄済みなら、解決結果で選択態を上書きしない。
+      if (resetRef.current) return;
       setMessages([
         ...history,
         {
@@ -295,6 +304,8 @@ export function WorkshopView() {
       ]);
       setPhase("idle");
     } catch (e) {
+      // 「新しい対話」で破棄済みなら、履歴復元も入力復元もしない。
+      if (resetRef.current) return;
       // 停止ボタンによる中断はエラー表示しない（ユーザーが意図した中断）。
       if (!cancelRef.current) setError(e instanceof Error ? e.message : String(e));
       // 失敗・中断したターンは履歴から外し、入力を戻して再試行できるようにする。
