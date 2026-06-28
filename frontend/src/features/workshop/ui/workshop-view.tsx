@@ -410,7 +410,7 @@ export function WorkshopView() {
           <div className="mx-auto mt-3 w-full max-w-3xl">
             {messages.length === 0 && visibleHasOllama && (
               <div className="mb-2.5 flex flex-wrap items-center gap-2">
-                <span className="font-mono text-[10.5px] font-bold tracking-[0.1em] text-ink-faint uppercase">
+                <span className="font-mono text-[10.5px] font-bold tracking-widest text-ink-faint uppercase">
                   {t("workshop.sug.label")}
                 </span>
                 {[t("workshop.sug.1"), t("workshop.sug.2"), t("workshop.sug.3")].map((s) => (
@@ -472,8 +472,8 @@ export function WorkshopView() {
                     <Icon name="plus" size={18} />
                   </button>
                   {showPicker && (
-                    <div className="absolute bottom-[calc(100%+9px)] left-0 z-30 w-[300px] rounded-xl border border-line bg-surface p-1.5 shadow-(--shadow-lg)">
-                      <div className="px-2 py-1.5 font-mono text-[10.5px] font-bold tracking-[0.1em] text-ink-muted uppercase">
+                    <div className="absolute bottom-[calc(100%+9px)] left-0 z-30 w-75 rounded-xl border border-line bg-surface p-1.5 shadow-(--shadow-lg)">
+                      <div className="px-2 py-1.5 font-mono text-[10.5px] font-bold tracking-widest text-ink-muted uppercase">
                         {t("workshop.addMaterial")}
                       </div>
                       {/* 外部ローカルファイルを追加（OS のファイル選択ダイアログ）。 */}
@@ -519,7 +519,7 @@ export function WorkshopView() {
                     </div>
                   )}
                 </div>
-                <div className="flex h-9 min-w-0 max-w-[240px] items-center gap-1.5 rounded-[10px] border border-line-strong bg-surface px-2.5">
+                <div className="flex h-9 min-w-0 max-w-60 items-center gap-1.5 rounded-[10px] border border-line-strong bg-surface px-2.5">
                   <Icon name="bot" size={15} className="flex-none text-ai" />
                   <select
                     value={visibleSelectedModel}
@@ -571,11 +571,14 @@ export function WorkshopView() {
                 </div>
               )}
               {/* tools 非対応モデルでは送信不可＝素材読み取り/書き込みが回らない。理由を提示する。 */}
-              {visibleHasOllama && visibleModels.length > 0 && visibleSelectedModel && !selectedTools && (
-                <div className="mt-2 px-1 text-[12px] text-ink-faint">
-                  {t("workshop.toolsRequired")}
-                </div>
-              )}
+              {visibleHasOllama &&
+                visibleModels.length > 0 &&
+                visibleSelectedModel &&
+                !selectedTools && (
+                  <div className="mt-2 px-1 text-[12px] text-ink-faint">
+                    {t("workshop.toolsRequired")}
+                  </div>
+                )}
               {error && (
                 <div className="mt-2 px-1 text-[12.5px] font-semibold text-brand">{error}</div>
               )}
@@ -654,7 +657,7 @@ function MaterialSelect({
   }
   return (
     <div>
-      <div className="mb-2.5 font-mono text-[10.5px] font-bold tracking-[0.1em] text-ink-muted uppercase">
+      <div className="mb-2.5 font-mono text-[10.5px] font-bold tracking-widest text-ink-muted uppercase">
         {t("workshop.pendingMaterials")} · {materials.length}
       </div>
       <div className="grid grid-cols-2 gap-2.5">
@@ -824,7 +827,7 @@ function ToolCallCard({ tool }: { tool: ToolEvent }) {
         {argText && <span className="truncate">{argText}</span>}
       </button>
       {open && hasResult && (
-        <div className="max-h-48 overflow-auto border-t border-line px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-pre-wrap break-words text-ink-soft">
+        <div className="max-h-48 overflow-auto border-t border-line px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-pre-wrap wrap-break-word text-ink-soft">
           {tool.summary}
         </div>
       )}
@@ -945,7 +948,7 @@ function InspRow({
 }) {
   return (
     <div className={first ? "py-3" : "border-t border-line py-3"}>
-      <div className="mb-2 font-mono text-[10.5px] font-bold tracking-[0.1em] text-ink-muted uppercase">
+      <div className="mb-2 font-mono text-[10.5px] font-bold tracking-widest text-ink-muted uppercase">
         {label}
       </div>
       {children}
@@ -957,7 +960,7 @@ function InspRow({
 function SourceChip({ material, onRemove }: { material: RawMaterial; onRemove?: () => void }) {
   const type = RAW_TYPE[material.type];
   return (
-    <span className="inline-flex max-w-[260px] items-center gap-2 rounded-[9px] border border-line bg-surface-2 py-1.5 pr-2 pl-2.5">
+    <span className="inline-flex max-w-65 items-center gap-2 rounded-[9px] border border-line bg-surface-2 py-1.5 pr-2 pl-2.5">
       <span
         className="grid size-5 flex-none place-items-center rounded-md bg-surface"
         style={{ color: type.color }}
