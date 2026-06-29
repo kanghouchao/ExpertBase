@@ -41,18 +41,6 @@ pub struct GraphData {
   pub edges: Vec<(String, String)>,
 }
 
-/// 受信箱素材の状態（一覧・ワークショップで使用）。
-#[derive(Serialize, Clone, Debug, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct InboxItem {
-  pub path: String,
-  #[serde(rename = "type")]
-  pub kind: String,
-  pub source: String,
-  pub status: String,
-  pub captured_at: String,
-}
-
 /// スキーマを作成する（存在すれば何もしない）。
 /// 全文検索は trigram トークナイザを使う。日本語/中国語を含む部分一致が効くが、
 /// クエリは 3 文字以上必要（trigram の仕様）。
@@ -76,13 +64,6 @@ pub fn ensure_schema(conn: &Connection) -> Result<(), String> {
        CREATE INDEX IF NOT EXISTS idx_links_dst ON links(dst_title);
        CREATE INDEX IF NOT EXISTS idx_links_src ON links(src_path);
        CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_title ON entries(title);
-       CREATE TABLE IF NOT EXISTS inbox(
-         path TEXT PRIMARY KEY,
-         type TEXT NOT NULL,
-         source TEXT NOT NULL DEFAULT '',
-         status TEXT NOT NULL DEFAULT 'pending',
-         captured_at TEXT NOT NULL DEFAULT ''
-       );
        CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts
          USING fts5(title, body, path UNINDEXED, tokenize='trigram');",
     )
@@ -98,13 +79,11 @@ pub fn open_index(root: &Path) -> Result<Connection, String> {
   Ok(conn)
 }
 
-/// ディスクの entries/ と inbox/ を走査してインデックスを再構築する。
+/// ディスクの entries/ を走査してインデックスを再構築する。
 /// 真実のソースは常に Markdown。壊れたインデックスはこれで作り直せる。
 pub fn rebuild(conn: &Connection, root: &Path) -> Result<(), String> {
   conn
-    .execute_batch(
-      "DELETE FROM entries; DELETE FROM links; DELETE FROM entries_fts; DELETE FROM inbox;",
-    )
+    .execute_batch("DELETE FROM entries; DELETE FROM links; DELETE FROM entries_fts;")
     .map_err(|e| e.to_string())?;
 
   let entries_dir = root.join("entries");
@@ -118,20 +97,6 @@ pub fn rebuild(conn: &Connection, root: &Path) -> Result<(), String> {
       let entry = crate::kb::domain::entry::parse_entry(&text)?;
       let rel = format!("entries/{}", path.file_name().unwrap().to_string_lossy());
       upsert_entry(conn, &rel, &entry)?;
-    }
-  }
-
-  let inbox_dir = root.join("inbox");
-  if inbox_dir.is_dir() {
-    for ent in std::fs::read_dir(&inbox_dir).map_err(|e| e.to_string())? {
-      let path = ent.map_err(|e| e.to_string())?.path();
-      if path.extension().and_then(|s| s.to_str()) != Some("md") {
-        continue;
-      }
-      let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-      let m = crate::kb::domain::material::parse_material(&text)?;
-      let rel = format!("inbox/{}", path.file_name().unwrap().to_string_lossy());
-      upsert_inbox(conn, &rel, &m.meta.kind, &m.meta.source, &m.meta.status, &m.meta.captured_at)?;
     }
   }
   Ok(())
@@ -295,63 +260,6 @@ pub fn graph(conn: &Connection) -> Result<GraphData, String> {
   Ok(GraphData { nodes, edges })
 }
 
-/// 受信箱素材をインデックスへ upsert する。
-pub fn upsert_inbox(
-  conn: &Connection,
-  rel_path: &str,
-  kind: &str,
-  source: &str,
-  status: &str,
-  captured_at: &str,
-) -> Result<(), String> {
-  conn
-    .execute(
-      "INSERT INTO inbox(path,type,source,status,captured_at) VALUES(?1,?2,?3,?4,?5)
-         ON CONFLICT(path) DO UPDATE SET type=?2,source=?3,status=?4,captured_at=?5",
-      rusqlite::params![rel_path, kind, source, status, captured_at],
-    )
-    .map_err(|e| e.to_string())?;
-  Ok(())
-}
-
-/// 受信箱の状態を更新する（pending → processed など）。
-pub fn set_inbox_status(conn: &Connection, rel_path: &str, status: &str) -> Result<(), String> {
-  conn
-    .execute(
-      "UPDATE inbox SET status=?2 WHERE path=?1",
-      rusqlite::params![rel_path, status],
-    )
-    .map_err(|e| e.to_string())?;
-  Ok(())
-}
-
-/// 受信箱からインデックス行を削除する。
-pub fn delete_inbox(conn: &Connection, rel_path: &str) -> Result<(), String> {
-  conn
-    .execute("DELETE FROM inbox WHERE path=?1", rusqlite::params![rel_path])
-    .map_err(|e| e.to_string())?;
-  Ok(())
-}
-
-/// 受信箱の一覧（取り込み新しい順）。
-pub fn list_inbox(conn: &Connection) -> Result<Vec<InboxItem>, String> {
-  let mut stmt = conn
-    .prepare("SELECT path,type,source,status,captured_at FROM inbox ORDER BY captured_at DESC, path")
-    .map_err(|e| e.to_string())?;
-  let rows = stmt
-    .query_map([], |r| {
-      Ok(InboxItem {
-        path: r.get(0)?,
-        kind: r.get(1)?,
-        source: r.get(2)?,
-        status: r.get(3)?,
-        captured_at: r.get(4)?,
-      })
-    })
-    .map_err(|e| e.to_string())?;
-  rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -458,20 +366,6 @@ mod tests {
     assert_eq!(s.entries, 2);
     assert_eq!(s.links, 1);
     assert_eq!(s.orphans, 0); // A->B なので両者ともリンクに関与
-  }
-
-  #[test]
-  fn inbox_upsert_list_and_status() {
-    let conn = mem();
-    upsert_inbox(&conn, "inbox/a.md", "web", "https://x", "pending", "2026-06-14T00:00:00Z")
-      .unwrap();
-    let items = list_inbox(&conn).unwrap();
-    assert_eq!(items.len(), 1);
-    assert_eq!(items[0].status, "pending");
-    set_inbox_status(&conn, "inbox/a.md", "processed").unwrap();
-    assert_eq!(list_inbox(&conn).unwrap()[0].status, "processed");
-    delete_inbox(&conn, "inbox/a.md").unwrap();
-    assert!(list_inbox(&conn).unwrap().is_empty());
   }
 
   #[test]
