@@ -43,8 +43,7 @@ pub fn run() {
       ai::interface::ai_has_key,
       ai::interface::ai_list_ollama_models,
       workshop::interface::workshop_chat,
-      workshop::interface::workshop_cancel,
-      asr::interface::transcribe_material
+      workshop::interface::workshop_cancel
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

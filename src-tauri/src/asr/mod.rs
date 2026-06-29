@@ -1,14 +1,8 @@
-//! 音声認識（ASR）機能。録音した音声を文字へ転写する。
-//! DDD レイヤ構成（domain / application / infrastructure / interface）。
-//! 転写エンジンは domain のポート（trait）の裏に隠し、whisper.cpp 等の実装を差し替え可能にする。
-
-// 転写エンジンの中身は whisper feature を有効にしたビルドでのみ使う。
-// feature オフ時は interface のコマンドがエラーを返すだけなので、これらは
-// テスト時を除き未使用（dead_code）になる。実際に使う構成だけコンパイルする。
-#[cfg(any(feature = "whisper", test))]
-mod application;
-#[cfg(any(feature = "whisper", test))]
-mod domain;
-#[cfg(any(feature = "whisper", test))]
-mod infrastructure;
-pub mod interface;
+//! 音声認識（ASR）機能 — 工坊への搬入待ちで休止中（コードはディスク上に残置）。
+//! 録音 UI と inbox を廃止した時点で transcribe の呼び出し経路と inbox 契約が消えたため、
+//! 各レイヤをコンパイル対象から外す。再導入は別 spec（録音 / 動画 / 臨時目录）で行う。
+//! ponytail: mod 宣言だけ外す最小休止。再開時はこの 4 行のコメントを戻す。
+// mod application;
+// mod domain;
+// mod infrastructure;
+// pub mod interface;
