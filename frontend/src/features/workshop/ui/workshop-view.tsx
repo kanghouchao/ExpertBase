@@ -2,28 +2,23 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { EmptyState } from "@/shared/ui/empty-state";
 import { Icon } from "@/shared/ui/icon";
 import { Tag } from "@/shared/ui/tag";
 import { Button } from "@/shared/ui/button";
 import { Markdown } from "@/shared/ui/markdown";
 import { PageHead } from "@/shared/ui/page-head";
-import { DeleteButton } from "@/shared/ui/delete-button";
 import { cn } from "@/shared/lib/utils";
 import { useI18n } from "@/shared/providers/providers";
 import {
   aiHasKey,
   listOllamaModels,
-  listInbox,
-  deleteInboxMaterial,
   pickLocalFile,
   workshopCancel,
   workshopChat,
   type ChatPhase,
-  type InboxItem,
   type OllamaModel,
 } from "@/shared/api/tauri/client";
-import { inboxToMaterial, RAW_TYPE, type RawMaterial, type RawType } from "@/entities/material";
+import { RAW_TYPE, type RawMaterial, type RawType } from "@/entities/material";
 import { useKbStore } from "@/entities/knowledge-base";
 import {
   canRemoveSource,
@@ -34,58 +29,6 @@ import {
   type ProcessMessage,
   type ToolEvent,
 } from "../model/process-state";
-
-// Tauri 外（静的プレビュー）で選択リストの形だけ見せる素材。AI 出力は偽装しない。
-const PREVIEW_MATERIALS: RawMaterial[] = [
-  {
-    id: "inbox/tea-master.md",
-    type: "audio",
-    title: "与制茶师傅的访谈录音",
-    source: "录音",
-    date: "02:14:50 · 2 小时前",
-    status: "transcribed",
-    size: "",
-    preview: "",
-    words: 0,
-    tags: [],
-  },
-  {
-    id: "inbox/whitepaper.md",
-    type: "pdf",
-    title: "2024 普洱仓储白皮书.pdf",
-    source: "PDF",
-    date: "42 页 · 昨天",
-    status: "pending",
-    size: "",
-    preview: "",
-    words: 0,
-    tags: [],
-  },
-  {
-    id: "inbox/gaiwan.md",
-    type: "video",
-    title: "盖碗冲泡手法教学.mov",
-    source: "视频",
-    date: "11:38 · 3 天前",
-    status: "pending",
-    size: "",
-    preview: "",
-    words: 0,
-    tags: [],
-  },
-  {
-    id: "inbox/mountain.md",
-    type: "audio",
-    title: "语音备忘：勐海茶山见闻",
-    source: "录音",
-    date: "08:31 · 上周",
-    status: "transcribed",
-    size: "",
-    preview: "",
-    words: 0,
-    tags: [],
-  },
-];
 
 const PREVIEW_MODELS: OllamaModel[] = [
   { name: "qwen3:8b", thinking: true, tools: true },
@@ -100,8 +43,6 @@ export function WorkshopView() {
   const { available } = useKbStore();
 
   const [sources, setSources] = useState<RawMaterial[]>([]);
-  const [inbox, setInbox] = useState<InboxItem[]>([]);
-  const [showPicker, setShowPicker] = useState(false);
   const [instruction, setInstruction] = useState("");
   const [hasOllama, setHasOllama] = useState(false);
   const [models, setModels] = useState<OllamaModel[]>([]);
@@ -121,19 +62,6 @@ export function WorkshopView() {
   const cancelRef = useRef(false);
   // 「新しい対話」押下フラグ。進行中ターンの解決が選択態をクリアした状態を上書きしないようにする。
   const resetRef = useRef(false);
-
-  // 受信箱を読み込み、選択リストの母数にする（path 引数は廃止）。
-  useEffect(() => {
-    if (!available) return;
-    void (async () => {
-      setError(null);
-      try {
-        setInbox(await listInbox());
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-  }, [available]);
 
   useEffect(() => {
     if (!available) return;
@@ -180,18 +108,6 @@ export function WorkshopView() {
   const selectedThinking = selectedModelInfo?.thinking ?? false;
   const selectedTools = selectedModelInfo?.tools ?? false;
 
-  // 選択リストの母数 = 未処理の inbox。
-  const pending = inbox
-    .filter((candidate) => candidate.status !== "processed")
-    .map(materialFromInbox);
-  const visiblePending = available ? pending : PREVIEW_MATERIALS;
-
-  // 「＋」追加プール = 未処理 inbox − すでに選択済み。
-  const pool = pending.filter((candidate) => !sources.some((s) => s.id === candidate.id));
-  const visiblePool = available
-    ? pool
-    : PREVIEW_MATERIALS.filter((candidate) => !sources.some((s) => s.id === candidate.id));
-
   // 工作坊は tools 対応モデル必須（素材を read_source で読む・条目を write_entry で書くため）。
   const canGenerate =
     visibleSources.length > 0 &&
@@ -211,25 +127,12 @@ export function WorkshopView() {
 
   // 外部のローカルファイルを素材に追加する（id は絶対パス。AI が read_source で読む、KB へは落とさない）。
   async function addLocalFile() {
-    setShowPicker(false);
     const path = await pickLocalFile();
     if (!path) return;
     const material = materialFromFile(path, t("workshop.addLocalFile"));
     setSources((current) =>
       current.some((s) => s.id === material.id) ? current : [...current, material]
     );
-  }
-
-  // 受信箱から素材を削除（選択中なら外す）。DeleteButton の 2 段階確認で直接削除する。
-  async function handleDelete(path: string) {
-    setError(null);
-    try {
-      await deleteInboxMaterial(path);
-      setSources((current) => current.filter((s) => s.id !== path));
-      setInbox(await listInbox());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
   }
 
   // 対話を終えて選択態へ戻す（「新しい対話」）。状態は揮発的なので破棄でよい。
@@ -240,7 +143,6 @@ export function WorkshopView() {
     setMessages([]);
     setSources([]);
     setInstruction("");
-    setShowPicker(false);
     setPhase("idle");
     setError(null);
   }
@@ -249,7 +151,6 @@ export function WorkshopView() {
   async function runTurn(history: Msg[]) {
     setMessages(history);
     setInstruction("");
-    setShowPicker(false);
     setPhase("connecting");
     setThinkingBuf("");
     setNarrationBuf("");
@@ -345,17 +246,6 @@ export function WorkshopView() {
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="lg:min-h-0 lg:flex-1 lg:overflow-auto">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-1 py-1">
-              {/* 選択態：可多選の待加工素材リスト（会話開始前のみ）。選択は下のチップへ反映。 */}
-              {messages.length === 0 && (
-                <MaterialSelect
-                  t={t}
-                  materials={visiblePending}
-                  selectedIds={visibleSources.map((s) => s.id)}
-                  onToggle={toggleSource}
-                  onDelete={available ? handleDelete : undefined}
-                />
-              )}
-
               {/* 会話（多輪）。 */}
               {messages.map((m, i) =>
                 m.role === "user" ? (
@@ -460,65 +350,16 @@ export function WorkshopView() {
                 className="max-h-40 w-full resize-none overflow-y-auto bg-transparent px-1 text-[14.5px] leading-relaxed text-ink outline-none"
               />
               <div className="mt-2 flex items-center gap-2.5">
-                {/* ＋ 素材を追加（未処理 inbox から選ぶ） */}
-                <div className="relative flex-none">
-                  <button
-                    type="button"
-                    onClick={() => setShowPicker((prev) => !prev)}
-                    disabled={generating}
-                    title={t("workshop.addMaterial")}
-                    className="grid size-9 place-items-center rounded-[10px] border border-line-strong bg-surface text-ink-soft transition-colors hover:bg-surface-2 disabled:opacity-40"
-                  >
-                    <Icon name="plus" size={18} />
-                  </button>
-                  {showPicker && (
-                    <div className="absolute bottom-[calc(100%+9px)] left-0 z-30 w-75 rounded-xl border border-line bg-surface p-1.5 shadow-(--shadow-lg)">
-                      <div className="px-2 py-1.5 font-mono text-[10.5px] font-bold tracking-widest text-ink-muted uppercase">
-                        {t("workshop.addMaterial")}
-                      </div>
-                      {/* 外部ローカルファイルを追加（OS のファイル選択ダイアログ）。 */}
-                      <button
-                        type="button"
-                        onClick={() => void addLocalFile()}
-                        className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-2"
-                      >
-                        <span className="grid size-7 flex-none place-items-center rounded-md bg-surface-2 text-ink-soft">
-                          <Icon name="plus" size={14} />
-                        </span>
-                        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">
-                          {t("workshop.addLocalFile")}
-                        </span>
-                      </button>
-                      {visiblePool.map((m) => {
-                        const poolType = RAW_TYPE[m.type];
-                        return (
-                          <button
-                            key={m.id}
-                            type="button"
-                            onClick={() => toggleSource(m)}
-                            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-2"
-                          >
-                            <span
-                              className="grid size-7 flex-none place-items-center rounded-md bg-surface-2"
-                              style={{ color: poolType.color }}
-                            >
-                              <Icon name={poolType.icon} size={14} />
-                            </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[13px] font-semibold text-ink">
-                                {m.title}
-                              </span>
-                              <span className="block truncate font-mono text-[10.5px] text-ink-faint">
-                                {m.source}
-                              </span>
-                            </span>
-                            <Icon name="plus" size={14} className="flex-none text-ink-muted" />
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+                {/* ＋ 外部ローカルファイルを素材に追加（OS のファイル選択ダイアログ） */}
+                <button
+                  type="button"
+                  onClick={() => void addLocalFile()}
+                  disabled={generating}
+                  title={t("workshop.addLocalFile")}
+                  className="grid size-9 flex-none place-items-center rounded-[10px] border border-line-strong bg-surface text-ink-soft transition-colors hover:bg-surface-2 disabled:opacity-40"
+                >
+                  <Icon name="plus" size={18} />
+                </button>
                 <div className="flex h-9 min-w-0 max-w-60 items-center gap-1.5 rounded-[10px] border border-line-strong bg-surface px-2.5">
                   <Icon name="bot" size={15} className="flex-none text-ai" />
                   <select
@@ -602,15 +443,6 @@ export function WorkshopView() {
   );
 }
 
-function materialFromInbox(item: InboxItem): RawMaterial {
-  const material = inboxToMaterial(item);
-  return {
-    ...material,
-    status: item.type === "audio" || item.type === "video" ? "transcribed" : material.status,
-    preview: item.source || material.title,
-  };
-}
-
 // 外部ローカルファイルを素材チップへ。id は絶対パス、拡張子で表示型を決める（pdf/doc/その他=note）。
 function materialFromFile(path: string, label: string): RawMaterial {
   const name = path.split(/[\\/]/).pop() || path;
@@ -628,92 +460,6 @@ function materialFromFile(path: string, label: string): RawMaterial {
     words: 0,
     tags: [],
   };
-}
-
-// 選択態の素材リスト。行クリックで選択トグル、右の DeleteButton で受信箱から削除。
-function MaterialSelect({
-  t,
-  materials,
-  selectedIds,
-  onToggle,
-  onDelete,
-}: {
-  t: (key: string) => string;
-  materials: RawMaterial[];
-  selectedIds: string[];
-  onToggle: (material: RawMaterial) => void;
-  onDelete?: (path: string) => void;
-}) {
-  if (materials.length === 0) {
-    return (
-      <div className="rounded-xl border border-line bg-surface shadow-(--shadow-sm)">
-        <EmptyState
-          icon="layers"
-          title={t("workshop.selectEmpty")}
-          sub={t("workshop.selectEmptyHint")}
-        />
-      </div>
-    );
-  }
-  return (
-    <div>
-      <div className="mb-2.5 font-mono text-[10.5px] font-bold tracking-widest text-ink-muted uppercase">
-        {t("workshop.pendingMaterials")} · {materials.length}
-      </div>
-      <div className="grid grid-cols-2 gap-2.5">
-        {materials.map((m) => {
-          const type = RAW_TYPE[m.type];
-          const selected = selectedIds.includes(m.id);
-          return (
-            <div
-              key={m.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => onToggle(m)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  onToggle(m);
-                }
-              }}
-              className={cn(
-                "flex cursor-pointer items-center gap-3 rounded-xl border bg-surface px-4 py-3 shadow-(--shadow-sm) transition-colors",
-                selected ? "border-brand bg-brand/5" : "border-line hover:bg-surface-2"
-              )}
-            >
-              <span
-                className={cn(
-                  "grid size-5 flex-none place-items-center rounded-md border",
-                  selected
-                    ? "border-brand bg-brand text-white"
-                    : "border-line-strong text-transparent"
-                )}
-              >
-                <Icon name="check" size={13} />
-              </span>
-              <span
-                className="grid size-9 flex-none place-items-center rounded-lg bg-surface-2"
-                style={{ color: type.color }}
-              >
-                <Icon name={type.icon} size={16} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[14px] font-semibold text-ink">{m.title}</div>
-                <div className="truncate font-mono text-[11px] text-ink-faint">
-                  {m.source} · {m.date}
-                </div>
-              </div>
-              {onDelete && (
-                <span onClick={(e) => e.stopPropagation()}>
-                  <DeleteButton onDelete={() => onDelete(m.id)} />
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 function ProcessTopBar({ t, onReset }: { t: (key: string) => string; onReset: () => void }) {
