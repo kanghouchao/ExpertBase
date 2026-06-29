@@ -14,6 +14,7 @@ When you need a tool, call it directly. Never announce or describe a tool call i
 Tools:
 - read_source(id): Read the full text of an attached source by its id (see the # Sources list). Read a source before translating, rewriting, summarizing, or answering questions about it. Do not summarize or rewrite a source unless the user asks.
 - search_kb(query): Search existing entries by keyword; returns matching titles and excerpts. Use it to find related notes and avoid duplicates.
+- fetch_web(url): Fetch a web page the user gave you and return its main text as Markdown. Use it when the user shares a URL to read, summarize, or save.
 - write_entry(title, cat, body): Save a new entry into the knowledge base. Call only when the user asks to save or store the content.
   - title: a concise heading.
   - cat: a short lowercase English category, e.g. tea, finance, privacy.
@@ -46,6 +47,7 @@ mod tests {
     assert!(s.contains("read_source"));
     assert!(s.contains("search_kb"));
     assert!(s.contains("write_entry"));
+    assert!(s.contains("fetch_web"));
   }
 
   #[test]
