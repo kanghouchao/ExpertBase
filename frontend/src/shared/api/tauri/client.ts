@@ -53,15 +53,6 @@ export type Stats = { entries: number; links: number; orphans: number };
 /** グラフ描画データ。edges は解決済みの (srcPath, dstPath)。 */
 export type GraphData = { nodes: EntryRef[]; edges: [string, string][] };
 
-/** 受信箱素材の状態。 */
-export type InboxItem = {
-  path: string;
-  type: string;
-  source: string;
-  status: string;
-  capturedAt: string;
-};
-
 /** 会話の 1 ターン（多輪・記憶のためフロントが履歴を組み立てて渡す）。 */
 export type ChatTurn = {
   role: "user" | "assistant";
@@ -129,63 +120,9 @@ export async function readEntry(path: string): Promise<string> {
   return invoke<string>("kb_read_entry", { path });
 }
 
-/** 受信箱素材の生 Markdown を読む。 */
-export async function readInboxMaterial(path: string): Promise<string> {
-  return invoke<string>("kb_read_inbox_material", { path });
-}
-
 /** 条目を上書き保存する（frontmatter 検証付き）。 */
 export async function saveEntry(path: string, content: string): Promise<void> {
   await invoke("kb_save_entry", { path, content });
-}
-
-/** 受信箱素材を削除する（素材・添付・インデックスをまとめて消す）。 */
-export async function deleteInboxMaterial(path: string): Promise<void> {
-  await invoke("kb_delete_inbox_material", { path });
-}
-
-/** 受信箱一覧。 */
-export async function listInbox(): Promise<InboxItem[]> {
-  if (!isTauri()) return [];
-  return invoke<InboxItem[]>("kb_list_inbox");
-}
-
-/** テキスト/Markdown を取り込む。確定した素材の相対パスを返す。 */
-export async function captureText(content: string, source: string): Promise<string> {
-  return invoke<string>("capture_text", { content, source });
-}
-
-/** ローカルファイルを取り込む。 */
-export async function captureFile(path: string): Promise<string> {
-  return invoke<string>("capture_file", { path });
-}
-
-/** Web ページを取り込む。 */
-export async function captureWeb(url: string): Promise<string> {
-  return invoke<string>("capture_web", { url });
-}
-
-/** 録音した WAV を取り込む。確定した素材の相対パスを返す。 */
-export async function captureAudio(wav: Uint8Array, source: string): Promise<string> {
-  return invoke<string>("capture_audio", { wav, source });
-}
-
-/** モデルダウンロードの進捗（Rust 側 DownloadProgress と一致）。 */
-export type DownloadProgress = { downloaded: number; total: number | null };
-
-/**
- * 受信箱の audio 素材を転写し、本文へ書き戻す。転写後のテキストを返す。
- * 初回はモデルをダウンロードし、`onProgress` で進捗を受け取る。
- * language は "auto" | "zh" | "ja" | "en"。
- */
-export async function transcribeMaterial(
-  inboxPath: string,
-  language: string,
-  onProgress?: (progress: DownloadProgress) => void
-): Promise<string> {
-  const channel = new Channel<DownloadProgress>();
-  if (onProgress) channel.onmessage = onProgress;
-  return invoke<string>("transcribe_material", { inboxPath, language, onProgress: channel });
 }
 
 /** ローカル Ollama が応答するか。 */
@@ -200,7 +137,7 @@ export async function listOllamaModels(): Promise<OllamaModel[]> {
   return invoke<OllamaModel[]>("ai_list_ollama_models");
 }
 
-/** 添付素材（inbox 相対 | ファイル絶対の混在 id）+ 会話履歴で対話エージェントを 1 ターン回す。
+/** 添付素材（外部ファイルの絶対パス id）+ 会話履歴で対話エージェントを 1 ターン回す。
  * 最終返信本文を返す。onPhase で進捗を受け取る。 */
 export async function workshopChat(
   sourceIds: string[],
