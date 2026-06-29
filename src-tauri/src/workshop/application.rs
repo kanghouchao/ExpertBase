@@ -18,8 +18,7 @@ use super::infrastructure::rig_agent;
 /// 対話エージェント経路。素材は本文を注入せず id の目録だけ system に置き、AI が read_source で
 /// 自分で読む。Rig で 1 会話分回し、進捗（思考・本文・ツール呼び出し/結果）を tx へ流して、
 /// 最終的な助手の返信本文を返す。書き込みは write_entry ツール経由で「ユーザーが保存を頼んだとき」
-/// だけ起きる＝確定の主導権はユーザー。inbox_rels（書き込み時に processed にする素材）は sources の
-/// うち inbox 内のものだけ＝外部ファイルは KB に落とさない。
+/// だけ起きる＝確定の主導権はユーザー。素材は全て外部絶対パスで、KB へは複製しない。
 #[allow(clippy::too_many_arguments)]
 pub async fn chat(
   model: String,
@@ -31,20 +30,19 @@ pub async fn chat(
   tx: UnboundedSender<StreamProgress>,
 ) -> Result<String, AiError> {
   let system = agent_system_with(&sources);
-  let inbox_rels: Vec<String> =
-    sources.iter().filter(|s| s.starts_with("inbox/")).cloned().collect();
-  rig_agent::run(&model, think, &system, &root, &sources, &inbox_rels, messages, cancel, &tx).await
+  rig_agent::run(&model, think, &system, &root, &sources, messages, cancel, &tx).await
 }
 
-/// 承認された内容を `entries/` に確定し、インデックス更新 + source の受信箱を全て processed にする。
+/// 承認された内容を `entries/` に確定し、インデックスを更新する。
 /// write_entry ツール（infra）経由で呼ばれる（書き込みの実体）。複数素材でも同じ経路を通る。
+/// source_refs は添付素材の引用文字列（外部絶対パス）。KB へは複製せず文字列だけ残す。
 pub fn confirm(
   root: &Path,
   conn: &Connection,
   title: &str,
   cat: &str,
   body: &str,
-  inbox_rels: &[String],
+  source_refs: &[String],
 ) -> Result<String, String> {
   let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
   let entry = Entry {
@@ -54,7 +52,7 @@ pub fn confirm(
       description: String::new(),
       cat: cat.to_string(),
       tags: vec![],
-      sources: inbox_rels.to_vec(),
+      sources: source_refs.to_vec(),
       created: today.clone(),
       updated: today,
     },
@@ -62,9 +60,6 @@ pub fn confirm(
   };
   let rel = store::write_entry(root, &entry)?;
   index::upsert_entry(conn, &rel, &entry)?;
-  for inbox_rel in inbox_rels {
-    index::set_inbox_status(conn, inbox_rel, "processed")?;
-  }
   Ok(rel)
 }
 
@@ -73,36 +68,32 @@ mod tests {
   use super::*;
 
   #[test]
-  fn confirm_records_inbox_rels_as_sources() {
+  fn confirm_records_source_refs_as_entry_sources() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let conn = crate::kb::index::open_index(root).unwrap();
-    std::fs::create_dir_all(root.join("inbox")).unwrap();
 
-    let rel = confirm(root, &conn, "緑茶", "tea", "本文", &["inbox/a.md".into()]).unwrap();
+    let rel = confirm(root, &conn, "緑茶", "tea", "本文", &["/abs/report.pdf".into()]).unwrap();
 
     let saved = std::fs::read_to_string(root.join(&rel)).unwrap();
     let entry = crate::kb::entry::parse_entry(&saved).unwrap();
-    assert_eq!(entry.meta.sources, vec!["inbox/a.md".to_string()]);
+    assert_eq!(entry.meta.sources, vec!["/abs/report.pdf".to_string()]);
   }
 
   #[test]
-  fn confirm_writes_one_entry_and_marks_all_source_inboxes_processed() {
+  fn confirm_writes_one_entry_and_indexes_links() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let conn = index::open_index(root).unwrap();
-    index::upsert_inbox(&conn, "inbox/m.md", "text", "paste", "pending", "2026-06-14T00:00:00Z")
-      .unwrap();
-    index::upsert_inbox(&conn, "inbox/n.md", "text", "paste", "pending", "2026-06-14T00:00:00Z")
-      .unwrap();
 
-    // 複数素材を 1 条目に合成する。確定後、source の inbox は全て processed になる。
-    let rels = vec!["inbox/m.md".to_string(), "inbox/n.md".to_string()];
-    let rel = confirm(root, &conn, "緑茶", "tea", "湯温は [[煎茶]] で70度", &rels).unwrap();
+    // 複数素材を 1 条目に合成する。引用は外部パスの文字列として残す。
+    let refs = vec!["/abs/a.pdf".to_string(), "/abs/b.docx".to_string()];
+    let rel = confirm(root, &conn, "緑茶", "tea", "湯温は [[煎茶]] で70度", &refs).unwrap();
     assert!(root.join(&rel).is_file());
     assert_eq!(index::stats(&conn).unwrap().entries, 1);
     assert_eq!(index::backlinks(&conn, "煎茶").unwrap().len(), 1);
-    let inbox = index::list_inbox(&conn).unwrap();
-    assert!(inbox.iter().all(|m| m.status == "processed"));
+    let saved = std::fs::read_to_string(root.join(&rel)).unwrap();
+    let entry = crate::kb::entry::parse_entry(&saved).unwrap();
+    assert_eq!(entry.meta.sources, refs);
   }
 }

@@ -36,7 +36,6 @@ pub(crate) async fn run(
   system: &str,
   root: &Path,
   sources: &[String],
-  inbox_rels: &[String],
   messages: Vec<ChatTurn>,
   cancel: Arc<AtomicBool>,
   tx: &UnboundedSender<StreamProgress>,
@@ -50,9 +49,9 @@ pub(crate) async fn run(
 
   // 工作坊は tools 対応モデル必須。read_source（素材読み取り）・search_kb・write_entry を常に登録する。
   let tools: Vec<Box<dyn ToolDyn>> = vec![
-    Box::new(ReadSource { root: root.to_path_buf(), sources: sources.to_vec() }),
+    Box::new(ReadSource { sources: sources.to_vec() }),
     Box::new(SearchKb { root: root.to_path_buf() }),
-    Box::new(WriteEntry { root: root.to_path_buf(), inbox_rels: inbox_rels.to_vec() }),
+    Box::new(WriteEntry { root: root.to_path_buf(), source_refs: sources.to_vec() }),
     Box::new(FetchWeb),
   ];
 
