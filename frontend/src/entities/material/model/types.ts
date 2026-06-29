@@ -2,7 +2,6 @@
 // UI コンポーネントは含まない（表示トークンのマッピングのみ）。
 
 import type { IconName } from "@/shared/ui/icon";
-import type { TagTone } from "@/shared/ui/tag";
 
 export type RawType = "audio" | "video" | "pdf" | "doc" | "note";
 export type RawStatus = "pending" | "transcribed" | "processed";
@@ -27,10 +26,4 @@ export const RAW_TYPE: Record<RawType, { icon: IconName; color: string }> = {
   pdf: { icon: "pdf", color: "#b5572f" },
   doc: { icon: "doc", color: "#5566b0" },
   note: { icon: "note", color: "var(--ai)" },
-};
-
-export const STATUS: Record<RawStatus, { tone: TagTone }> = {
-  pending: { tone: "muted" },
-  transcribed: { tone: "ai" },
-  processed: { tone: "accent" },
 };
