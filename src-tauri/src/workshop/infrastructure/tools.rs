@@ -39,11 +39,10 @@ pub struct WriteArgs {
   body: String,
 }
 
-/// 添付素材を id で読む読み取りツール（inbox の内部素材 / ローカルの外部ファイル）。
+/// 添付素材を id で読む読み取りツール（外部絶対パスのローカルファイルのみ）。
 /// sources は許可された素材 id の集合＝モデルが任意のパスを読むのを防ぐ。
-/// 外部ファイルは読み取りのみ・KB へ落とさない。
+/// 読み取りのみ・KB へ落とさない。
 pub struct ReadSource {
-  pub root: PathBuf,
   pub sources: Vec<String>,
 }
 
@@ -70,9 +69,8 @@ impl Tool for ReadSource {
   }
 
   async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-    let root = self.root.clone();
     let sources = self.sources.clone();
-    let out = tokio::task::spawn_blocking(move || read_blocking(&root, &sources, &args.id))
+    let out = tokio::task::spawn_blocking(move || read_blocking(&sources, &args.id))
       .await
       .unwrap_or_else(|e| format!("(read task failed: {e})"));
     Ok(out)
@@ -115,10 +113,11 @@ impl Tool for SearchKb {
   }
 }
 
-/// 新しい条目を KB へ書き込むツール（application::confirm へ委譲、source の inbox を processed に）。
+/// 新しい条目を KB へ書き込むツール（application::confirm へ委譲）。
+/// source_refs は添付素材の引用文字列（外部絶対パス）＝そのまま entry.sources に記録する。
 pub struct WriteEntry {
   pub root: PathBuf,
-  pub inbox_rels: Vec<String>,
+  pub source_refs: Vec<String>,
 }
 
 impl Tool for WriteEntry {
@@ -147,17 +146,18 @@ impl Tool for WriteEntry {
 
   async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
     let root = self.root.clone();
-    let inbox_rels = self.inbox_rels.clone();
-    let out = tokio::task::spawn_blocking(move || write_blocking(&root, &inbox_rels, args))
+    let source_refs = self.source_refs.clone();
+    let out = tokio::task::spawn_blocking(move || write_blocking(&root, &source_refs, args))
       .await
       .unwrap_or_else(|e| format!("(write task failed: {e})"));
     Ok(out)
   }
 }
 
-/// 素材読み取り（ブロッキング）。id を許可集合で検証してから、接頭辞で内部 / 外部に振り分ける。
-/// エラーは全てモデル向け文字列で返す（ループ継続）。外部ファイルは読み取りのみ・KB へ落とさない。
-fn read_blocking(root: &Path, sources: &[String], id: &str) -> String {
+/// 素材読み取り（ブロッキング）。id を許可集合で検証してから、拡張子で抽出器を選ぶ。
+/// source は外部絶対パスのみ（pdf/docx は抽出、その他はテキスト読み）。
+/// エラーは全てモデル向け文字列で返す（ループ継続）。読み取りのみ・KB へ落とさない。
+fn read_blocking(sources: &[String], id: &str) -> String {
   let id = id.trim();
   if id.is_empty() {
     return "(read_source needs a non-empty id)".to_string();
@@ -166,29 +166,14 @@ fn read_blocking(root: &Path, sources: &[String], id: &str) -> String {
   if !sources.iter().any(|s| s == id) {
     return format!("(unknown source id: {id})");
   }
-  let text = if id.starts_with("inbox/") {
-    // 内部素材: KB の inbox を frontmatter ごと parse_material で読み、本文を返す。
-    match crate::kb::checked_kb_markdown_path(id, "inbox") {
-      Ok(rel) => match std::fs::read_to_string(root.join(&rel)) {
-        Ok(raw) => match crate::kb::material::parse_material(&raw) {
-          Ok(m) => Ok(m.body),
-          Err(e) => Err(format!("parse error: {e}")),
-        },
-        Err(e) => Err(format!("read error: {e}")),
-      },
-      Err(e) => Err(format!("invalid source: {e}")),
-    }
-  } else {
-    // 外部素材: ローカルファイルを拡張子で振り分け（pdf/docx は抽出、その他はテキスト）。
-    let path = Path::new(id);
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    match ext.as_str() {
-      "pdf" => extract_pdf(path),
-      "docx" => extract_docx(path),
-      _ => std::fs::read_to_string(path).map_err(|e| e.to_string()),
-    }
-    .map_err(|e| format!("read error: {e}"))
-  };
+  let path = Path::new(id);
+  let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+  let text = match ext.as_str() {
+    "pdf" => extract_pdf(path),
+    "docx" => extract_docx(path),
+    _ => std::fs::read_to_string(path).map_err(|e| e.to_string()),
+  }
+  .map_err(|e| format!("read error: {e}"));
   match text {
     Ok(body) if body.trim().is_empty() => format!("(source {id} is empty)"),
     Ok(body) => body,
@@ -221,8 +206,8 @@ fn search_blocking(root: &Path, query: &str) -> String {
   }
 }
 
-/// 条目書き込み（ブロッキング）。title/body を検証 → confirm で確定し inbox を processed に。
-fn write_blocking(root: &Path, inbox_rels: &[String], args: WriteArgs) -> String {
+/// 条目書き込み（ブロッキング）。title/body を検証 → confirm で確定する。
+fn write_blocking(root: &Path, source_refs: &[String], args: WriteArgs) -> String {
   let title = args.title.trim();
   let body = args.body.trim();
   if title.is_empty() || body.is_empty() {
@@ -232,7 +217,7 @@ fn write_blocking(root: &Path, inbox_rels: &[String], args: WriteArgs) -> String
     Ok(c) => c,
     Err(e) => return format!("(index error: {e})"),
   };
-  match crate::workshop::application::confirm(root, &conn, title, args.cat.trim(), body, inbox_rels) {
+  match crate::workshop::application::confirm(root, &conn, title, args.cat.trim(), body, source_refs) {
     Ok(rel) => format!("Saved entry to {rel}"),
     Err(e) => format!("(write error: {e})"),
   }
@@ -320,30 +305,6 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn read_source_reads_inbox_material_body() {
-    use crate::kb::material::{serialize_material, Material, MaterialMeta};
-    let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path();
-    std::fs::create_dir_all(root.join("inbox")).unwrap();
-    let m = Material {
-      meta: MaterialMeta {
-        kind: "text".into(),
-        source: "paste".into(),
-        status: "pending".into(),
-        attachment: String::new(),
-        captured_at: "2026-06-14T00:00:00Z".into(),
-      },
-      body: "受信箱の本文テキスト".into(),
-    };
-    std::fs::write(root.join("inbox/m.md"), serialize_material(&m).unwrap()).unwrap();
-
-    let tool = ReadSource { root: root.to_path_buf(), sources: vec!["inbox/m.md".into()] };
-    let out = tool.call(ReadArgs { id: "inbox/m.md".into() }).await.unwrap();
-
-    assert!(out.contains("受信箱の本文テキスト"));
-  }
-
-  #[tokio::test]
   async fn read_source_reads_external_local_file() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -351,7 +312,7 @@ mod tests {
     std::fs::write(&file, "外部ファイルの内容").unwrap();
     let id = file.to_string_lossy().to_string();
 
-    let tool = ReadSource { root: root.to_path_buf(), sources: vec![id.clone()] };
+    let tool = ReadSource { sources: vec![id.clone()] };
     let out = tool.call(ReadArgs { id }).await.unwrap();
 
     assert!(out.contains("外部ファイルの内容"));
@@ -359,11 +320,8 @@ mod tests {
 
   #[tokio::test]
   async fn read_source_rejects_unknown_id() {
-    let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path();
-    let tool = ReadSource { root: root.to_path_buf(), sources: vec![] };
-
-    let out = tool.call(ReadArgs { id: "inbox/secret.md".into() }).await.unwrap();
+    let tool = ReadSource { sources: vec![] };
+    let out = tool.call(ReadArgs { id: "/abs/secret.md".into() }).await.unwrap();
     assert!(out.contains("unknown source id"));
   }
 
@@ -393,14 +351,15 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn write_entry_tool_persists_and_marks_inbox() {
+  async fn write_entry_tool_persists_and_records_source_refs() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let conn = index::open_index(root).unwrap();
-    index::upsert_inbox(&conn, "inbox/m.md", "text", "paste", "pending", "2026-06-14T00:00:00Z")
-      .unwrap();
 
-    let tool = WriteEntry { root: root.to_path_buf(), inbox_rels: vec!["inbox/m.md".into()] };
+    let tool = WriteEntry {
+      root: root.to_path_buf(),
+      source_refs: vec!["/abs/report.pdf".into()],
+    };
     let out = tool
       .call(WriteArgs { title: "緑茶".into(), cat: "tea".into(), body: "湯温は [[煎茶]] で70度".into() })
       .await
@@ -409,8 +368,11 @@ mod tests {
     assert!(out.starts_with("Saved entry to"));
     assert_eq!(index::stats(&conn).unwrap().entries, 1);
     assert_eq!(index::backlinks(&conn, "煎茶").unwrap().len(), 1);
-    let inbox = index::list_inbox(&conn).unwrap();
-    assert!(inbox.iter().all(|m| m.status == "processed"));
+    // 引用文字列（外部パス）が entry.sources に文字列として記録される。
+    let rel = out.trim_start_matches("Saved entry to ").trim();
+    let saved = std::fs::read_to_string(root.join(rel)).unwrap();
+    let entry = crate::kb::entry::parse_entry(&saved).unwrap();
+    assert_eq!(entry.meta.sources, vec!["/abs/report.pdf".to_string()]);
   }
 
   #[tokio::test]
@@ -418,7 +380,7 @@ mod tests {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     index::open_index(root).unwrap();
-    let tool = WriteEntry { root: root.to_path_buf(), inbox_rels: vec![] };
+    let tool = WriteEntry { root: root.to_path_buf(), source_refs: vec![] };
 
     let out = tool
       .call(WriteArgs { title: "  ".into(), cat: "tea".into(), body: "x".into() })

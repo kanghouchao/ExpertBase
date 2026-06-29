@@ -70,8 +70,7 @@ pub async fn workshop_chat(
   let cancel_flag = cancel.0.clone();
 
   // 素材 id の検証はブロッキング寄り。root + 検証済み sources を別スレッドで用意。
-  // 本文はここでは読まない＝AI が read_source で個別に読む。id は inbox 相対 | ファイル絶対の混在：
-  // 絶対パスはユーザーがダイアログで選んだ外部ファイルとしてそのまま許可、それ以外は inbox 内に限定検証。
+  // 本文はここでは読まない＝AI が read_source で個別に読む。id は外部ファイルの絶対パスのみ。
   let (root, sources) =
     tauri::async_runtime::spawn_blocking(move || -> Result<(PathBuf, Vec<String>), String> {
       let (root, _conn) = crate::kb::open_active(&home)?;
@@ -80,8 +79,7 @@ pub async fn workshop_chat(
         if std::path::Path::new(id).is_absolute() {
           sources.push(id.clone());
         } else {
-          let inbox_rel = crate::kb::checked_kb_markdown_path(id, "inbox")?;
-          sources.push(inbox_rel.to_string_lossy().to_string());
+          return Err(format!("source must be an absolute path: {id}"));
         }
       }
       Ok((root, sources))
