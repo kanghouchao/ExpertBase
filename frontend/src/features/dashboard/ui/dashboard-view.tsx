@@ -9,9 +9,8 @@ import { Panel } from "@/shared/ui/panel";
 import { PageHead } from "@/shared/ui/page-head";
 import { Icon, type IconName } from "@/shared/ui/icon";
 import { useI18n } from "@/shared/providers/providers";
-import { RecentMaterials } from "./recent-materials";
 import { WikiHealth } from "./wiki-health";
-import { listInbox, stats as fetchStats } from "@/shared/api/tauri/client";
+import { stats as fetchStats } from "@/shared/api/tauri/client";
 import { useKbStore } from "@/entities/knowledge-base";
 
 type Tone = "accent" | "ai";
@@ -57,7 +56,7 @@ function PipelineStep({
 }: {
   icon: IconName;
   label: string;
-  count: string;
+  count?: string;
   tone: Tone | "muted";
   last?: boolean;
 }) {
@@ -79,7 +78,7 @@ function PipelineStep({
           <Icon name={icon} size={22} />
         </div>
         <div className="text-[13.5px] font-semibold text-ink">{label}</div>
-        <div className="mt-0.75 font-mono text-xs text-ink-faint">{count}</div>
+        {count && <div className="mt-0.75 font-mono text-xs text-ink-faint">{count}</div>}
       </div>
       {!last && (
         <div className="relative -mt-7.5 h-0.5 w-13.5 flex-none bg-line-strong">
@@ -95,18 +94,13 @@ function PipelineStep({
 export function DashboardView() {
   const { t, lang } = useI18n();
   const { active, available } = useKbStore();
-  const [data, setData] = useState({ rawCount: 0, pending: 0, wikiCount: 0, links: 0 });
+  const [data, setData] = useState({ wikiCount: 0, links: 0 });
 
   useEffect(() => {
     if (!available) return;
     void (async () => {
-      const [s, inbox] = await Promise.all([fetchStats(), listInbox()]);
-      setData({
-        rawCount: inbox.length,
-        pending: inbox.filter((item) => item.status !== "processed").length,
-        wikiCount: s?.entries ?? 0,
-        links: s?.links ?? 0,
-      });
+      const s = await fetchStats();
+      setData({ wikiCount: s?.entries ?? 0, links: s?.links ?? 0 });
     })();
   }, [available]);
 
@@ -130,7 +124,7 @@ export function DashboardView() {
               <Icon name="search" size={17} />
               {t("c.search")}
             </Button>
-            <Link href="/capture" className={cn(buttonVariants({ size: "lg" }))}>
+            <Link href="/workshop" className={cn(buttonVariants({ size: "lg" }))}>
               <Icon name="plus" size={17} />
               {t("c.add")}
             </Link>
@@ -146,18 +140,8 @@ export function DashboardView() {
           </div>
         </div>
         <div className="flex items-start">
-          <PipelineStep
-            icon="inbox"
-            label={t("dash.p.collect")}
-            count={count(data.rawCount, "unit.materials")}
-            tone="accent"
-          />
-          <PipelineStep
-            icon="merge"
-            label={t("dash.p.work")}
-            count={count(data.pending, "unit.pending")}
-            tone="accent"
-          />
+          <PipelineStep icon="inbox" label={t("dash.p.collect")} tone="accent" />
+          <PipelineStep icon="merge" label={t("dash.p.work")} tone="accent" />
           <PipelineStep
             icon="book"
             label={t("dash.p.kb")}
@@ -182,13 +166,6 @@ export function DashboardView() {
 
       <div className="mb-5.5 flex gap-3.5">
         <StatTile
-          icon="inbox"
-          label={t("dash.t.inbox")}
-          value={nf.format(data.rawCount)}
-          sub={t("dash.t.inbox.s")}
-          tone="accent"
-        />
-        <StatTile
           icon="book"
           label={t("dash.t.wiki")}
           value={nf.format(data.wikiCount)}
@@ -211,10 +188,7 @@ export function DashboardView() {
         />
       </div>
 
-      <div className="grid grid-cols-[1.4fr_1fr] gap-4.5">
-        <RecentMaterials />
-        <WikiHealth />
-      </div>
+      <WikiHealth />
     </div>
   );
 }
