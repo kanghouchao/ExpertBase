@@ -11,7 +11,7 @@ use rig_core::tool::Tool;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::capture::{extract_docx, extract_pdf};
+use crate::capture::{extract_docx, extract_pdf, extract_readable, fetch_html};
 use crate::kb::index;
 
 /// read_source の引数。id（素材識別子）を緩く受ける。
@@ -238,6 +238,65 @@ fn write_blocking(root: &Path, inbox_rels: &[String], args: WriteArgs) -> String
   }
 }
 
+/// fetch_web の引数。URL を緩く受ける。
+#[derive(Deserialize)]
+pub struct FetchArgs {
+  #[serde(default)]
+  url: String,
+}
+
+/// ユーザーが会話に渡した URL の本文を Markdown で返す読み取りツール。
+/// `web::fetch_html`（HTTPS 取得）+ `web::extract_readable`（Readability→Markdown）を再利用する。
+/// 単一 URL の本文抽出のみ。許可リスト / SSRF 防御は入れない（local-first・単一ユーザー前提）。
+pub struct FetchWeb;
+
+impl Tool for FetchWeb {
+  const NAME: &'static str = "fetch_web";
+  type Error = Infallible;
+  type Args = FetchArgs;
+  type Output = String;
+
+  async fn definition(&self, _prompt: String) -> ToolDefinition {
+    ToolDefinition {
+      name: Self::NAME.to_string(),
+      description:
+        "Fetch a web page the user gave you and return its main text as Markdown. Use it when the user shares a URL to read, summarize, or save."
+          .to_string(),
+      parameters: json!({
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "The page URL to fetch" }
+        },
+        "required": ["url"]
+      }),
+    }
+  }
+
+  async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+    let url = args.url.trim();
+    if url.is_empty() {
+      return Ok("(fetch_web needs a non-empty url)".to_string());
+    }
+    let html = match fetch_html(url).await {
+      Ok(h) => h,
+      Err(e) => return Ok(format!("(fetch error: {e})")),
+    };
+    match extract_readable(&html, url) {
+      Ok((title, markdown)) => Ok(format_web_body(&title, &markdown)),
+      Err(e) => Ok(format!("(extract error: {e})")),
+    }
+  }
+}
+
+/// タイトルがあれば本文の先頭に `# title` を前置する（無ければ本文のみ）。
+fn format_web_body(title: &str, markdown: &str) -> String {
+  if title.trim().is_empty() {
+    markdown.to_string()
+  } else {
+    format!("# {}\n\n{}", title.trim(), markdown)
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -366,5 +425,21 @@ mod tests {
       .await
       .unwrap();
     assert!(out.contains("needs a non-empty title and body"));
+  }
+
+  #[tokio::test]
+  async fn fetch_web_rejects_empty_url() {
+    let out = FetchWeb.call(FetchArgs { url: "  ".into() }).await.unwrap();
+    assert!(out.contains("needs a non-empty url"), "was: {out}");
+  }
+
+  #[tokio::test]
+  async fn fetch_web_formats_extracted_body_with_title() {
+    // 実ネットは叩かない。抽出器の出力整形（title を見出しに前置）だけを検証する。
+    let body = super::format_web_body("緑茶の淹れ方", "湯温は70度。");
+    assert!(body.starts_with("# 緑茶の淹れ方"));
+    assert!(body.contains("湯温は70度。"));
+    // タイトルが空なら見出しを足さない。
+    assert_eq!(super::format_web_body("  ", "本文だけ"), "本文だけ");
   }
 }
