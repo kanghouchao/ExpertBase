@@ -31,6 +31,8 @@ dom_smoothie = "0.18"
 htmd = "0.5"
 pdf-extract = "0.10"
 dotext = "0.1"
+# 素材 id 照合用の Unicode 正規化。macOS は NFD、モデルは NFC で打ち直すため照合前に揃える。
+unicode-normalization = "0.1"
 # 転写エンジン（whisper.cpp）。ネイティブビルドに cmake が要るため、optional feature の裏に置く。
 whisper-rs = { version = "0.16", optional = true }
 hound = { version = "3", optional = true }

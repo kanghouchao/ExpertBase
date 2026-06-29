@@ -10,6 +10,7 @@ use rig_core::completion::ToolDefinition;
 use rig_core::tool::Tool;
 use serde::Deserialize;
 use serde_json::json;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::capture::{extract_docx, extract_pdf, extract_readable, fetch_html};
 use crate::kb::index;
@@ -163,10 +164,13 @@ fn read_blocking(sources: &[String], id: &str) -> String {
     return "(read_source needs a non-empty id)".to_string();
   }
   // 許可された素材だけ読む（モデルが任意パスを読むのを防ぐ）。
-  if !sources.iter().any(|s| s == id) {
+  // macOS はファイル名を NFD で返し、モデルは NFC で打ち直すため、Unicode 正規化（NFC）で照合する
+  // （バイト一致だと日本語名の素材を必ず取りこぼす）。読み取りは検証済みの保存側パスで開く。
+  let want: String = id.nfc().collect();
+  let Some(source) = sources.iter().find(|s| s.nfc().collect::<String>() == want) else {
     return format!("(unknown source id: {id})");
-  }
-  let path = Path::new(id);
+  };
+  let path = Path::new(source);
   let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
   let text = match ext.as_str() {
     "pdf" => extract_pdf(path),
@@ -286,6 +290,7 @@ fn format_web_body(title: &str, markdown: &str) -> String {
 mod tests {
   use super::*;
   use crate::kb::entry::{Entry, EntryMeta};
+  use unicode_normalization::UnicodeNormalization;
 
   fn seed_entry(conn: &rusqlite::Connection, path: &str, title: &str, body: &str) {
     let entry = Entry {
@@ -316,6 +321,25 @@ mod tests {
     let out = tool.call(ReadArgs { id }).await.unwrap();
 
     assert!(out.contains("外部ファイルの内容"));
+  }
+
+  #[tokio::test]
+  async fn read_source_matches_across_unicode_normalization() {
+    // macOS のファイルダイアログはファイル名を NFD（分解）で返すが、モデルは tool 引数を
+    // NFC（合成）で打ち直す。バイト一致だと日本語名の素材を必ず取りこぼすため、正規化して照合する。
+    let tmp = tempfile::tempdir().unwrap();
+    let nfd_name: String = "五分プレゼン.md".nfd().collect();
+    let file = tmp.path().join(&nfd_name);
+    std::fs::write(&file, "テキスト本文").unwrap();
+    // sources にはディスク由来の NFD パス、モデルが渡すのは NFC パス。
+    let nfd_id = file.to_string_lossy().to_string();
+    let nfc_id: String = nfd_id.nfc().collect();
+    assert_ne!(nfd_id, nfc_id, "前提: NFD と NFC でバイトが異なる");
+
+    let tool = ReadSource { sources: vec![nfd_id] };
+    let out = tool.call(ReadArgs { id: nfc_id }).await.unwrap();
+
+    assert!(out.contains("テキスト本文"), "was: {out}");
   }
 
   #[tokio::test]
