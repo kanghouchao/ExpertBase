@@ -107,26 +107,7 @@ pub fn kb_read_entry(app: tauri::AppHandle, path: String) -> Result<String, Stri
 }
 
 #[tauri::command]
-pub fn kb_read_inbox_material(app: tauri::AppHandle, path: String) -> Result<String, String> {
-  let home = app.path().home_dir().map_err(|e| e.to_string())?;
-  application::read_inbox_material(&home, &path)
-}
-
-#[tauri::command]
 pub fn kb_save_entry(app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
   let home = app.path().home_dir().map_err(|e| e.to_string())?;
   application::save_entry(&home, &path, &content)
-}
-
-#[tauri::command]
-pub fn kb_delete_inbox_material(app: tauri::AppHandle, path: String) -> Result<(), String> {
-  let home = app.path().home_dir().map_err(|e| e.to_string())?;
-  application::delete_inbox_material(&home, &path)
-}
-
-#[tauri::command]
-pub fn kb_list_inbox(app: tauri::AppHandle) -> Result<Vec<index::InboxItem>, String> {
-  let home = app.path().home_dir().map_err(|e| e.to_string())?;
-  let (_root, conn) = application::open_active(&home)?;
-  index::list_inbox(&conn)
 }

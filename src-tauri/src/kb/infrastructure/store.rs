@@ -81,26 +81,20 @@ mod tests {
   }
 
   #[test]
-  fn rebuild_scans_entries_and_inbox_from_disk() {
+  fn rebuild_scans_entries_from_disk() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     fs::create_dir_all(root.join("entries")).unwrap();
-    fs::create_dir_all(root.join("inbox")).unwrap();
     fs::write(
       root.join("entries/a.md"),
       "---\ntype: Entry\ntitle: A\ncreated: 2026-06-14\nupdated: 2026-06-14\n---\n\n[[B]]\n",
-    )
-    .unwrap();
-    fs::write(
-      root.join("inbox/m.md"),
-      "---\ntype: web\nsource: https://x\nstatus: pending\ncaptured_at: 2026-06-14T00:00:00Z\n---\n\ntext\n",
     )
     .unwrap();
 
     let conn = index::open_index(root).unwrap();
     index::rebuild(&conn, root).unwrap();
     assert_eq!(index::stats(&conn).unwrap().entries, 1);
-    assert_eq!(index::list_inbox(&conn).unwrap().len(), 1);
+    assert_eq!(index::backlinks(&conn, "B").unwrap().len(), 1);
   }
 
   #[test]

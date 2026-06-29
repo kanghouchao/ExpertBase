@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 
 use crate::kb::domain::entry;
-use crate::kb::domain::material;
 use crate::kb::domain::registry::{self, KbConfig, KbEntry};
 use crate::kb::infrastructure::{config_store, index};
 
@@ -125,32 +124,6 @@ pub fn read_entry(home: &Path, rel_path: &str) -> Result<String, String> {
   let root = active_kb_root(home)?;
   let rel = registry::checked_kb_markdown_path(rel_path, "entries")?;
   fs::read_to_string(root.join(rel)).map_err(|e| e.to_string())
-}
-
-/// 受信箱素材の生 Markdown を読む。
-pub fn read_inbox_material(home: &Path, rel_path: &str) -> Result<String, String> {
-  let root = active_kb_root(home)?;
-  let rel = registry::checked_kb_markdown_path(rel_path, "inbox")?;
-  fs::read_to_string(root.join(rel)).map_err(|e| e.to_string())
-}
-
-/// 受信箱素材を削除する（素材 .md・添付ファイル・インデックス行をまとめて消す）。
-pub fn delete_inbox_material(home: &Path, rel_path: &str) -> Result<(), String> {
-  let (root, conn) = open_active(home)?;
-  let rel = registry::checked_kb_markdown_path(rel_path, "inbox")?;
-  let file = root.join(&rel);
-  // 添付（attachments/ の wav 等）も一緒に削除する。読めない/壊れている場合は素材だけ消す。
-  if let Ok(raw) = fs::read_to_string(&file) {
-    if let Ok(m) = material::parse_material(&raw) {
-      let att = m.meta.attachment;
-      // ponytail: アプリ生成の相対パス前提の最小ガード。.. を含むものは経路脱出防止で消さない。
-      if !att.is_empty() && !att.contains("..") {
-        let _ = fs::remove_file(root.join(att)); // 既に無くても無視
-      }
-    }
-  }
-  fs::remove_file(&file).map_err(|e| e.to_string())?;
-  index::delete_inbox(&conn, &rel.to_string_lossy())
 }
 
 #[cfg(test)]
@@ -312,25 +285,4 @@ mod tests {
     assert!(delete_kb(tmp.path(), "/nowhere").is_err());
   }
 
-  #[test]
-  fn delete_inbox_material_removes_file_attachment_and_index() {
-    let tmp = tempfile::tempdir().unwrap();
-    let home = tmp.path();
-    create_kb(home, "k", "", home.join("kb").to_str().unwrap()).unwrap();
-    let (root, conn) = open_active(home).unwrap();
-
-    fs::create_dir_all(root.join("inbox")).unwrap();
-    fs::create_dir_all(root.join("attachments")).unwrap();
-    let md = "---\ntype: audio\nsource: record\nstatus: transcribed\nattachment: attachments/x.wav\ncaptured_at: 2026-06-19T00:00:00Z\n---\n\nhello\n";
-    fs::write(root.join("inbox/x.md"), md).unwrap();
-    fs::write(root.join("attachments/x.wav"), b"riff").unwrap();
-    index::upsert_inbox(&conn, "inbox/x.md", "audio", "record", "transcribed", "2026-06-19T00:00:00Z")
-      .unwrap();
-
-    delete_inbox_material(home, "inbox/x.md").unwrap();
-
-    assert!(!root.join("inbox/x.md").exists());
-    assert!(!root.join("attachments/x.wav").exists());
-    assert!(index::list_inbox(&conn).unwrap().is_empty());
-  }
 }
