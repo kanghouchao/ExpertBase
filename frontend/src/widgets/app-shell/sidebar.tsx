@@ -40,12 +40,12 @@ export function Sidebar({ onAddKb }: { onAddKb: () => void }) {
       </div>
 
       <nav className="flex flex-1 flex-col gap-0.75">
-        {NAV.slice(0, 5).map(renderItem)}
+        {NAV.slice(0, 4).map(renderItem)}
         <div className="mx-2 my-3 h-px bg-line" />
         <div className="px-3.25 pb-2 font-mono text-[10.5px] font-semibold tracking-[0.12em] text-ink-faint uppercase">
           {t("nav.group.external")}
         </div>
-        {NAV.slice(5).map(renderItem)}
+        {NAV.slice(4).map(renderItem)}
       </nav>
 
       <KbSwitcher onAdd={onAddKb} />

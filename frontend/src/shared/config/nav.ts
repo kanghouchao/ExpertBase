@@ -4,7 +4,6 @@ import type { IconName } from "@/shared/ui/icon";
 
 export type RouteId =
   | "dash"
-  | "capture"
   | "workshop"
   | "wiki"
   | "graph"
@@ -21,7 +20,6 @@ export type NavItem = {
 
 export const NAV: NavItem[] = [
   { id: "dash", href: "/", icon: "dash" },
-  { id: "capture", href: "/capture", icon: "inbox" },
   { id: "workshop", href: "/workshop", icon: "merge" },
   { id: "wiki", href: "/wiki", icon: "book" },
   { id: "graph", href: "/graph", icon: "graph", tone: "ai" },
