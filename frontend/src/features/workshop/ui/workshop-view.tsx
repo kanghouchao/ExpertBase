@@ -452,12 +452,6 @@ function materialFromFile(path: string, label: string): RawMaterial {
     type,
     title: name,
     source: label,
-    date: "",
-    status: "pending",
-    size: "",
-    preview: "",
-    words: 0,
-    tags: [],
   };
 }
 
