@@ -1,12 +1,14 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import { Suspense } from "react";
 
+import { requestNewWorkshopConversation, WorkshopHistoryNav } from "@/features/workshop";
+import { NAV } from "@/shared/config/nav";
+import { useI18n } from "@/shared/providers/providers";
 import { Logo } from "@/shared/ui/logo";
 import { NavItem } from "./nav-item";
 import { KbSwitcher } from "./kb-switcher";
-import { useI18n } from "@/shared/providers/providers";
-import { NAV } from "@/shared/config/nav";
 
 export function Sidebar({ onAddKb }: { onAddKb: () => void }) {
   const { t } = useI18n();
@@ -16,13 +18,20 @@ export function Sidebar({ onAddKb }: { onAddKb: () => void }) {
       ?.id ?? "dash";
 
   const renderItem = (item: (typeof NAV)[number]) => (
-    <NavItem
-      key={item.id}
-      item={item}
-      active={item.id === activeId}
-      label={t(`nav.${item.id}`)}
-      sublabel={t(`nav.${item.id}.sub`)}
-    />
+    <div key={item.id} className="flex flex-col gap-1">
+      <NavItem
+        item={item}
+        active={item.id === activeId}
+        label={t(`nav.${item.id}`)}
+        sublabel={t(`nav.${item.id}.sub`)}
+        onClick={item.id === "workshop" ? requestNewWorkshopConversation : undefined}
+      />
+      {item.id === "workshop" ? (
+        <Suspense fallback={null}>
+          <WorkshopHistoryNav />
+        </Suspense>
+      ) : null}
+    </div>
   );
 
   return (
@@ -39,7 +48,9 @@ export function Sidebar({ onAddKb }: { onAddKb: () => void }) {
         </div>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-0.75">{NAV.map(renderItem)}</nav>
+      <nav className="flex min-h-0 flex-1 flex-col gap-0.75 overflow-y-auto">
+        {NAV.map(renderItem)}
+      </nav>
 
       <KbSwitcher onAdd={onAddKb} />
     </aside>

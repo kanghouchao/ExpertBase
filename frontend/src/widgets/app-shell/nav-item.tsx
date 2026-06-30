@@ -10,17 +10,20 @@ export function NavItem({
   label,
   sublabel,
   badge,
+  onClick,
 }: {
   item: NavItemData;
   active: boolean;
   label: string;
   sublabel: string;
   badge?: number;
+  onClick?: () => void;
 }) {
   const ai = item.tone === "ai";
   return (
     <Link
       href={item.href}
+      onClick={onClick}
       aria-current={active ? "page" : undefined}
       className={cn(
         "group relative flex items-center gap-3 rounded-[11px] px-3.25 py-2.5 transition-colors",
