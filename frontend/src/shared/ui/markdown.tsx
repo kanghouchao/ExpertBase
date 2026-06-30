@@ -1,7 +1,9 @@
 "use client";
 
 import ReactMarkdown, { type Components } from "react-markdown";
+import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 
 // Markdown を安全な React ノードへ描画する共通プリミティブ。AI 出力・KB 条目本文の
 // 「表示」専用（保存・生成は常に Markdown のまま）。dangerouslySetInnerHTML は使わない＝
@@ -71,7 +73,11 @@ const components: Components = {
 export function Markdown({ children, className }: { children: string; className?: string }) {
   return (
     <div className={className}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={components}
+      >
         {children}
       </ReactMarkdown>
     </div>
