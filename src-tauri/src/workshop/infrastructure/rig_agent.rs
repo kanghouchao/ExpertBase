@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use futures::StreamExt;
 use serde_json::json;
@@ -46,13 +46,14 @@ pub(crate) async fn run(
   };
 
   let client = ollama::Client::new(Nothing).map_err(|e| AiError::Network(e.to_string()))?;
+  let used_sources = Arc::new(Mutex::new(Vec::new()));
 
   // 工作坊は tools 対応モデル必須。read_source（素材読み取り）・search_kb・write_entry を常に登録する。
   let tools: Vec<Box<dyn ToolDyn>> = vec![
-    Box::new(ReadSource { sources: sources.to_vec() }),
+    Box::new(ReadSource { sources: sources.to_vec(), used_sources: used_sources.clone() }),
     Box::new(SearchKb { root: root.to_path_buf() }),
-    Box::new(WriteEntry { root: root.to_path_buf(), source_refs: sources.to_vec() }),
-    Box::new(FetchWeb),
+    Box::new(WriteEntry { root: root.to_path_buf(), used_sources: used_sources.clone() }),
+    Box::new(FetchWeb { used_sources }),
   ];
 
   // num_ctx は options へ、think は最上位へ（Ollama provider が additional_params を仕分ける）。

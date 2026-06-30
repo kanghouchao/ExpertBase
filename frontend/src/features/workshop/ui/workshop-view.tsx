@@ -110,7 +110,6 @@ export function WorkshopView() {
 
   // 工作坊は tools 対応モデル必須（素材を read_source で読む・条目を write_entry で書くため）。
   const canGenerate =
-    visibleSources.length > 0 &&
     visibleHasOllama &&
     !!visibleSelectedModel &&
     selectedTools &&
