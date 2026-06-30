@@ -1,8 +1,9 @@
-//! ワークショップ機能。DDD レイヤ構成（application / infrastructure / interface）。
-//! domain 層は持たない。infrastructure 層は Rig（AI フレームワーク）と KB を繋ぐアダプタ
-//! （Tool 実装・エージェント駆動）を収める。永続化・索引は kb のインフラを編成して使う。
+//! ワークショップ機能。DDD レイヤ構成（domain / application / infrastructure / interface）。
+//! infrastructure 層は Rig（AI フレームワーク）と KB を繋ぐアダプタ、および対話履歴の
+//! 永続化を収める。
 
 mod application;
+mod domain;
 mod infrastructure;
 pub mod interface;
 
