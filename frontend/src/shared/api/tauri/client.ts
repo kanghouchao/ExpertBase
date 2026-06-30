@@ -59,7 +59,7 @@ export type ChatTurn = {
   content: string;
 };
 
-/** 対話の進捗イベント（Rust ChatEvent と一致）。 */
+/** 対話の進捗イベント（Rust StreamProgress と一致）。 */
 export type ChatPhase =
   | { phase: "thinking"; delta: string }
   | { phase: "loadingModel" }
