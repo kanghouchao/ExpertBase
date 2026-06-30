@@ -1,5 +1,4 @@
 //! 抽出器の置き場（doc + web）。元 capture 機能は工坊へ畳み込み済み。
-//! ponytail: 名前と実体がズレるが capture→extract 改名は import 波及のため見送り（後日検討）。
 
 mod infrastructure;
 

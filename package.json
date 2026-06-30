@@ -3,8 +3,8 @@
   "private": true,
   "scripts": {
     "setup": "bun install && bun install --cwd frontend",
-    "dev": "tauri dev --features whisper",
-    "build": "tauri build --features whisper",
+    "dev": "tauri dev",
+    "build": "tauri build",
     "lint": "bun run --cwd frontend lint",
     "test": "cargo test --manifest-path src-tauri/Cargo.toml",
     "clean": "rm -rf frontend/.next frontend/out src-tauri/target",
