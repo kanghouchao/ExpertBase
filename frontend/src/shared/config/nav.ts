@@ -2,14 +2,7 @@
 
 import type { IconName } from "@/shared/ui/icon";
 
-export type RouteId =
-  | "dash"
-  | "workshop"
-  | "wiki"
-  | "graph"
-  | "publish"
-  | "bots"
-  | "plugins";
+export type RouteId = "dash" | "workshop" | "wiki" | "graph";
 
 export type NavItem = {
   id: RouteId;
@@ -23,7 +16,4 @@ export const NAV: NavItem[] = [
   { id: "workshop", href: "/workshop", icon: "merge" },
   { id: "wiki", href: "/wiki", icon: "book" },
   { id: "graph", href: "/graph", icon: "graph", tone: "ai" },
-  { id: "publish", href: "/publish", icon: "broadcast" },
-  { id: "bots", href: "/bots", icon: "bot" },
-  { id: "plugins", href: "/plugins", icon: "plug" },
 ];
