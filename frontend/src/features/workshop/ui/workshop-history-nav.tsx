@@ -55,9 +55,13 @@ function WorkshopHistoryNavState() {
   }, []);
 
   useEffect(() => {
-    queueMicrotask(() => void loadFirstPage());
+    let current = true;
+    queueMicrotask(() => {
+      if (current) void loadFirstPage();
+    });
     const unsubscribe = onWorkshopHistoryChanged(() => void loadFirstPage());
     return () => {
+      current = false;
       requestRef.current += 1;
       unsubscribe();
     };
