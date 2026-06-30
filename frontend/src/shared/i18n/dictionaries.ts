@@ -93,7 +93,6 @@ const zh: Dict = {
   "workshop.processTitle": "加工素材",
   "workshop.processSub": "左侧确认原始素材，右侧用本地 Ollama 生成草稿，最后手动确认写入知识库。",
   "workshop.processCrumb": "处理素材 → 新知识",
-  "workshop.newChat": "新对话",
   "workshop.history": "历史对话",
   "workshop.historyMore": "加载更多",
   "workshop.historyCollapse": "收起来",
@@ -276,7 +275,6 @@ const en: Dict = {
   "workshop.processSub":
     "Review the source on the left, generate a draft with local Ollama on the right, then confirm it into the knowledge base.",
   "workshop.processCrumb": "Process material → New knowledge",
-  "workshop.newChat": "New chat",
   "workshop.history": "History",
   "workshop.historyMore": "Load more",
   "workshop.historyCollapse": "Collapse",
@@ -457,7 +455,6 @@ const ja: Dict = {
   "workshop.processSub":
     "左で元素材を確認し、右でローカル Ollama の草稿を生成して、最後にナレッジベースへ確定します。",
   "workshop.processCrumb": "素材を加工 → 新しい知識",
-  "workshop.newChat": "新しい対話",
   "workshop.history": "対話履歴",
   "workshop.historyMore": "さらに読み込む",
   "workshop.historyCollapse": "折りたたむ",

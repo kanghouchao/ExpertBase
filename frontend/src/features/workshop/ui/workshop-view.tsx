@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Icon } from "@/shared/ui/icon";
 import { Tag } from "@/shared/ui/tag";
@@ -11,12 +12,15 @@ import { cn } from "@/shared/lib/utils";
 import { useI18n } from "@/shared/providers/providers";
 import {
   aiHasKey,
+  getWorkshopConversation,
   listOllamaModels,
   pickLocalFile,
+  saveWorkshopConversation,
   workshopCancel,
   workshopChat,
   type ChatPhase,
   type OllamaModel,
+  type WorkshopMessage,
 } from "@/shared/api/tauri/client";
 import { RAW_TYPE, type RawMaterial, type RawType } from "@/entities/material";
 import { useKbStore } from "@/entities/knowledge-base";
@@ -29,6 +33,11 @@ import {
   type ProcessMessage,
   type ToolEvent,
 } from "../model/process-state";
+import {
+  notifyWorkshopHistoryChanged,
+  onNewWorkshopConversation,
+  parseConversationId,
+} from "../model/history";
 
 const PREVIEW_MODELS: OllamaModel[] = [
   { name: "qwen3:8b", thinking: true, tools: true },
@@ -40,7 +49,11 @@ type Msg = ProcessMessage;
 
 export function WorkshopView() {
   const { t } = useI18n();
-  const { available } = useKbStore();
+  const { available, active } = useKbStore();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedConversationId = parseConversationId(searchParams.get("conversation"));
+  const conversationIdRef = useRef<number | null>(requestedConversationId);
 
   const [sources, setSources] = useState<RawMaterial[]>([]);
   const [instruction, setInstruction] = useState("");
@@ -134,17 +147,66 @@ export function WorkshopView() {
     );
   }
 
-  // 対話を終えて選択態へ戻す（「新しい対話」）。状態は揮発的なので破棄でよい。
-  function reset() {
-    // 生成中でも押せる。後端を止め、進行中ターンの解決でこのクリアが上書きされないよう resetRef を立てる。
+  // 工房ナビゲーションから新しい対話を開始する。
+  const reset = useCallback(() => {
     resetRef.current = true;
+    conversationIdRef.current = null;
     void workshopCancel();
     setMessages([]);
     setSources([]);
     setInstruction("");
+    setThinkingBuf("");
+    setNarrationBuf("");
+    setToolLog([]);
     setPhase("idle");
     setError(null);
-  }
+  }, []);
+
+  useEffect(
+    () =>
+      onNewWorkshopConversation(() => {
+        reset();
+        router.replace("/workshop");
+      }),
+    [reset, router]
+  );
+
+  useEffect(() => {
+    let current = true;
+    queueMicrotask(() => {
+      if (!current) return;
+      if (requestedConversationId === null) {
+        if (conversationIdRef.current !== null) reset();
+        return;
+      }
+
+      resetRef.current = true;
+      void workshopCancel();
+      setPhase("idle");
+      setError(null);
+      void getWorkshopConversation(requestedConversationId)
+        .then((conversation) => {
+          if (!current) return;
+          conversationIdRef.current = conversation.id;
+          setMessages(conversation.messages);
+          setSources(
+            conversation.sourceIds.map((path) =>
+              materialFromFile(path, t("workshop.addLocalFile"))
+            )
+          );
+          resetRef.current = false;
+        })
+        .catch((loadError) => {
+          if (!current) return;
+          reset();
+          setError(loadError instanceof Error ? loadError.message : String(loadError));
+        });
+    });
+
+    return () => {
+      current = false;
+    };
+  }, [active?.path, requestedConversationId, reset, t]);
 
   // 会話履歴つきで対話エージェントを 1 ターン回す。思考・ツール・本文を流式表示し、最終返信を会話へ積む。
   async function runTurn(history: Msg[]) {
@@ -193,7 +255,7 @@ export function WorkshopView() {
       );
       // 「新しい対話」で破棄済みなら、解決結果で選択態を上書きしない。
       if (resetRef.current) return;
-      setMessages([
+      const completed: WorkshopMessage[] = [
         ...history,
         {
           role: "ai",
@@ -201,7 +263,25 @@ export function WorkshopView() {
           thinking: thinking || undefined,
           tools: tools.length ? tools : undefined,
         },
-      ]);
+      ];
+      setMessages(completed);
+
+      try {
+        const saved = await saveWorkshopConversation({
+          id: conversationIdRef.current,
+          sourceIds: sources.map((source) => source.id),
+          messages: completed,
+        });
+        if (!resetRef.current) {
+          conversationIdRef.current = saved.id;
+          router.replace(`/workshop?conversation=${saved.id}`);
+          notifyWorkshopHistoryChanged();
+        }
+      } catch (saveError) {
+        if (!resetRef.current) {
+          setError(saveError instanceof Error ? saveError.message : String(saveError));
+        }
+      }
       setPhase("idle");
     } catch (e) {
       // 「新しい対話」で破棄済みなら、履歴復元も入力復元もしない。
@@ -236,7 +316,7 @@ export function WorkshopView() {
           sub={t("workshop.listSub")}
         />
       ) : (
-        <ProcessTopBar t={t} onReset={reset} />
+        <ProcessTopBar t={t} />
       )}
 
       {/* lg 以上は 2 カラム（会話は内部スクロール）、それ未満は 1 カラムでページ全体スクロール。 */}
@@ -455,13 +535,9 @@ function materialFromFile(path: string, label: string): RawMaterial {
   };
 }
 
-function ProcessTopBar({ t, onReset }: { t: (key: string) => string; onReset: () => void }) {
+function ProcessTopBar({ t }: { t: (key: string) => string }) {
   return (
     <div className="flex flex-none items-center gap-3.5 border-b border-line pb-4">
-      <Button variant="outline" size="lg" onClick={onReset}>
-        <Icon name="chevL" size={15} />
-        {t("workshop.newChat")}
-      </Button>
       <div className="min-w-0 flex-1">
         <div className="font-mono text-[11px] font-semibold tracking-[0.14em] text-ink-muted uppercase">
           {t("workshop.processCrumb")}
