@@ -29,6 +29,11 @@ export type RunStoreState = {
   error: { kbPath: string; conversationId: number; message: string } | null;
 };
 
+export type StopResult = {
+  prompt: string;
+  history: WorkshopMessage[];
+};
+
 type StartArgs = {
   kbPath: string;
   conversationId: number;
@@ -200,11 +205,29 @@ async function finishSave(args: StartArgs, completed: WorkshopMessage[]): Promis
   }
 }
 
-/** 停止ボタン: 後端を中断する。途中まで出た本文は run の catch が保存する。 */
-export function stopActive(): void {
-  if (!state.active) return;
+/** 表示中の対話だけを停止する。出力前なら送信直前へ戻す情報を返す。 */
+export function stopActive(
+  kbPath: string | null | undefined,
+  conversationId: number | null
+): StopResult | null {
+  const active = state.active;
+  if (!isRunForConversation(active, kbPath, conversationId)) return null;
   cancelled = true;
+
+  const hasOutput = !!active.narration || !!active.thinking || active.tools.length > 0;
+  if (hasOutput) {
+    void workshopCancel();
+    return null;
+  }
+
+  const last = active.baseHistory.at(-1);
+  const rollback =
+    last?.role === "user"
+      ? { prompt: last.text, history: active.baseHistory.slice(0, -1) }
+      : null;
+  emit({ active: null, error: null });
   void workshopCancel();
+  return rollback;
 }
 
 /** KB 切替など: 進行中の実行を捨てる（存盤目標が動くので保存しない）。 */

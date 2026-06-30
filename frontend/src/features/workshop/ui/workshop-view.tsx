@@ -231,10 +231,34 @@ export function WorkshopView() {
     };
   }, [active?.path, requestedConversationId, activeRunKey, reset, router, t]);
 
-  // 進行中の生成を止める。途中まで出た本文はストアが対話へ保存する（失わない）。
-  function handleStop() {
-    stopActive();
-  }
+  // 進行中の生成を止める。出力前なら送信直前の入力と履歴へ戻す。
+  const kbPath = active?.path;
+  const handleStop = useCallback(() => {
+    const rollback = stopActive(kbPath, viewedId);
+    if (!rollback || !kbPath || viewedId === null) return;
+
+    setInstruction(rollback.prompt);
+    setMessages(rollback.history);
+    void saveWorkshopConversation({
+      kbPath,
+      id: viewedId,
+      sourceIds: sources.map((source) => source.id),
+      messages: rollback.history,
+    })
+      .then(() => notifyWorkshopHistoryChanged())
+      .catch((saveError) =>
+        setError(saveError instanceof Error ? saveError.message : String(saveError))
+      );
+  }, [kbPath, sources, viewedId, setError, setInstruction, setMessages]);
+
+  useEffect(() => {
+    if (!generating) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") handleStop();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [generating, handleStop]);
 
   async function handleSend() {
     if (!canGenerate || !instruction.trim()) return;

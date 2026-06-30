@@ -129,6 +129,70 @@ describe("startRun", () => {
 });
 
 describe("stopActive", () => {
+  test("returns the prompt and previous history when stopped before AI output", async () => {
+    let rejectChat: (reason: unknown) => void = () => {};
+    chatImpl = () =>
+      new Promise<string>((_resolve, reject) => {
+        rejectChat = reject;
+      });
+
+    startRun({
+      kbPath: "/home/user/ExpertBase/tea",
+      conversationId: 8,
+      sourceIds: [],
+      baseHistory: [
+        { role: "user", text: "前の問い" },
+        { role: "ai", text: "前の答え" },
+        { role: "user", text: "やり直す問い" },
+      ],
+      model: "qwen3:8b",
+      think: true,
+      tools: true,
+    });
+    await tick();
+
+    expect(stopActive("/home/user/ExpertBase/tea", 8)).toEqual({
+      prompt: "やり直す問い",
+      history: [
+        { role: "user", text: "前の問い" },
+        { role: "ai", text: "前の答え" },
+      ],
+    });
+    expect(getSnapshot().active).toBeNull();
+    expect(cancelCalls).toBe(1);
+
+    rejectChat(new Error("Cancelled"));
+    await tick();
+    expect(saveCalls).toHaveLength(0);
+  });
+
+  test("does not stop a background conversation", async () => {
+    let rejectChat: (reason: unknown) => void = () => {};
+    chatImpl = () =>
+      new Promise<string>((_resolve, reject) => {
+        rejectChat = reject;
+      });
+
+    startRun({
+      kbPath: "/home/user/ExpertBase/tea",
+      conversationId: 9,
+      sourceIds: [],
+      baseHistory: [{ role: "user", text: "問" }],
+      model: "qwen3:8b",
+      think: false,
+      tools: true,
+    });
+    await tick();
+
+    expect(stopActive("/home/user/ExpertBase/tea", 10)).toBeNull();
+    expect(getSnapshot().active?.conversationId).toBe(9);
+    expect(cancelCalls).toBe(0);
+
+    discardActive();
+    rejectChat(new Error("Cancelled"));
+    await tick();
+  });
+
   test("keeps the partial narration as the AI reply", async () => {
     let rejectChat: (reason: unknown) => void = () => {};
     chatImpl = (_s, _m, _mo, _th, _to, onPhase) => {
@@ -150,7 +214,7 @@ describe("stopActive", () => {
     await tick();
     expect(getSnapshot().active?.narration).toBe("途中まで");
 
-    stopActive();
+    expect(stopActive("C:\\Users\\user\\ExpertBase\\tea", 3)).toBeNull();
     expect(cancelCalls).toBe(1);
     rejectChat(new Error("Cancelled")); // 後端が接続を drop ＝ reject
     await tick();
