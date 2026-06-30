@@ -17,6 +17,26 @@ export function collapseHistory(
   return items.slice(0, HISTORY_PAGE_SIZE);
 }
 
+export function activeKbChanged(previous: string | null, current: string | null): boolean {
+  return previous !== null && previous !== current;
+}
+
+export function createConversationRunGuard() {
+  let current = 0;
+  return {
+    start(): number {
+      current += 1;
+      return current;
+    },
+    invalidate(): void {
+      current += 1;
+    },
+    isCurrent(run: number): boolean {
+      return run === current;
+    },
+  };
+}
+
 export function requestNewWorkshopConversation(): void {
   window.dispatchEvent(new Event(NEW_CONVERSATION_EVENT));
 }

@@ -34,6 +34,8 @@ import {
   type ToolEvent,
 } from "../model/process-state";
 import {
+  activeKbChanged,
+  createConversationRunGuard,
   notifyWorkshopHistoryChanged,
   onNewWorkshopConversation,
   parseConversationId,
@@ -54,6 +56,8 @@ export function WorkshopView() {
   const searchParams = useSearchParams();
   const requestedConversationId = parseConversationId(searchParams.get("conversation"));
   const conversationIdRef = useRef<number | null>(requestedConversationId);
+  const activePathRef = useRef<string | null>(active?.path ?? null);
+  const [runGuard] = useState(createConversationRunGuard);
 
   const [sources, setSources] = useState<RawMaterial[]>([]);
   const [instruction, setInstruction] = useState("");
@@ -73,8 +77,6 @@ export function WorkshopView() {
   const composerRef = useRef<HTMLTextAreaElement>(null);
   // 停止ボタン押下フラグ。中断は失敗扱いせず（赤エラーを出さず）idle へ戻すために使う。
   const cancelRef = useRef(false);
-  // 「新しい対話」押下フラグ。進行中ターンの解決が選択態をクリアした状態を上書きしないようにする。
-  const resetRef = useRef(false);
 
   useEffect(() => {
     if (!available) return;
@@ -149,7 +151,7 @@ export function WorkshopView() {
 
   // 工房ナビゲーションから新しい対話を開始する。
   const reset = useCallback(() => {
-    resetRef.current = true;
+    runGuard.invalidate();
     conversationIdRef.current = null;
     void workshopCancel();
     setMessages([]);
@@ -160,7 +162,7 @@ export function WorkshopView() {
     setToolLog([]);
     setPhase("idle");
     setError(null);
-  }, []);
+  }, [runGuard]);
 
   useEffect(
     () =>
@@ -175,12 +177,20 @@ export function WorkshopView() {
     let current = true;
     queueMicrotask(() => {
       if (!current) return;
+      const activePath = active?.path ?? null;
+      const previousActivePath = activePathRef.current;
+      activePathRef.current = activePath;
+      if (activeKbChanged(previousActivePath, activePath)) {
+        reset();
+        router.replace("/workshop");
+        return;
+      }
       if (requestedConversationId === null) {
         if (conversationIdRef.current !== null) reset();
         return;
       }
 
-      resetRef.current = true;
+      runGuard.invalidate();
       void workshopCancel();
       setPhase("idle");
       setError(null);
@@ -194,7 +204,6 @@ export function WorkshopView() {
               materialFromFile(path, t("workshop.addLocalFile"))
             )
           );
-          resetRef.current = false;
         })
         .catch((loadError) => {
           if (!current) return;
@@ -206,10 +215,11 @@ export function WorkshopView() {
     return () => {
       current = false;
     };
-  }, [active?.path, requestedConversationId, reset, t]);
+  }, [active?.path, requestedConversationId, reset, router, runGuard, t]);
 
   // 会話履歴つきで対話エージェントを 1 ターン回す。思考・ツール・本文を流式表示し、最終返信を会話へ積む。
   async function runTurn(history: Msg[]) {
+    const run = runGuard.start();
     setMessages(history);
     setInstruction("");
     setPhase("connecting");
@@ -218,7 +228,6 @@ export function WorkshopView() {
     setToolLog([]);
     setError(null);
     cancelRef.current = false;
-    resetRef.current = false;
     try {
       let thinking = "";
       let narration = "";
@@ -230,6 +239,7 @@ export function WorkshopView() {
         selectedThinking,
         selectedTools,
         (p: ChatPhase) => {
+          if (!runGuard.isCurrent(run)) return;
           if (p.phase === "narration") {
             setPhase("generating");
             narration += p.delta;
@@ -253,8 +263,8 @@ export function WorkshopView() {
           }
         }
       );
-      // 「新しい対話」で破棄済みなら、解決結果で選択態を上書きしない。
-      if (resetRef.current) return;
+      // 別の対話・KB へ移動済みなら、古い生成結果を画面や履歴へ反映しない。
+      if (!runGuard.isCurrent(run)) return;
       const completed: WorkshopMessage[] = [
         ...history,
         {
@@ -272,20 +282,20 @@ export function WorkshopView() {
           sourceIds: sources.map((source) => source.id),
           messages: completed,
         });
-        if (!resetRef.current) {
+        if (runGuard.isCurrent(run)) {
           conversationIdRef.current = saved.id;
           router.replace(`/workshop?conversation=${saved.id}`);
           notifyWorkshopHistoryChanged();
         }
       } catch (saveError) {
-        if (!resetRef.current) {
+        if (runGuard.isCurrent(run)) {
           setError(saveError instanceof Error ? saveError.message : String(saveError));
         }
       }
-      setPhase("idle");
+      if (runGuard.isCurrent(run)) setPhase("idle");
     } catch (e) {
-      // 「新しい対話」で破棄済みなら、履歴復元も入力復元もしない。
-      if (resetRef.current) return;
+      // 別の対話・KB へ移動済みなら、古い入力やエラーを復元しない。
+      if (!runGuard.isCurrent(run)) return;
       // 停止ボタンによる中断はエラー表示しない（ユーザーが意図した中断）。
       if (!cancelRef.current) setError(e instanceof Error ? e.message : String(e));
       // 失敗・中断したターンは履歴から外し、入力を戻して再試行できるようにする。

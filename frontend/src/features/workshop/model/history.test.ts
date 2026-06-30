@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { collapseHistory, parseConversationId } from "./history";
+import {
+  activeKbChanged,
+  collapseHistory,
+  createConversationRunGuard,
+  parseConversationId,
+} from "./history";
 
 describe("parseConversationId", () => {
   test("accepts positive integer ids only", () => {
@@ -21,4 +26,26 @@ test("collapseHistory keeps exactly the first backend page", () => {
   expect(collapseHistory(items).map((item) => item.id)).toEqual(
     Array.from({ length: 20 }, (_, index) => index + 1)
   );
+});
+
+test("activeKbChanged ignores initial load and detects later KB changes", () => {
+  expect(activeKbChanged(null, "/kb/a")).toBeFalse();
+  expect(activeKbChanged("/kb/a", "/kb/b")).toBeTrue();
+  expect(activeKbChanged("/kb/a", null)).toBeTrue();
+});
+
+test("invalidated conversation runs never become current again", () => {
+  const guard = createConversationRunGuard();
+  const first = guard.start();
+  expect(guard.isCurrent(first)).toBeTrue();
+
+  guard.invalidate();
+  expect(guard.isCurrent(first)).toBeFalse();
+
+  const second = guard.start();
+  expect(guard.isCurrent(first)).toBeFalse();
+  expect(guard.isCurrent(second)).toBeTrue();
+
+  guard.invalidate();
+  expect(guard.isCurrent(second)).toBeFalse();
 });
