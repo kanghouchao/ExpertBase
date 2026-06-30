@@ -17,7 +17,12 @@ type ChatImpl = (
 ) => Promise<string>;
 
 let chatImpl: ChatImpl = async () => "";
-let saveCalls: { id: number | null; sourceIds: string[]; messages: { role: string; text: string }[] }[] = [];
+let saveCalls: {
+  kbPath: string;
+  id: number | null;
+  sourceIds: string[];
+  messages: { role: string; text: string }[];
+}[] = [];
 let cancelCalls = 0;
 
 mock.module("@/shared/api/tauri/client", () => ({
@@ -38,7 +43,8 @@ mock.module("@/shared/api/tauri/client", () => ({
   },
 }));
 
-const { startRun, stopActive, discardActive, subscribe, getSnapshot } = await import("./workshop-run");
+const { startRun, stopActive, discardActive, isRunForConversation, subscribe, getSnapshot } =
+  await import("./workshop-run");
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 const HISTORY_EVENT = "expertbase:workshop:history-changed";
@@ -53,6 +59,22 @@ beforeEach(() => {
   chatImpl = async () => "";
   saveCalls = [];
   cancelCalls = 0;
+});
+
+test("run identity includes the opaque KB path on every platform", () => {
+  const run = {
+    kbPath: "C:\\Users\\user\\ExpertBase\\tea",
+    conversationId: 1,
+    phase: "thinking" as const,
+    baseHistory: [],
+    narration: "",
+    thinking: "",
+    tools: [],
+  };
+
+  expect(isRunForConversation(run, "C:\\Users\\user\\ExpertBase\\tea", 1)).toBeTrue();
+  expect(isRunForConversation(run, "/home/user/ExpertBase/tea", 1)).toBeFalse();
+  expect(isRunForConversation(run, "C:\\Users\\user\\ExpertBase\\tea", 2)).toBeFalse();
 });
 
 describe("startRun", () => {
@@ -72,6 +94,7 @@ describe("startRun", () => {
     window.addEventListener(HISTORY_EVENT, onHistory);
 
     startRun({
+      kbPath: "/home/user/ExpertBase/tea",
       conversationId: 7,
       sourceIds: ["/a.pdf"],
       baseHistory: [{ role: "user", text: "問い" }],
@@ -88,6 +111,7 @@ describe("startRun", () => {
 
     // 捕獲した id へ、末尾に AI 返信を足して保存する。
     expect(saveCalls).toHaveLength(1);
+    expect(saveCalls[0].kbPath).toBe("/home/user/ExpertBase/tea");
     expect(saveCalls[0].id).toBe(7);
     const msgs = saveCalls[0].messages;
     const last = msgs[msgs.length - 1] as { role: string; text: string; tools?: { summary?: string }[] };
@@ -115,6 +139,7 @@ describe("stopActive", () => {
     };
 
     startRun({
+      kbPath: "C:\\Users\\user\\ExpertBase\\tea",
       conversationId: 3,
       sourceIds: [],
       baseHistory: [{ role: "user", text: "問" }],
@@ -131,6 +156,7 @@ describe("stopActive", () => {
     await tick();
 
     expect(saveCalls).toHaveLength(1);
+    expect(saveCalls[0].kbPath).toBe("C:\\Users\\user\\ExpertBase\\tea");
     const msgs = saveCalls[0].messages;
     const last = msgs[msgs.length - 1] as { role: string; text: string };
     expect(last.role).toBe("ai");
@@ -150,6 +176,7 @@ describe("discardActive", () => {
     };
 
     startRun({
+      kbPath: "/home/user/ExpertBase/tea",
       conversationId: 5,
       sourceIds: [],
       baseHistory: [{ role: "user", text: "問" }],

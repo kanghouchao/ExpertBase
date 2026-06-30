@@ -206,6 +206,7 @@ export async function getWorkshopConversation(id: number): Promise<WorkshopConve
 
 /** 完了済みの対話状態をアクティブ KB へ保存する。 */
 export async function saveWorkshopConversation(input: {
+  kbPath: string;
   id: number | null;
   sourceIds: string[];
   messages: WorkshopMessage[];

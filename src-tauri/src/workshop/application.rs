@@ -19,6 +19,25 @@ use super::infrastructure::{history, rig_agent};
 
 const HISTORY_PAGE_SIZE: usize = 20;
 
+fn ensure_active_kb(active_root: &Path, expected_kb_path: &str) -> Result<(), String> {
+  if active_root != Path::new(expected_kb_path) {
+    return Err("知识库已切换，已取消保存对话".into());
+  }
+  Ok(())
+}
+
+pub fn save_active_conversation(
+  home: &Path,
+  expected_kb_path: &str,
+  id: Option<i64>,
+  source_ids: Vec<String>,
+  messages: Vec<WorkshopMessage>,
+) -> Result<WorkshopConversation, String> {
+  let root = crate::kb::active_kb_root(home)?;
+  ensure_active_kb(&root, expected_kb_path)?;
+  save_conversation(&root, id, source_ids, messages)
+}
+
 pub fn save_conversation(
   root: &Path,
   id: Option<i64>,
@@ -119,6 +138,17 @@ mod tests {
       list_conversations(tmp.path(), 0).unwrap().items[0].id,
       saved.id
     );
+  }
+
+  #[test]
+  fn saving_rejects_a_conversation_from_a_different_active_kb() {
+    let tmp = tempfile::tempdir().unwrap();
+    let first_path = tmp.path().join("first");
+    let second_path = tmp.path().join("second");
+
+    let error = ensure_active_kb(&second_path, first_path.to_str().unwrap()).unwrap_err();
+
+    assert!(error.contains("知识库已切换"));
   }
 
   #[test]

@@ -216,7 +216,13 @@ pub fn list(dir: &Path, offset: usize, limit: usize) -> Result<WorkshopConversat
       continue;
     };
     // ponytail: 一覧は会話ごとに全文を読む。件数が爆発したら title/updatedAt を別索引へ。
-    let conversation = build_conversation(id, &read_lines(&path)?)?;
+    // 1 件の破損で正常な履歴まで読めなくしない。個別取得では引き続きエラーを返す。
+    let Ok(lines) = read_lines(&path) else {
+      continue;
+    };
+    let Ok(conversation) = build_conversation(id, &lines) else {
+      continue;
+    };
     summaries.push(WorkshopConversationSummary {
       id,
       title: conversation.title,
@@ -347,5 +353,26 @@ mod tests {
     .unwrap();
     assert_eq!(updated.source_ids, vec!["/a.pdf", "/b.docx"]);
     assert_eq!(get(&dir, first.id).unwrap().source_ids, vec!["/a.pdf", "/b.docx"]);
+  }
+
+  #[test]
+  fn list_skips_a_corrupt_conversation_without_hiding_valid_history() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = open(tmp.path()).unwrap();
+    let saved = save(
+      &dir,
+      None,
+      &[],
+      &[WorkshopMessage::user("正常")],
+      "2026-06-30T01:00:00.000Z",
+    )
+    .unwrap();
+    fs::write(conv_path(&dir, saved.id + 1), "{broken\n").unwrap();
+
+    let page = list(&dir, 0, 20).unwrap();
+
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].id, saved.id);
+    assert!(get(&dir, saved.id + 1).is_err());
   }
 }

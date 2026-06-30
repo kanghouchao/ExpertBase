@@ -21,14 +21,14 @@ pub struct WorkshopCancel(pub Arc<AtomicBool>);
 #[tauri::command]
 pub async fn workshop_save_conversation(
   app: tauri::AppHandle,
+  kb_path: String,
   id: Option<i64>,
   source_ids: Vec<String>,
   messages: Vec<WorkshopMessage>,
 ) -> Result<WorkshopConversation, String> {
   let home = app.path().home_dir().map_err(|error| error.to_string())?;
   tauri::async_runtime::spawn_blocking(move || {
-    let root = crate::kb::active_kb_root(&home)?;
-    application::save_conversation(&root, id, source_ids, messages)
+    application::save_active_conversation(&home, &kb_path, id, source_ids, messages)
   })
   .await
   .map_err(|error| error.to_string())?

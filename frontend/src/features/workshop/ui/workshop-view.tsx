@@ -43,6 +43,7 @@ import {
 import {
   discardActive,
   getSnapshot,
+  isRunForConversation,
   startRun,
   stopActive,
   subscribe,
@@ -83,7 +84,7 @@ export function WorkshopView() {
     getSnapshot
   );
   const viewedId = requestedConversationId;
-  const isViewingActive = activeRun !== null && activeRun.conversationId === viewedId;
+  const isViewingActive = isRunForConversation(activeRun, active?.path, viewedId);
   const someoneGenerating = activeRun !== null;
   // 「今見ている対話が生成中」のときだけ生成 UI（実時本文・停止ボタン）を出す。
   const generating = isViewingActive;
@@ -237,6 +238,8 @@ export function WorkshopView() {
 
   async function handleSend() {
     if (!canGenerate || !instruction.trim()) return;
+    const kbPath = active?.path;
+    if (!kbPath) return;
     const userMsg: Msg = { role: "user", text: instruction.trim() };
     const baseHistory = [...displayMessages, userMsg];
     const sourceIds = sources.map((source) => source.id);
@@ -245,7 +248,7 @@ export function WorkshopView() {
     // 送信時に即存盤＝後台生成が会話 id を捕獲でき、切り戻しても消えない。失敗時だけ入力を戻す。
     let id = conversationIdRef.current;
     try {
-      const saved = await saveWorkshopConversation({ id, sourceIds, messages: baseHistory });
+      const saved = await saveWorkshopConversation({ kbPath, id, sourceIds, messages: baseHistory });
       id = saved.id;
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError));
@@ -257,6 +260,7 @@ export function WorkshopView() {
     notifyWorkshopHistoryChanged();
     if (requestedConversationId !== id) router.replace(`/workshop?conversation=${id}`);
     startRun({
+      kbPath,
       conversationId: id,
       sourceIds,
       baseHistory,
@@ -464,7 +468,10 @@ export function WorkshopView() {
                   {t("workshop.generatingElsewhere")}
                 </div>
               )}
-              {(error || (runError && runError.conversationId === viewedId)) && (
+              {(error ||
+                (runError &&
+                  runError.kbPath === active?.path &&
+                  runError.conversationId === viewedId)) && (
                 <div className="mt-2 px-1 text-[12.5px] font-semibold text-brand">
                   {error ?? runError?.message}
                 </div>
