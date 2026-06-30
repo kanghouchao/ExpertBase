@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
+use chrono::SecondsFormat;
 use rusqlite::Connection;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -13,7 +14,29 @@ use crate::ai::{AiError, ChatTurn, StreamProgress};
 use crate::kb::entry::{Entry, EntryMeta};
 use crate::kb::{index, store};
 
-use super::infrastructure::rig_agent;
+use super::domain::{WorkshopConversation, WorkshopConversationPage, WorkshopMessage};
+use super::infrastructure::{history, rig_agent};
+
+const HISTORY_PAGE_SIZE: usize = 20;
+
+pub fn save_conversation(
+  root: &Path,
+  id: Option<i64>,
+  source_ids: Vec<String>,
+  messages: Vec<WorkshopMessage>,
+) -> Result<WorkshopConversation, String> {
+  let conn = history::open(root)?;
+  let now = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+  history::save(&conn, id, &source_ids, &messages, &now)
+}
+
+pub fn get_conversation(root: &Path, id: i64) -> Result<WorkshopConversation, String> {
+  history::get(&history::open(root)?, id)
+}
+
+pub fn list_conversations(root: &Path, offset: usize) -> Result<WorkshopConversationPage, String> {
+  history::list(&history::open(root)?, offset, HISTORY_PAGE_SIZE)
+}
 
 /// 対話エージェント経路。素材は本文を注入せず id の目録だけ system に置き、AI が read_source で
 /// 自分で読む。Rig で 1 会話分回し、進捗（思考・本文・ツール呼び出し/結果）を tx へ流して、
@@ -67,6 +90,36 @@ pub fn confirm(
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::workshop::domain::{WorkshopMessage, WorkshopMessageRole};
+
+  #[test]
+  fn conversation_use_cases_round_trip_in_active_root() {
+    let tmp = tempfile::tempdir().unwrap();
+    let messages = vec![
+      WorkshopMessage {
+        role: WorkshopMessageRole::User,
+        text: "整理这份资料".into(),
+        thinking: None,
+        tools: None,
+      },
+      WorkshopMessage {
+        role: WorkshopMessageRole::Ai,
+        text: "完成".into(),
+        thinking: None,
+        tools: None,
+      },
+    ];
+
+    let saved = save_conversation(tmp.path(), None, vec![], messages).unwrap();
+    assert_eq!(
+      get_conversation(tmp.path(), saved.id).unwrap().title,
+      "整理这份资料"
+    );
+    assert_eq!(
+      list_conversations(tmp.path(), 0).unwrap().items[0].id,
+      saved.id
+    );
+  }
 
   #[test]
   fn confirm_records_source_refs_as_entry_sources() {

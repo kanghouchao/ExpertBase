@@ -9,4 +9,4 @@ pub mod interface;
 // 他機能はこの面のみを参照し、各レイヤ内部へ直接到達しない。
 pub use domain::entry;
 pub use infrastructure::{index, store};
-pub(crate) use application::open_active;
+pub(crate) use application::{active_kb_root, open_active};

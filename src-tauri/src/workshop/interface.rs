@@ -9,12 +9,60 @@ use tauri::{Manager, State};
 
 use crate::ai::{ChatTurn, StreamProgress};
 use crate::workshop::application;
+use crate::workshop::domain::{WorkshopConversation, WorkshopConversationPage, WorkshopMessage};
 
 /// 停止ボタン用の共有中断フラグ。lib.rs で app.manage する。
 /// Ollama は直列なので生成は同時に 1 本だけ ＝ 単一フラグで足りる。
 /// ponytail: 単飛フラグ。並列生成が要るようになったら per-run の登録表に替える。
 #[derive(Default)]
 pub struct WorkshopCancel(pub Arc<AtomicBool>);
+
+/// 完了済みの対話をアクティブ KB の履歴へ保存する。
+#[tauri::command]
+pub async fn workshop_save_conversation(
+  app: tauri::AppHandle,
+  id: Option<i64>,
+  source_ids: Vec<String>,
+  messages: Vec<WorkshopMessage>,
+) -> Result<WorkshopConversation, String> {
+  let home = app.path().home_dir().map_err(|error| error.to_string())?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let root = crate::kb::active_kb_root(&home)?;
+    application::save_conversation(&root, id, source_ids, messages)
+  })
+  .await
+  .map_err(|error| error.to_string())?
+}
+
+/// アクティブ KB から指定した対話を取得する。
+#[tauri::command]
+pub async fn workshop_get_conversation(
+  app: tauri::AppHandle,
+  id: i64,
+) -> Result<WorkshopConversation, String> {
+  let home = app.path().home_dir().map_err(|error| error.to_string())?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let root = crate::kb::active_kb_root(&home)?;
+    application::get_conversation(&root, id)
+  })
+  .await
+  .map_err(|error| error.to_string())?
+}
+
+/// アクティブ KB の対話履歴を更新日時の降順で取得する。
+#[tauri::command]
+pub async fn workshop_list_conversations(
+  app: tauri::AppHandle,
+  offset: usize,
+) -> Result<WorkshopConversationPage, String> {
+  let home = app.path().home_dir().map_err(|error| error.to_string())?;
+  tauri::async_runtime::spawn_blocking(move || {
+    let root = crate::kb::active_kb_root(&home)?;
+    application::list_conversations(&root, offset)
+  })
+  .await
+  .map_err(|error| error.to_string())?
+}
 
 /// 添付素材 + 会話履歴で対話エージェントを 1 会話分回す。素材は本文を注入せず、検証済みの id
 /// 一覧（sources）として渡し、AI が read_source で自分で読む。会話の記憶はフロントが組み立てた

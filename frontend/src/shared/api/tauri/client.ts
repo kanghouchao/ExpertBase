@@ -59,6 +59,32 @@ export type ChatTurn = {
   content: string;
 };
 
+export type WorkshopToolEvent = { name: string; args: string; summary?: string };
+
+export type WorkshopMessage =
+  | { role: "user"; text: string; thinking?: never; tools?: never }
+  | { role: "ai"; text: string; thinking?: string; tools?: WorkshopToolEvent[] };
+
+export type WorkshopConversationSummary = {
+  id: number;
+  title: string;
+  updatedAt: string;
+};
+
+export type WorkshopConversationPage = {
+  items: WorkshopConversationSummary[];
+  hasMore: boolean;
+};
+
+export type WorkshopConversation = {
+  id: number;
+  title: string;
+  sourceIds: string[];
+  messages: WorkshopMessage[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 /** 対話の進捗イベント（Rust StreamProgress と一致）。 */
 export type ChatPhase =
   | { phase: "thinking"; delta: string }
@@ -163,6 +189,28 @@ export async function workshopChat(
 export async function workshopCancel(): Promise<void> {
   if (!isTauri()) return;
   await invoke("workshop_cancel");
+}
+
+/** アクティブ KB の対話履歴を取得する。 */
+export async function listWorkshopConversations(
+  offset: number
+): Promise<WorkshopConversationPage> {
+  if (!isTauri()) return { items: [], hasMore: false };
+  return invoke<WorkshopConversationPage>("workshop_list_conversations", { offset });
+}
+
+/** アクティブ KB から保存済み対話を取得する。 */
+export async function getWorkshopConversation(id: number): Promise<WorkshopConversation> {
+  return invoke<WorkshopConversation>("workshop_get_conversation", { id });
+}
+
+/** 完了済みの対話状態をアクティブ KB へ保存する。 */
+export async function saveWorkshopConversation(input: {
+  id: number | null;
+  sourceIds: string[];
+  messages: WorkshopMessage[];
+}): Promise<WorkshopConversation> {
+  return invoke<WorkshopConversation>("workshop_save_conversation", input);
 }
 
 /** ローカルファイルを 1 つ選ぶ（素材として添付する用）。選ばなければ null（Tauri 外も null）。 */

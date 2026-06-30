@@ -1,16 +1,13 @@
-import type { ChatTurn } from "@/shared/api/tauri/client";
+import type {
+  ChatTurn,
+  WorkshopMessage,
+  WorkshopToolEvent,
+} from "@/shared/api/tauri/client";
 
 // エージェントのツール呼び出し 1 件（表示用）。summary はツール結果到着後に埋まる。
-export type ToolEvent = { name: string; args: string; summary?: string };
+export type ToolEvent = WorkshopToolEvent;
 
-export type ProcessMessage =
-  | { role: "user"; text: string }
-  | {
-      role: "ai";
-      text: string;
-      thinking?: string;
-      tools?: ToolEvent[];
-    };
+export type ProcessMessage = WorkshopMessage;
 
 export function toChatTurn(message: ProcessMessage): ChatTurn {
   return message.role === "user"
