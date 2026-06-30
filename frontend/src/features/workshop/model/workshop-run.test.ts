@@ -1,0 +1,169 @@
+import { beforeEach, describe, expect, mock, test } from "bun:test";
+
+import type { ChatPhase } from "@/shared/api/tauri/client";
+import type { RunStoreState } from "./workshop-run";
+
+// history.ts の window イベントを動かすため EventTarget を window として与える。
+(globalThis as { window?: EventTarget }).window = new EventTarget();
+
+// 後端クライアントを差し替える（実 IPC を呼ばない）。
+type ChatImpl = (
+  sourceIds: string[],
+  messages: { role: string; content: string }[],
+  model: string,
+  think: boolean,
+  tools: boolean,
+  onPhase?: (p: ChatPhase) => void
+) => Promise<string>;
+
+let chatImpl: ChatImpl = async () => "";
+let saveCalls: { id: number | null; sourceIds: string[]; messages: { role: string; text: string }[] }[] = [];
+let cancelCalls = 0;
+
+mock.module("@/shared/api/tauri/client", () => ({
+  workshopChat: (...args: Parameters<ChatImpl>) => chatImpl(...args),
+  workshopCancel: async () => {
+    cancelCalls += 1;
+  },
+  saveWorkshopConversation: async (input: (typeof saveCalls)[number]) => {
+    saveCalls.push(input);
+    return {
+      id: input.id ?? 99,
+      title: "t",
+      sourceIds: input.sourceIds,
+      messages: input.messages,
+      createdAt: "",
+      updatedAt: "",
+    };
+  },
+}));
+
+const { startRun, stopActive, discardActive, subscribe, getSnapshot } = await import("./workshop-run");
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+const HISTORY_EVENT = "expertbase:workshop:history-changed";
+
+function recordSnapshots() {
+  const seen: RunStoreState[] = [];
+  const unsub = subscribe(() => seen.push(getSnapshot()));
+  return { seen, unsub };
+}
+
+beforeEach(() => {
+  chatImpl = async () => "";
+  saveCalls = [];
+  cancelCalls = 0;
+});
+
+describe("startRun", () => {
+  test("streams buffers then saves the AI reply to the captured conversation id", async () => {
+    chatImpl = async (_s, _m, _mo, _th, _to, onPhase) => {
+      onPhase?.({ phase: "loadingModel" });
+      onPhase?.({ phase: "thinking", delta: "考え" });
+      onPhase?.({ phase: "narration", delta: "答え" });
+      onPhase?.({ phase: "narration", delta: "だ" });
+      onPhase?.({ phase: "toolCall", name: "search_kb", args: "{}" });
+      onPhase?.({ phase: "toolResult", name: "search_kb", summary: "hit" });
+      return "答えだ";
+    };
+    const { seen, unsub } = recordSnapshots();
+    let historyChanged = 0;
+    const onHistory = () => (historyChanged += 1);
+    window.addEventListener(HISTORY_EVENT, onHistory);
+
+    startRun({
+      conversationId: 7,
+      sourceIds: ["/a.pdf"],
+      baseHistory: [{ role: "user", text: "問い" }],
+      model: "qwen3:8b",
+      think: true,
+      tools: true,
+    });
+    await tick();
+
+    // 流式中の途中状態がスナップショットに現れる。
+    expect(seen.some((s) => s.active?.narration === "答えだ")).toBeTrue();
+    expect(seen.some((s) => s.active?.thinking === "考え")).toBeTrue();
+    expect(seen.some((s) => (s.active?.tools.length ?? 0) > 0)).toBeTrue();
+
+    // 捕獲した id へ、末尾に AI 返信を足して保存する。
+    expect(saveCalls).toHaveLength(1);
+    expect(saveCalls[0].id).toBe(7);
+    const msgs = saveCalls[0].messages;
+    const last = msgs[msgs.length - 1] as { role: string; text: string; tools?: { summary?: string }[] };
+    expect(last.role).toBe("ai");
+    expect(last.text).toBe("答えだ");
+    expect(last.tools?.[0].summary).toBe("hit");
+
+    // 完了後はアクティブが消え、履歴更新が通知される。
+    expect(getSnapshot().active).toBeNull();
+    expect(historyChanged).toBe(1);
+
+    unsub();
+    window.removeEventListener(HISTORY_EVENT, onHistory);
+  });
+});
+
+describe("stopActive", () => {
+  test("keeps the partial narration as the AI reply", async () => {
+    let rejectChat: (reason: unknown) => void = () => {};
+    chatImpl = (_s, _m, _mo, _th, _to, onPhase) => {
+      onPhase?.({ phase: "narration", delta: "途中まで" });
+      return new Promise<string>((_resolve, reject) => {
+        rejectChat = reject;
+      });
+    };
+
+    startRun({
+      conversationId: 3,
+      sourceIds: [],
+      baseHistory: [{ role: "user", text: "問" }],
+      model: "qwen3:8b",
+      think: false,
+      tools: true,
+    });
+    await tick();
+    expect(getSnapshot().active?.narration).toBe("途中まで");
+
+    stopActive();
+    expect(cancelCalls).toBe(1);
+    rejectChat(new Error("Cancelled")); // 後端が接続を drop ＝ reject
+    await tick();
+
+    expect(saveCalls).toHaveLength(1);
+    const msgs = saveCalls[0].messages;
+    const last = msgs[msgs.length - 1] as { role: string; text: string };
+    expect(last.role).toBe("ai");
+    expect(last.text).toBe("途中まで");
+    expect(getSnapshot().active).toBeNull();
+  });
+});
+
+describe("discardActive", () => {
+  test("drops the run without saving", async () => {
+    let rejectChat: (reason: unknown) => void = () => {};
+    chatImpl = (_s, _m, _mo, _th, _to, onPhase) => {
+      onPhase?.({ phase: "narration", delta: "x" });
+      return new Promise<string>((_resolve, reject) => {
+        rejectChat = reject;
+      });
+    };
+
+    startRun({
+      conversationId: 5,
+      sourceIds: [],
+      baseHistory: [{ role: "user", text: "問" }],
+      model: "qwen3:8b",
+      think: false,
+      tools: true,
+    });
+    await tick();
+
+    discardActive();
+    expect(getSnapshot().active).toBeNull();
+    rejectChat(new Error("Cancelled"));
+    await tick();
+
+    expect(saveCalls).toHaveLength(0);
+  });
+});

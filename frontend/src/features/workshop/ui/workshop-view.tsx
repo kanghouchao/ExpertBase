@@ -1,7 +1,14 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 
 import { Icon } from "@/shared/ui/icon";
 import { Tag } from "@/shared/ui/tag";
@@ -16,30 +23,30 @@ import {
   listOllamaModels,
   pickLocalFile,
   saveWorkshopConversation,
-  workshopCancel,
-  workshopChat,
-  type ChatPhase,
   type OllamaModel,
-  type WorkshopMessage,
 } from "@/shared/api/tauri/client";
 import { RAW_TYPE, type RawMaterial, type RawType } from "@/entities/material";
 import { useKbStore } from "@/entities/knowledge-base";
 import {
   canRemoveSource,
-  isGeneratingPhase,
   runningLabelKey,
-  toChatTurn,
   type ChatUiPhase,
   type ProcessMessage,
   type ToolEvent,
 } from "../model/process-state";
 import {
   activeKbChanged,
-  createConversationRunGuard,
   notifyWorkshopHistoryChanged,
   onNewWorkshopConversation,
   parseConversationId,
 } from "../model/history";
+import {
+  discardActive,
+  getSnapshot,
+  startRun,
+  stopActive,
+  subscribe,
+} from "../model/workshop-run";
 
 const PREVIEW_MODELS: OllamaModel[] = [
   { name: "qwen3:8b", thinking: true, tools: true },
@@ -57,26 +64,36 @@ export function WorkshopView() {
   const requestedConversationId = parseConversationId(searchParams.get("conversation"));
   const conversationIdRef = useRef<number | null>(requestedConversationId);
   const activePathRef = useRef<string | null>(active?.path ?? null);
-  const [runGuard] = useState(createConversationRunGuard);
 
   const [sources, setSources] = useState<RawMaterial[]>([]);
   const [instruction, setInstruction] = useState("");
   const [hasOllama, setHasOllama] = useState(false);
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
+  // 確定済み（存盤済み）メッセージ。生成中の対話を見ているときはストアの baseHistory を描く。
   const [messages, setMessages] = useState<Msg[]>([]);
-  const [phase, setPhase] = useState<ChatUiPhase>("idle");
-  const [thinkingBuf, setThinkingBuf] = useState("");
-  // 生成中に流れる「AI が今書いている本文」。過程を可視化する。
-  const [narrationBuf, setNarrationBuf] = useState("");
-  // 生成中のツール呼び出しログ（検索・書き込みなど）。会話にカードで見せる。
-  const [toolLog, setToolLog] = useState<ToolEvent[]>([]);
-  const generating = isGeneratingPhase(phase);
   const [error, setError] = useState<string | null>(null);
   const threadEnd = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
-  // 停止ボタン押下フラグ。中断は失敗扱いせず（赤エラーを出さず）idle へ戻すために使う。
-  const cancelRef = useRef(false);
+
+  // 進行中の 1 ターンはモジュール単例ストアが持つ＝会話を切り替えても殺さず後台で継続する。
+  const { active: activeRun, error: runError } = useSyncExternalStore(
+    subscribe,
+    getSnapshot,
+    getSnapshot
+  );
+  const viewedId = requestedConversationId;
+  const isViewingActive = activeRun !== null && activeRun.conversationId === viewedId;
+  const someoneGenerating = activeRun !== null;
+  // 「今見ている対話が生成中」のときだけ生成 UI（実時本文・停止ボタン）を出す。
+  const generating = isViewingActive;
+  const displayMessages = isViewingActive ? activeRun.baseHistory : messages;
+  const phase: ChatUiPhase = isViewingActive ? activeRun.phase : "idle";
+  const thinkingBuf = isViewingActive ? activeRun.thinking : "";
+  const narrationBuf = isViewingActive ? activeRun.narration : "";
+  const toolLog: ToolEvent[] = isViewingActive ? activeRun.tools : [];
+  // 実行の起止だけ依存に使う（流式 buffer 変化では切替 effect を回さない）。
+  const activeRunKey = activeRun ? activeRun.conversationId : 0;
 
   useEffect(() => {
     if (!available) return;
@@ -102,10 +119,10 @@ export function WorkshopView() {
     })();
   }, [available]);
 
-  // 新しいメッセージが出たら会話を最下部に追従させる。
+  // 新しいメッセージ・流式の進みに合わせて会話を最下部に追従させる。
   useEffect(() => {
     threadEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, generating]);
+  }, [displayMessages, generating, narrationBuf, thinkingBuf]);
 
   // 入力欄は 1 行から始まり、内容に合わせて自動的に伸びる（送信後は空＝1 行に戻る）。
   useEffect(() => {
@@ -128,7 +145,7 @@ export function WorkshopView() {
     visibleHasOllama &&
     !!visibleSelectedModel &&
     selectedTools &&
-    !generating;
+    !someoneGenerating;
 
   // 選択リスト/チップで素材をトグル選択（純ローカル状態。プレビューでも動く）。
   function toggleSource(material: RawMaterial) {
@@ -149,20 +166,14 @@ export function WorkshopView() {
     );
   }
 
-  // 工房ナビゲーションから新しい対話を開始する。
+  // 工房ナビゲーションから新しい対話へ。本地ビューだけ畳む＝後台で走る生成は殺さない。
   const reset = useCallback(() => {
-    runGuard.invalidate();
     conversationIdRef.current = null;
-    void workshopCancel();
     setMessages([]);
     setSources([]);
     setInstruction("");
-    setThinkingBuf("");
-    setNarrationBuf("");
-    setToolLog([]);
-    setPhase("idle");
     setError(null);
-  }, [runGuard]);
+  }, []);
 
   useEffect(
     () =>
@@ -181,6 +192,7 @@ export function WorkshopView() {
       const previousActivePath = activePathRef.current;
       activePathRef.current = activePath;
       if (activeKbChanged(previousActivePath, activePath)) {
+        discardActive(); // KB が変わると存盤目標も動く＝進行中の実行は捨てる
         reset();
         router.replace("/workshop");
         return;
@@ -189,10 +201,11 @@ export function WorkshopView() {
         if (conversationIdRef.current !== null) reset();
         return;
       }
-
-      runGuard.invalidate();
-      void workshopCancel();
-      setPhase("idle");
+      // 進行中の対話を見ているなら DB から読まず、ストアの実時態をそのまま描く。
+      if (getSnapshot().active?.conversationId === requestedConversationId) {
+        conversationIdRef.current = requestedConversationId;
+        return;
+      }
       setError(null);
       void getWorkshopConversation(requestedConversationId)
         .then((conversation) => {
@@ -215,111 +228,47 @@ export function WorkshopView() {
     return () => {
       current = false;
     };
-  }, [active?.path, requestedConversationId, reset, router, runGuard, t]);
+  }, [active?.path, requestedConversationId, activeRunKey, reset, router, t]);
 
-  // 会話履歴つきで対話エージェントを 1 ターン回す。思考・ツール・本文を流式表示し、最終返信を会話へ積む。
-  async function runTurn(history: Msg[]) {
-    const run = runGuard.start();
-    setMessages(history);
-    setInstruction("");
-    setPhase("connecting");
-    setThinkingBuf("");
-    setNarrationBuf("");
-    setToolLog([]);
-    setError(null);
-    cancelRef.current = false;
-    try {
-      let thinking = "";
-      let narration = "";
-      const tools: ToolEvent[] = [];
-      const reply = await workshopChat(
-        sources.map((s) => s.id),
-        history.map(toChatTurn),
-        visibleSelectedModel,
-        selectedThinking,
-        selectedTools,
-        (p: ChatPhase) => {
-          if (!runGuard.isCurrent(run)) return;
-          if (p.phase === "narration") {
-            setPhase("generating");
-            narration += p.delta;
-            setNarrationBuf(narration);
-          } else if (p.phase === "toolCall") {
-            tools.push({ name: p.name, args: p.args });
-            setToolLog([...tools]);
-          } else if (p.phase === "toolResult") {
-            // 直近の同名・未完了の呼び出しに結果サマリを埋める。
-            const target = [...tools]
-              .reverse()
-              .find((tool) => tool.name === p.name && !tool.summary);
-            if (target) target.summary = p.summary;
-            setToolLog([...tools]);
-          } else if (p.phase === "thinking") {
-            setPhase("thinking");
-            thinking += p.delta;
-            setThinkingBuf(thinking);
-          } else {
-            setPhase("loadingModel");
-          }
-        }
-      );
-      // 別の対話・KB へ移動済みなら、古い生成結果を画面や履歴へ反映しない。
-      if (!runGuard.isCurrent(run)) return;
-      const completed: WorkshopMessage[] = [
-        ...history,
-        {
-          role: "ai",
-          text: reply || narration,
-          thinking: thinking || undefined,
-          tools: tools.length ? tools : undefined,
-        },
-      ];
-      setMessages(completed);
-
-      try {
-        const saved = await saveWorkshopConversation({
-          id: conversationIdRef.current,
-          sourceIds: sources.map((source) => source.id),
-          messages: completed,
-        });
-        if (runGuard.isCurrent(run)) {
-          conversationIdRef.current = saved.id;
-          router.replace(`/workshop?conversation=${saved.id}`);
-          notifyWorkshopHistoryChanged();
-        }
-      } catch (saveError) {
-        if (runGuard.isCurrent(run)) {
-          setError(saveError instanceof Error ? saveError.message : String(saveError));
-        }
-      }
-      if (runGuard.isCurrent(run)) setPhase("idle");
-    } catch (e) {
-      // 別の対話・KB へ移動済みなら、古い入力やエラーを復元しない。
-      if (!runGuard.isCurrent(run)) return;
-      // 停止ボタンによる中断はエラー表示しない（ユーザーが意図した中断）。
-      if (!cancelRef.current) setError(e instanceof Error ? e.message : String(e));
-      // 失敗・中断したターンは履歴から外し、入力を戻して再試行できるようにする。
-      const last = history[history.length - 1];
-      setMessages(history.slice(0, -1));
-      if (last?.role === "user") setInstruction(last.text);
-      setPhase("idle");
-    }
-  }
-
-  // 進行中の生成を止める。後端のフラグを立て、stream が次チャンク前に打ち切る。
+  // 進行中の生成を止める。途中まで出た本文はストアが対話へ保存する（失わない）。
   function handleStop() {
-    cancelRef.current = true;
-    void workshopCancel();
+    stopActive();
   }
 
   async function handleSend() {
     if (!canGenerate || !instruction.trim()) return;
-    void runTurn([...messages, { role: "user", text: instruction.trim() }]);
+    const userMsg: Msg = { role: "user", text: instruction.trim() };
+    const baseHistory = [...displayMessages, userMsg];
+    const sourceIds = sources.map((source) => source.id);
+    setInstruction("");
+    setError(null);
+    // 送信時に即存盤＝後台生成が会話 id を捕獲でき、切り戻しても消えない。失敗時だけ入力を戻す。
+    let id = conversationIdRef.current;
+    try {
+      const saved = await saveWorkshopConversation({ id, sourceIds, messages: baseHistory });
+      id = saved.id;
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : String(saveError));
+      setInstruction(userMsg.text);
+      return;
+    }
+    conversationIdRef.current = id;
+    setMessages(baseHistory);
+    notifyWorkshopHistoryChanged();
+    if (requestedConversationId !== id) router.replace(`/workshop?conversation=${id}`);
+    startRun({
+      conversationId: id,
+      sourceIds,
+      baseHistory,
+      model: visibleSelectedModel,
+      think: selectedThinking,
+      tools: selectedTools,
+    });
   }
 
   return (
     <div className="view-enter flex flex-col lg:h-full">
-      {messages.length === 0 ? (
+      {displayMessages.length === 0 ? (
         <PageHead
           eyebrow={t("workshop.eyebrow")}
           title={t("workshop.title")}
@@ -336,7 +285,7 @@ export function WorkshopView() {
           <div className="lg:min-h-0 lg:flex-1 lg:overflow-auto">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-1 py-1">
               {/* 会話（多輪）。 */}
-              {messages.map((m, i) =>
+              {displayMessages.map((m, i) =>
                 m.role === "user" ? (
                   <div key={i} className="flex justify-end">
                     {/* 素材は右パネル/コンポーザーで示すので会話には出さない（履歴で常に文脈に入る）。 */}
@@ -387,7 +336,7 @@ export function WorkshopView() {
 
           {/* ── サジェスト + コンポーザー ── */}
           <div className="mx-auto mt-3 w-full max-w-3xl">
-            {messages.length === 0 && visibleHasOllama && (
+            {displayMessages.length === 0 && visibleHasOllama && (
               <div className="mb-2.5 flex flex-wrap items-center gap-2">
                 <span className="font-mono text-[10.5px] font-bold tracking-widest text-ink-faint uppercase">
                   {t("workshop.sug.label")}
@@ -408,14 +357,14 @@ export function WorkshopView() {
 
             <div className="rounded-[18px] border border-line-strong bg-surface p-3 shadow-(--shadow-md)">
               {/* 関連文档は会話開始前だけ示す。最初の送信で文脈に入るので以降は隠す（+ は常に追加可）。 */}
-              {visibleSources.length > 0 && messages.length === 0 && (
+              {visibleSources.length > 0 && displayMessages.length === 0 && (
                 <div className="mb-2.5 flex flex-wrap gap-2">
                   {visibleSources.map((m) => (
                     <SourceChip
                       key={m.id}
                       material={m}
                       onRemove={
-                        canRemoveSource(messages.length, visibleSources.length)
+                        canRemoveSource(displayMessages.length, visibleSources.length)
                           ? () => toggleSource(m)
                           : undefined
                       }
@@ -509,15 +458,23 @@ export function WorkshopView() {
                     {t("workshop.toolsRequired")}
                   </div>
                 )}
-              {error && (
-                <div className="mt-2 px-1 text-[12.5px] font-semibold text-brand">{error}</div>
+              {/* 他の対話が生成中＝本地モデルは直列なのでここでは送れない、と理由を出す。 */}
+              {someoneGenerating && !isViewingActive && (
+                <div className="mt-2 px-1 text-[12px] text-ink-faint">
+                  {t("workshop.generatingElsewhere")}
+                </div>
+              )}
+              {(error || (runError && runError.conversationId === viewedId)) && (
+                <div className="mt-2 px-1 text-[12.5px] font-semibold text-brand">
+                  {error ?? runError?.message}
+                </div>
               )}
             </div>
           </div>
         </div>
 
         {/* ── 右側ステータス（対話態のみ。実行状態 + モデル + 在席素材。草稿は出さない） ── */}
-        {messages.length > 0 && (
+        {displayMessages.length > 0 && (
           <Inspector
             model={visibleSelectedModel}
             generating={generating}

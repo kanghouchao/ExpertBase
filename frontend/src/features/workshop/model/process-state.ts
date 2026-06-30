@@ -25,17 +25,7 @@ export type ChatUiPhase =
   | "connecting"
   | "thinking"
   | "loadingModel"
-  | "generating"
-  | "done";
-
-export function isGeneratingPhase(phase: ChatUiPhase): boolean {
-  return (
-    phase === "connecting" ||
-    phase === "thinking" ||
-    phase === "loadingModel" ||
-    phase === "generating"
-  );
-}
+  | "generating";
 
 /** フェーズ → i18n キー（spinner ラベル）。 */
 export function phaseLabelKey(phase: ChatUiPhase): string {
@@ -48,8 +38,6 @@ export function phaseLabelKey(phase: ChatUiPhase): string {
       return "workshop.phase.loadingModel";
     case "generating":
       return "workshop.phase.generating";
-    case "done":
-      return "workshop.st.done";
     default:
       return "workshop.st.idle";
   }

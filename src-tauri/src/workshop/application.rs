@@ -25,9 +25,9 @@ pub fn save_conversation(
   source_ids: Vec<String>,
   messages: Vec<WorkshopMessage>,
 ) -> Result<WorkshopConversation, String> {
-  let conn = history::open(root)?;
+  let dir = history::open(root)?;
   let now = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
-  history::save(&conn, id, &source_ids, &messages, &now)
+  history::save(&dir, id, &source_ids, &messages, &now)
 }
 
 pub fn get_conversation(root: &Path, id: i64) -> Result<WorkshopConversation, String> {
