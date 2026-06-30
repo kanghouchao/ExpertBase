@@ -179,13 +179,6 @@ export function DashboardView() {
           sub={t("dash.t.links.s")}
           tone="ai"
         />
-        <StatTile
-          icon="chat"
-          label={t("dash.t.qa")}
-          value={nf.format(0)}
-          sub={t("dash.t.qa.s")}
-          tone="ai"
-        />
       </div>
 
       <WikiHealth />
