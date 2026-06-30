@@ -13,7 +13,6 @@ When working under `src-tauri/`, follow this file in addition to the repository-
 - Library crate: `expert_base_lib` (`src/lib.rs`); `src/main.rs` is a thin binary entry point.
 - Serialization: serde / serde_json.
 - Logging: `log` macros, emitted through `tauri-plugin-log` (registered in debug builds only).
-- Speech-to-text (`asr` feature): the on-device transcription engine (whisper.cpp via `whisper-rs`) is gated behind the optional `whisper` Cargo feature, off by default so `cargo test` runs without a C/C++ toolchain. Enabling it (`--features whisper`, required for real transcription in `bun run build`/`bun run dev`) needs `cmake` and a C/C++ compiler installed (e.g. `brew install cmake` on macOS).
 
 ## Command Policy
 
@@ -39,7 +38,7 @@ Use Domain-Driven Design (DDD) for Rust backend code in `src-tauri/`.
 - Interface code adapts the outside world to the application layer. Tauri commands are interface adapters only.
 - Domain code must not depend on Tauri, storage, filesystem, frontend DTOs, or other infrastructure details.
 
-All current features (`kb`, `ai`, `capture`, `workshop`) are split into the DDD layers they actually use. New feature modules may start as `src/<feature>.rs`, but split into feature-local `domain`, `application`, `infrastructure`, and `interface` modules as they accumulate real business rules or multiple use cases. Create only the layers a feature actually needs — do not add empty layers (e.g. `ai` has no `application` layer; `workshop` has no `infrastructure` layer). Use top-level shared modules only when a cross-feature abstraction is justified by real reuse.
+All current features (`kb`, `ai`, `extract`, `workshop`) are split into the DDD layers they actually use. New feature modules may start as `src/<feature>.rs`, but split into feature-local `domain`, `application`, `infrastructure`, and `interface` modules as they accumulate real business rules or multiple use cases. Create only the layers a feature actually needs — do not add empty layers (e.g. `ai` has no `application` layer; `workshop` has no `infrastructure` layer). Use top-level shared modules only when a cross-feature abstraction is justified by real reuse.
 
 ## IPC Command Practices
 

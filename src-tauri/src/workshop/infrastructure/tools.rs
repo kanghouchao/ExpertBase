@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::json;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::capture::{extract_docx, extract_pdf, extract_readable, fetch_html};
+use crate::extract::{extract_docx, extract_pdf, extract_readable, fetch_html};
 use crate::kb::index;
 
 pub(crate) type UsedSources = Arc<Mutex<Vec<String>>>;

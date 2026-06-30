@@ -1,6 +1,5 @@
 mod ai;
-mod asr;
-mod capture;
+mod extract;
 mod kb;
 mod workshop;
 

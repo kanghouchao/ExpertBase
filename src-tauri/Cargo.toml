@@ -33,17 +33,10 @@ pdf-extract = "0.10"
 dotext = "0.1"
 # 素材 id 照合用の Unicode 正規化。macOS は NFD、モデルは NFC で打ち直すため照合前に揃える。
 unicode-normalization = "0.1"
-# 転写エンジン（whisper.cpp）。ネイティブビルドに cmake が要るため、optional feature の裏に置く。
-whisper-rs = { version = "0.16", optional = true }
-hound = { version = "3", optional = true }
 tauri-plugin-dialog = "2.7.1"
 rig-core = "0.39.0"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync"] }
 futures = "0.3.32"
-
-[features]
-# 既定は OFF（cmake 無しでも cargo test が通る）。実アプリのビルドでは有効化する。
-whisper = ["dep:whisper-rs", "dep:hound"]
 
 [dev-dependencies]
 tempfile = "3"
