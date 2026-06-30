@@ -35,7 +35,8 @@ pub async fn chat(
 
 /// 承認された内容を `entries/` に確定し、インデックスを更新する。
 /// write_entry ツール（infra）経由で呼ばれる（書き込みの実体）。複数素材でも同じ経路を通る。
-/// source_refs は添付素材の引用文字列（外部絶対パス）。KB へは複製せず文字列だけ残す。
+/// source_refs は実際に読んだ素材の引用文字列（外部絶対パス / URL）。
+/// KB へは複製せず文字列だけ残す。
 pub fn confirm(
   root: &Path,
   conn: &Connection,

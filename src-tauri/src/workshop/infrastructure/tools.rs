@@ -5,6 +5,7 @@
 
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use rig_core::completion::ToolDefinition;
 use rig_core::tool::Tool;
@@ -14,6 +15,15 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::capture::{extract_docx, extract_pdf, extract_readable, fetch_html};
 use crate::kb::index;
+
+pub(crate) type UsedSources = Arc<Mutex<Vec<String>>>;
+
+fn remember_source(used_sources: &UsedSources, source: &str) {
+  let mut refs = used_sources.lock().unwrap_or_else(|e| e.into_inner());
+  if !refs.iter().any(|item| item == source) {
+    refs.push(source.to_string());
+  }
+}
 
 /// read_source の引数。id（素材識別子）を緩く受ける。
 #[derive(Deserialize)]
@@ -45,6 +55,7 @@ pub struct WriteArgs {
 /// 読み取りのみ・KB へ落とさない。
 pub struct ReadSource {
   pub sources: Vec<String>,
+  pub used_sources: UsedSources,
 }
 
 impl Tool for ReadSource {
@@ -71,7 +82,8 @@ impl Tool for ReadSource {
 
   async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
     let sources = self.sources.clone();
-    let out = tokio::task::spawn_blocking(move || read_blocking(&sources, &args.id))
+    let used_sources = self.used_sources.clone();
+    let out = tokio::task::spawn_blocking(move || read_blocking(&sources, &used_sources, &args.id))
       .await
       .unwrap_or_else(|e| format!("(read task failed: {e})"));
     Ok(out)
@@ -115,10 +127,10 @@ impl Tool for SearchKb {
 }
 
 /// 新しい条目を KB へ書き込むツール（application::confirm へ委譲）。
-/// source_refs は添付素材の引用文字列（外部絶対パス）＝そのまま entry.sources に記録する。
+/// 同じ実行内で正常に読んだファイル / URL を entry.sources に記録する。
 pub struct WriteEntry {
   pub root: PathBuf,
-  pub source_refs: Vec<String>,
+  pub used_sources: UsedSources,
 }
 
 impl Tool for WriteEntry {
@@ -147,7 +159,7 @@ impl Tool for WriteEntry {
 
   async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
     let root = self.root.clone();
-    let source_refs = self.source_refs.clone();
+    let source_refs = self.used_sources.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let out = tokio::task::spawn_blocking(move || write_blocking(&root, &source_refs, args))
       .await
       .unwrap_or_else(|e| format!("(write task failed: {e})"));
@@ -158,7 +170,7 @@ impl Tool for WriteEntry {
 /// 素材読み取り（ブロッキング）。id を許可集合で検証してから、拡張子で抽出器を選ぶ。
 /// source は外部絶対パスのみ（pdf/docx は抽出、その他はテキスト読み）。
 /// エラーは全てモデル向け文字列で返す（ループ継続）。読み取りのみ・KB へ落とさない。
-fn read_blocking(sources: &[String], id: &str) -> String {
+fn read_blocking(sources: &[String], used_sources: &UsedSources, id: &str) -> String {
   let id = id.trim();
   if id.is_empty() {
     return "(read_source needs a non-empty id)".to_string();
@@ -179,8 +191,14 @@ fn read_blocking(sources: &[String], id: &str) -> String {
   }
   .map_err(|e| format!("read error: {e}"));
   match text {
-    Ok(body) if body.trim().is_empty() => format!("(source {id} is empty)"),
-    Ok(body) => body,
+    Ok(body) => {
+      remember_source(used_sources, source);
+      if body.trim().is_empty() {
+        format!("(source {id} is empty)")
+      } else {
+        body
+      }
+    }
     Err(e) => format!("({e})"),
   }
 }
@@ -237,7 +255,9 @@ pub struct FetchArgs {
 /// ユーザーが会話に渡した URL の本文を Markdown で返す読み取りツール。
 /// `web::fetch_html`（HTTPS 取得）+ `web::extract_readable`（Readability→Markdown）を再利用する。
 /// 単一 URL の本文抽出のみ。許可リスト / SSRF 防御は入れない（local-first・単一ユーザー前提）。
-pub struct FetchWeb;
+pub struct FetchWeb {
+  pub used_sources: UsedSources,
+}
 
 impl Tool for FetchWeb {
   const NAME: &'static str = "fetch_web";
@@ -271,7 +291,10 @@ impl Tool for FetchWeb {
       Err(e) => return Ok(format!("(fetch error: {e})")),
     };
     match extract_readable(&html, url) {
-      Ok((title, markdown)) => Ok(format_web_body(&title, &markdown)),
+      Ok((title, markdown)) => {
+        remember_source(&self.used_sources, url);
+        Ok(format_web_body(&title, &markdown))
+      }
       Err(e) => Ok(format!("(extract error: {e})")),
     }
   }
@@ -290,6 +313,7 @@ fn format_web_body(title: &str, markdown: &str) -> String {
 mod tests {
   use super::*;
   use crate::kb::entry::{Entry, EntryMeta};
+  use std::sync::{Arc, Mutex};
   use unicode_normalization::UnicodeNormalization;
 
   fn seed_entry(conn: &rusqlite::Connection, path: &str, title: &str, body: &str) {
@@ -317,10 +341,12 @@ mod tests {
     std::fs::write(&file, "外部ファイルの内容").unwrap();
     let id = file.to_string_lossy().to_string();
 
-    let tool = ReadSource { sources: vec![id.clone()] };
+    let used_sources = Arc::new(Mutex::new(Vec::new()));
+    let tool = ReadSource { sources: vec![id.clone()], used_sources: used_sources.clone() };
     let out = tool.call(ReadArgs { id }).await.unwrap();
 
     assert!(out.contains("外部ファイルの内容"));
+    assert_eq!(*used_sources.lock().unwrap(), vec![file.to_string_lossy().to_string()]);
   }
 
   #[tokio::test]
@@ -336,7 +362,10 @@ mod tests {
     let nfc_id: String = nfd_id.nfc().collect();
     assert_ne!(nfd_id, nfc_id, "前提: NFD と NFC でバイトが異なる");
 
-    let tool = ReadSource { sources: vec![nfd_id] };
+    let tool = ReadSource {
+      sources: vec![nfd_id],
+      used_sources: Arc::new(Mutex::new(Vec::new())),
+    };
     let out = tool.call(ReadArgs { id: nfc_id }).await.unwrap();
 
     assert!(out.contains("テキスト本文"), "was: {out}");
@@ -344,9 +373,11 @@ mod tests {
 
   #[tokio::test]
   async fn read_source_rejects_unknown_id() {
-    let tool = ReadSource { sources: vec![] };
+    let used_sources = Arc::new(Mutex::new(Vec::new()));
+    let tool = ReadSource { sources: vec![], used_sources: used_sources.clone() };
     let out = tool.call(ReadArgs { id: "/abs/secret.md".into() }).await.unwrap();
     assert!(out.contains("unknown source id"));
+    assert!(used_sources.lock().unwrap().is_empty());
   }
 
   #[tokio::test]
@@ -380,10 +411,8 @@ mod tests {
     let root = tmp.path();
     let conn = index::open_index(root).unwrap();
 
-    let tool = WriteEntry {
-      root: root.to_path_buf(),
-      source_refs: vec!["/abs/report.pdf".into()],
-    };
+    let used_sources = Arc::new(Mutex::new(vec!["/abs/report.pdf".into()]));
+    let tool = WriteEntry { root: root.to_path_buf(), used_sources };
     let out = tool
       .call(WriteArgs { title: "緑茶".into(), cat: "tea".into(), body: "湯温は [[煎茶]] で70度".into() })
       .await
@@ -404,7 +433,10 @@ mod tests {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     index::open_index(root).unwrap();
-    let tool = WriteEntry { root: root.to_path_buf(), source_refs: vec![] };
+    let tool = WriteEntry {
+      root: root.to_path_buf(),
+      used_sources: Arc::new(Mutex::new(Vec::new())),
+    };
 
     let out = tool
       .call(WriteArgs { title: "  ".into(), cat: "tea".into(), body: "x".into() })
@@ -415,8 +447,25 @@ mod tests {
 
   #[tokio::test]
   async fn fetch_web_rejects_empty_url() {
-    let out = FetchWeb.call(FetchArgs { url: "  ".into() }).await.unwrap();
+    let used_sources = Arc::new(Mutex::new(Vec::new()));
+    let out = FetchWeb { used_sources: used_sources.clone() }
+      .call(FetchArgs { url: "  ".into() })
+      .await
+      .unwrap();
     assert!(out.contains("needs a non-empty url"), "was: {out}");
+    assert!(used_sources.lock().unwrap().is_empty());
+  }
+
+  #[test]
+  fn source_tracking_deduplicates_urls() {
+    let used_sources = Arc::new(Mutex::new(Vec::new()));
+    remember_source(&used_sources, "https://example.com/article");
+    remember_source(&used_sources, "https://example.com/article");
+
+    assert_eq!(
+      *used_sources.lock().unwrap(),
+      vec!["https://example.com/article".to_string()]
+    );
   }
 
   #[tokio::test]
