@@ -19,10 +19,12 @@ import { cn } from "@/shared/lib/utils";
 import { useI18n } from "@/shared/providers/providers";
 import {
   aiHasKey,
+  getAiSettings,
   getWorkshopConversation,
   listOllamaModels,
   pickLocalFile,
   saveWorkshopConversation,
+  type AiProvider,
   type OllamaModel,
 } from "@/shared/api/tauri/client";
 import { RAW_TYPE, type RawMaterial, type RawType } from "@/entities/material";
@@ -71,6 +73,9 @@ export function WorkshopView() {
   const [hasOllama, setHasOllama] = useState(false);
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
+  // AI 設定（provider はグローバル選択、settingsModel は既定モデル）。設定画面で編集する。
+  const [provider, setProvider] = useState<AiProvider>("ollama");
+  const [settingsModel, setSettingsModel] = useState("");
   // 確定済み（存盤済み）メッセージ。生成中の対話を見ているときはストアの baseHistory を描く。
   const [messages, setMessages] = useState<Msg[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -100,18 +105,27 @@ export function WorkshopView() {
     if (!available) return;
     void (async () => {
       try {
-        const [ollama, modelList] = await Promise.all([aiHasKey(), listOllamaModels()]);
+        const [settings, ollama, modelList] = await Promise.all([
+          getAiSettings(),
+          aiHasKey(),
+          listOllamaModels(),
+        ]);
+        setProvider(settings.provider);
+        setSettingsModel(settings.model);
         setHasOllama(ollama);
         setModels(modelList);
-        // 既定モデルの nudge: Qwen3（2026 本地工具调用最稳）→ 任意の tools 対応 → 先頭。
-        setSelectedModel((current) =>
-          current && modelList.some((model) => model.name === current)
-            ? current
-            : (modelList.find((model) => /qwen3/i.test(model.name))?.name ??
-              modelList.find((model) => model.tools)?.name ??
-              modelList[0]?.name ??
-              "")
-        );
+        // 既定モデルの nudge: 設定の既定 → Qwen3（2026 本地工具调用最稳）→ 任意の tools 対応 → 先頭。
+        setSelectedModel((current) => {
+          const has = (name: string) => modelList.some((model) => model.name === name);
+          if (current && has(current)) return current;
+          if (settings.model && has(settings.model)) return settings.model;
+          return (
+            modelList.find((model) => /qwen3/i.test(model.name))?.name ??
+            modelList.find((model) => model.tools)?.name ??
+            modelList[0]?.name ??
+            ""
+          );
+        });
       } catch {
         setHasOllama(false);
         setModels([]);
@@ -134,9 +148,19 @@ export function WorkshopView() {
   }, [instruction]);
 
   const visibleSources = sources;
-  const visibleHasOllama = available ? hasOllama : true;
-  const visibleModels = available ? models : PREVIEW_MODELS;
-  const visibleSelectedModel = available ? selectedModel : selectedModel || PREVIEW_MODELS[0].name;
+  // llama.app は能力探測がないので、設定した既定モデルを tools 対応として 1 件だけ扱う＝
+  // 既存のモデル選択/生成ゲート（tools 必須）をそのまま流用できる。
+  const isLlamaApp = provider === "llamaApp";
+  const llamaModels: OllamaModel[] = settingsModel
+    ? [{ name: settingsModel, thinking: false, tools: true }]
+    : [];
+  const visibleHasOllama = isLlamaApp ? true : available ? hasOllama : true;
+  const visibleModels = isLlamaApp ? llamaModels : available ? models : PREVIEW_MODELS;
+  const visibleSelectedModel = isLlamaApp
+    ? settingsModel
+    : available
+      ? selectedModel
+      : selectedModel || PREVIEW_MODELS[0].name;
   const selectedModelInfo = visibleModels.find((model) => model.name === visibleSelectedModel);
   const selectedThinking = selectedModelInfo?.thinking ?? false;
   const selectedTools = selectedModelInfo?.tools ?? false;

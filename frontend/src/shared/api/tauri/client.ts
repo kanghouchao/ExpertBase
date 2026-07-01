@@ -163,6 +163,30 @@ export async function listOllamaModels(): Promise<OllamaModel[]> {
   return invoke<OllamaModel[]>("ai_list_ollama_models");
 }
 
+/** AI プロバイダ（Rust Provider と一致）。ローカル端点のみ。 */
+export type AiProvider = "ollama" | "llamaApp";
+
+/** AI 設定（Rust AiSettings と一致）。 */
+export type AiSettings = {
+  provider: AiProvider;
+  model: string;
+  llamaAppUrl: string;
+};
+
+const DEFAULT_AI_SETTINGS: AiSettings = { provider: "ollama", model: "", llamaAppUrl: "" };
+
+/** 保存済み AI 設定を読む（既定は Ollama）。Tauri 外では既定値。 */
+export async function getAiSettings(): Promise<AiSettings> {
+  if (!isTauri()) return DEFAULT_AI_SETTINGS;
+  return invoke<AiSettings>("ai_get_settings");
+}
+
+/** AI 設定を保存する。 */
+export async function setAiSettings(settings: AiSettings): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("ai_set_settings", { settings });
+}
+
 /** 添付素材（外部ファイルの絶対パス id）+ 会話履歴で対話エージェントを 1 ターン回す。
  * 最終返信本文を返す。onPhase で進捗を受け取る。 */
 export async function workshopChat(
