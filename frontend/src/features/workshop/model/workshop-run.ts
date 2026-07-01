@@ -26,7 +26,7 @@ export type RunSnapshot = {
 
 export type RunStoreState = {
   active: RunSnapshot | null;
-  error: { kbPath: string; conversationId: number; message: string } | null;
+  error: { kbPath: string; conversationId: number; cause: unknown } | null;
 };
 
 export type StopResult = {
@@ -171,11 +171,7 @@ async function run(args: StartArgs): Promise<void> {
       // 失敗: user メッセージは存盤済み。エラー文だけ視図へ渡す。
       emit({
         active: null,
-        error: {
-          kbPath,
-          conversationId,
-          message: error instanceof Error ? error.message : String(error),
-        },
+        error: { kbPath, conversationId, cause: error },
       });
     }
   }
@@ -196,11 +192,7 @@ async function finishSave(args: StartArgs, completed: WorkshopMessage[]): Promis
     if (!isActive(args.kbPath, args.conversationId)) return;
     emit({
       active: null,
-      error: {
-        kbPath: args.kbPath,
-        conversationId: args.conversationId,
-        message: error instanceof Error ? error.message : String(error),
-      },
+      error: { kbPath: args.kbPath, conversationId: args.conversationId, cause: error },
     });
   }
 }

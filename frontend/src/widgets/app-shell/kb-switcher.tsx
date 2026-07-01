@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Icon } from "@/shared/ui/icon";
 import { DeleteButton } from "@/shared/ui/delete-button";
 import { useI18n } from "@/shared/providers/providers";
+import { translateError } from "@/shared/i18n/translate";
 import { removeKb, switchKb, useKbStore } from "@/entities/knowledge-base";
 
 export function KbSwitcher({ onAdd }: { onAdd: () => void }) {
@@ -18,7 +19,7 @@ export function KbSwitcher({ onAdd }: { onAdd: () => void }) {
     try {
       await removeKb(path);
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : String(error));
+      setDeleteError(translateError(t, error));
     }
   }
 

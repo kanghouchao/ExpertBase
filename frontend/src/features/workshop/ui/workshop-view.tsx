@@ -17,6 +17,7 @@ import { Markdown } from "@/shared/ui/markdown";
 import { PageHead } from "@/shared/ui/page-head";
 import { cn } from "@/shared/lib/utils";
 import { useI18n } from "@/shared/providers/providers";
+import { translateError } from "@/shared/i18n/translate";
 import {
   aiHasKey,
   getAiSettings,
@@ -251,7 +252,7 @@ export function WorkshopView() {
         .catch((loadError) => {
           if (!current) return;
           reset();
-          setError(loadError instanceof Error ? loadError.message : String(loadError));
+          setError(translateError(t, loadError));
         });
     });
 
@@ -275,10 +276,8 @@ export function WorkshopView() {
       messages: rollback.history,
     })
       .then(() => notifyWorkshopHistoryChanged())
-      .catch((saveError) =>
-        setError(saveError instanceof Error ? saveError.message : String(saveError))
-      );
-  }, [kbPath, sources, viewedId, setError, setInstruction, setMessages]);
+      .catch((saveError) => setError(translateError(t, saveError)));
+  }, [kbPath, sources, viewedId, setError, setInstruction, setMessages, t]);
 
   useEffect(() => {
     if (!generating) return;
@@ -304,7 +303,7 @@ export function WorkshopView() {
       const saved = await saveWorkshopConversation({ kbPath, id, sourceIds, messages: baseHistory });
       id = saved.id;
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : String(saveError));
+      setError(translateError(t, saveError));
       setInstruction(userMsg.text);
       return;
     }
@@ -526,7 +525,7 @@ export function WorkshopView() {
                   runError.kbPath === active?.path &&
                   runError.conversationId === viewedId)) && (
                 <div className="mt-2 px-1 text-[12.5px] font-semibold text-brand">
-                  {error ?? runError?.message}
+                  {error ?? (runError ? translateError(t, runError.cause) : undefined)}
                 </div>
               )}
             </div>

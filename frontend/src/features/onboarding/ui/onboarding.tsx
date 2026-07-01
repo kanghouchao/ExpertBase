@@ -11,6 +11,7 @@ import { Logo } from "@/shared/ui/logo";
 import { Button } from "@/shared/ui/button";
 import { useI18n } from "@/shared/providers/providers";
 import { LANGS } from "@/shared/i18n/dictionaries";
+import { translateError } from "@/shared/i18n/translate";
 import { createAndActivateKb, useKbStore } from "@/entities/knowledge-base";
 
 const STEP_COUNT = 4;
@@ -48,7 +49,7 @@ export function Onboarding({ onCancel }: { onCancel?: () => void }) {
       });
       onCancel?.();
     } catch (e) {
-      setError(String(e));
+      setError(translateError(t, e));
       setBusy(false);
     }
   };
