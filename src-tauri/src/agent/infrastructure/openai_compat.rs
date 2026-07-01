@@ -8,22 +8,25 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use super::ollama::OllamaModel;
-use crate::agent::AiError;
+use crate::error::AppError;
 
 /// モデル一覧を返す。base_url は解決済み（例: `http://127.0.0.1:8080/v1`）。
-pub fn list_models(base_url: &str) -> Result<Vec<OllamaModel>, AiError> {
+pub fn list_models(base_url: &str) -> Result<Vec<OllamaModel>, AppError> {
   let client = reqwest::blocking::Client::builder()
     .timeout(Duration::from_secs(3))
     .build()
-    .map_err(|e| AiError::Network(e.to_string()))?;
+    .map_err(|e| AppError::param("err.agent.network", "detail", e))?;
   let resp = client
     .get(format!("{base_url}/models"))
     .send()
-    .map_err(|e| AiError::Network(e.to_string()))?;
+    .map_err(|e| AppError::param("err.agent.network", "detail", e))?;
   let status = resp.status();
-  let text = resp.text().map_err(|e| AiError::Network(e.to_string()))?;
+  let text = resp.text().map_err(|e| AppError::param("err.agent.network", "detail", e))?;
   if status.as_u16() != 200 {
-    return Err(AiError::Other(format!("模型列表读取失败({status}): {text}")));
+    return Err(AppError::params(
+      "err.agent.modelListFailed",
+      [("status", status.to_string()), ("detail", text)],
+    ));
   }
   parse_models(&text)
 }
@@ -40,8 +43,8 @@ struct ModelEntry {
 }
 
 /// OpenAI 互換 `/models` レスポンスから id を取り出す。能力は不明なので tools=true / thinking=false。
-fn parse_models(body: &str) -> Result<Vec<OllamaModel>, AiError> {
-  let parsed: ModelsResponse = serde_json::from_str(body).map_err(|e| AiError::Other(e.to_string()))?;
+fn parse_models(body: &str) -> Result<Vec<OllamaModel>, AppError> {
+  let parsed: ModelsResponse = serde_json::from_str(body).map_err(AppError::generic)?;
   Ok(
     parsed
       .data

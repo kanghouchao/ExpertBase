@@ -30,27 +30,6 @@ pub enum StreamProgress {
   ToolResult { name: String, summary: String },
 }
 
-/// AI エラー。UI で区別して表示できるようにする。
-#[derive(Debug, PartialEq)]
-pub enum AiError {
-  /// ネットワーク障害。
-  Network(String),
-  /// その他（API エラー応答・解析失敗など）。
-  Other(String),
-  /// ユーザーが生成を中断した（停止ボタン）。UI はエラー表示せず idle へ戻す。
-  Cancelled,
-}
-
-impl std::fmt::Display for AiError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      AiError::Network(m) => write!(f, "网络错误: {m}"),
-      AiError::Other(m) => write!(f, "{m}"),
-      AiError::Cancelled => write!(f, "已取消"),
-    }
-  }
-}
-
 /// AI プロバイダの選択。本 MVP はローカル端点のみ（クラウド・API キーなし）。
 /// どちらも OpenAI 互換/HTTP のローカル端点で、base_url は設定から（空欄は既定へフォールバック）。
 /// 追加プロバイダは runner の match に arm を足すだけ（縫い目はここと domain）。
@@ -107,11 +86,6 @@ pub struct AiSettings {
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  #[test]
-  fn ai_error_displays_messages() {
-    assert_eq!(AiError::Other("x".into()).to_string(), "x");
-  }
 
   #[test]
   fn provider_defaults_to_ollama_and_serializes_camel_case() {

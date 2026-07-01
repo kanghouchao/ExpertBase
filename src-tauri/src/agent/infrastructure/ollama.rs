@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::agent::AiError;
+use crate::error::AppError;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -30,19 +30,22 @@ pub fn available(base_url: &str) -> bool {
 }
 
 /// ローカルのモデル一覧を返す（各モデルの thinking / tools 能力を /api/show で補う）。base_url は解決済み。
-pub fn list_models(base_url: &str) -> Result<Vec<OllamaModel>, AiError> {
+pub fn list_models(base_url: &str) -> Result<Vec<OllamaModel>, AppError> {
   let client = reqwest::blocking::Client::builder()
     .timeout(Duration::from_secs(3))
     .build()
-    .map_err(|e| AiError::Network(e.to_string()))?;
+    .map_err(|e| AppError::param("err.agent.network", "detail", e))?;
   let resp = client
     .get(format!("{base_url}/api/tags"))
     .send()
-    .map_err(|e| AiError::Network(e.to_string()))?;
+    .map_err(|e| AppError::param("err.agent.network", "detail", e))?;
   let status = resp.status();
-  let text = resp.text().map_err(|e| AiError::Network(e.to_string()))?;
+  let text = resp.text().map_err(|e| AppError::param("err.agent.network", "detail", e))?;
   if status.as_u16() != 200 {
-    return Err(AiError::Other(format!("Ollama 模型列表读取失败({status}): {text}")));
+    return Err(AppError::params(
+      "err.agent.modelListFailed",
+      [("status", status.to_string()), ("detail", text)],
+    ));
   }
   let mut models = parse_models_response(&text)?;
   // 各モデルの thinking / tools 能力を /api/show で補う（ローカル・高速、1 リクエストで両方）。
@@ -70,8 +73,8 @@ struct TagModel {
   name: String,
 }
 
-fn parse_models_response(body: &str) -> Result<Vec<OllamaModel>, AiError> {
-  let tags: TagsResponse = serde_json::from_str(body).map_err(|e| AiError::Other(e.to_string()))?;
+fn parse_models_response(body: &str) -> Result<Vec<OllamaModel>, AppError> {
+  let tags: TagsResponse = serde_json::from_str(body).map_err(AppError::generic)?;
   Ok(tags
     .models
     .into_iter()

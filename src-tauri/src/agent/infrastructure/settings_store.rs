@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::agent::domain::AiSettings;
+use crate::error::AppError;
 
 /// グローバル設定ディレクトリ（ユーザーホーム直下、kb と共用）。
 const CONFIG_DIR: &str = ".expertBase";
@@ -16,23 +17,23 @@ fn settings_path(home: &Path) -> PathBuf {
 }
 
 /// AI 設定を読み込む。ファイルが無ければ既定値（Ollama）を返す。
-pub fn load(home: &Path) -> Result<AiSettings, String> {
+pub fn load(home: &Path) -> Result<AiSettings, AppError> {
   let path = settings_path(home);
   if !path.exists() {
     return Ok(AiSettings::default());
   }
-  let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-  toml::from_str(&text).map_err(|e| e.to_string())
+  let text = fs::read_to_string(&path).map_err(AppError::generic)?;
+  toml::from_str(&text).map_err(AppError::generic)
 }
 
 /// AI 設定を書き込む。`.expertBase` ディレクトリが無ければ作成する。
-pub fn save(home: &Path, settings: &AiSettings) -> Result<(), String> {
+pub fn save(home: &Path, settings: &AiSettings) -> Result<(), AppError> {
   let path = settings_path(home);
   if let Some(dir) = path.parent() {
-    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(dir).map_err(AppError::generic)?;
   }
-  let text = toml::to_string_pretty(settings).map_err(|e| e.to_string())?;
-  fs::write(path, text).map_err(|e| e.to_string())
+  let text = toml::to_string_pretty(settings).map_err(AppError::generic)?;
+  fs::write(path, text).map_err(AppError::generic)
 }
 
 #[cfg(test)]

@@ -22,7 +22,8 @@ use rig_core::streaming::{StreamedAssistantContent, StreamedUserContent, Streami
 use rig_core::tool::ToolDyn;
 use rig_core::OneOrMany;
 
-use crate::agent::{resolve_base_url, AiError, ChatTurn, Provider, StreamProgress};
+use crate::agent::{resolve_base_url, ChatTurn, Provider, StreamProgress};
+use crate::error::AppError;
 
 /// エージェントの暴走（無限ツール呼び出し）を抑える反復上限。
 const MAX_TURNS: usize = 6;
@@ -40,10 +41,10 @@ pub async fn run(
   messages: Vec<ChatTurn>,
   cancel: Arc<AtomicBool>,
   tx: &UnboundedSender<StreamProgress>,
-) -> Result<String, AiError> {
+) -> Result<String, AppError> {
   // 直近のユーザー発話をプロンプト、それ以前を履歴に分ける。
   let Some((last, rest)) = messages.split_last() else {
-    return Err(AiError::Other("対話メッセージが空です".into()));
+    return Err(AppError::code("err.agent.emptyConversation"));
   };
   let history: Vec<Message> = rest.iter().map(turn_to_message).collect();
   let prompt = turn_to_message(last);
@@ -61,7 +62,7 @@ pub async fn run(
         .api_key(OllamaApiKey::default())
         .base_url(&base_url)
         .build()
-        .map_err(|e| AiError::Network(e.to_string()))?;
+        .map_err(|e| AppError::param("err.agent.network", "detail", e))?;
       // num_ctx は options へ、think は最上位へ（Ollama provider が additional_params を仕分ける）。
       let agent = client
         .agent(model)
@@ -79,7 +80,7 @@ pub async fn run(
         .api_key("expertbase-local") // ローカル端点は key 不要。ダミーを渡す。
         .base_url(&base_url)
         .build()
-        .map_err(|e| AiError::Network(e.to_string()))?;
+        .map_err(|e| AppError::param("err.agent.network", "detail", e))?;
       let agent = client.agent(model).preamble(system).temperature(0.6).tools(tools).build();
       drive(agent, prompt, history, cancel, tx).await
     }
@@ -93,7 +94,7 @@ async fn drive<M>(
   history: Vec<Message>,
   cancel: Arc<AtomicBool>,
   tx: &UnboundedSender<StreamProgress>,
-) -> Result<String, AiError>
+) -> Result<String, AppError>
 where
   M: CompletionModel + 'static,
   M::StreamingResponse: GetTokenUsage,
@@ -107,7 +108,7 @@ where
   while let Some(item) = stream.next().await {
     // 停止ボタン: 各チャンク前に確認。立っていれば stream を drop して即返す。
     if cancel.load(Ordering::Relaxed) {
-      return Err(AiError::Cancelled);
+      return Err(AppError::code("err.agent.cancelled"));
     }
     match item {
       Ok(MultiTurnStreamItem::StreamAssistantItem(content)) => match content {
@@ -145,7 +146,7 @@ where
         break;
       }
       Ok(_) => {}
-      Err(e) => return Err(AiError::Other(e.to_string())),
+      Err(e) => return Err(AppError::generic(e)),
     }
   }
 
@@ -186,6 +187,6 @@ mod tests {
     let err = run(Provider::Ollama, "", "m", false, "s", vec![], vec![], cancel, &tx)
       .await
       .unwrap_err();
-    assert!(matches!(err, AiError::Other(_)));
+    assert_eq!(err.code, "err.agent.emptyConversation");
   }
 }
