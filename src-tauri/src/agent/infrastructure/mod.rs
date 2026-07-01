@@ -2,3 +2,4 @@
 
 pub mod ollama;
 pub mod runner;
+pub mod settings_store;

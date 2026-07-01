@@ -34,6 +34,8 @@ pub fn run() {
       kb::interface::kb_save_entry,
       agent::interface::ai_has_key,
       agent::interface::ai_list_ollama_models,
+      agent::interface::ai_get_settings,
+      agent::interface::ai_set_settings,
       workshop::interface::workshop_chat,
       workshop::interface::workshop_get_conversation,
       workshop::interface::workshop_list_conversations,
