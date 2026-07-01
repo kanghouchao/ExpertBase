@@ -174,6 +174,7 @@ export function SettingsDialog({
                     placeholder={DEFAULT_PROVIDER_URL[ai.provider]}
                     onChange={(event) => {
                       setUrl(event.target.value);
+                      setModels([]);
                       setVerify("idle");
                     }}
                     onBlur={() => saveAi(ai)}
