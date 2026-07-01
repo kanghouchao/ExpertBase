@@ -224,7 +224,7 @@ fn search_blocking(root: &Path, query: &str) -> String {
   }
   let conn = match index::open_index(root) {
     Ok(c) => c,
-    Err(e) => return format!("(index error: {e})"),
+    Err(e) => return format!("(index error: {e:?})"),
   };
   match index::search(&conn, query) {
     Ok(hits) if !hits.is_empty() => {
@@ -237,7 +237,7 @@ fn search_blocking(root: &Path, query: &str) -> String {
         .join("\n")
     }
     Ok(_) => "(no matching entries)".to_string(),
-    Err(e) => format!("(search error: {e})"),
+    Err(e) => format!("(search error: {e:?})"),
   }
 }
 
@@ -250,11 +250,11 @@ fn write_blocking(root: &Path, source_refs: &[String], args: WriteArgs) -> Strin
   }
   let conn = match index::open_index(root) {
     Ok(c) => c,
-    Err(e) => return format!("(index error: {e})"),
+    Err(e) => return format!("(index error: {e:?})"),
   };
   match crate::workshop::application::confirm(root, &conn, title, args.cat.trim(), body, source_refs) {
     Ok(rel) => format!("Saved entry to {rel}"),
-    Err(e) => format!("(write error: {e})"),
+    Err(e) => format!("(write error: {e:?})"),
   }
 }
 

@@ -10,7 +10,8 @@ use chrono::SecondsFormat;
 use rusqlite::Connection;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::agent::{AiError, ChatTurn, Provider, StreamProgress};
+use crate::agent::{ChatTurn, Provider, StreamProgress};
+use crate::error::AppError;
 
 use super::prompt::agent_system_with;
 use crate::kb::entry::{Entry, EntryMeta};
@@ -21,9 +22,9 @@ use super::infrastructure::{history, tools};
 
 const HISTORY_PAGE_SIZE: usize = 20;
 
-fn ensure_active_kb(active_root: &Path, expected_kb_path: &str) -> Result<(), String> {
+fn ensure_active_kb(active_root: &Path, expected_kb_path: &str) -> Result<(), AppError> {
   if active_root != Path::new(expected_kb_path) {
-    return Err("知识库已切换，已取消保存对话".into());
+    return Err(AppError::code("err.workshop.kbSwitchedDuringSave"));
   }
   Ok(())
 }
@@ -34,7 +35,7 @@ pub fn save_active_conversation(
   id: Option<i64>,
   source_ids: Vec<String>,
   messages: Vec<WorkshopMessage>,
-) -> Result<WorkshopConversation, String> {
+) -> Result<WorkshopConversation, AppError> {
   let root = crate::kb::active_kb_root(home)?;
   ensure_active_kb(&root, expected_kb_path)?;
   save_conversation(&root, id, source_ids, messages)
@@ -45,17 +46,17 @@ pub fn save_conversation(
   id: Option<i64>,
   source_ids: Vec<String>,
   messages: Vec<WorkshopMessage>,
-) -> Result<WorkshopConversation, String> {
+) -> Result<WorkshopConversation, AppError> {
   let dir = history::open(root)?;
   let now = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
   history::save(&dir, id, &source_ids, &messages, &now)
 }
 
-pub fn get_conversation(root: &Path, id: i64) -> Result<WorkshopConversation, String> {
+pub fn get_conversation(root: &Path, id: i64) -> Result<WorkshopConversation, AppError> {
   history::get(&history::open(root)?, id)
 }
 
-pub fn list_conversations(root: &Path, offset: usize) -> Result<WorkshopConversationPage, String> {
+pub fn list_conversations(root: &Path, offset: usize) -> Result<WorkshopConversationPage, AppError> {
   history::list(&history::open(root)?, offset, HISTORY_PAGE_SIZE)
 }
 
@@ -74,7 +75,7 @@ pub async fn chat(
   messages: Vec<ChatTurn>,
   cancel: Arc<AtomicBool>,
   tx: UnboundedSender<StreamProgress>,
-) -> Result<String, AiError> {
+) -> Result<String, AppError> {
   let system = agent_system_with(&sources);
   let toolset = tools::build_toolset(&root, &sources);
   // base_url は設定の生値（空欄可）。空欄→provider 既定への解決は agent::run が担う。
@@ -92,7 +93,7 @@ pub fn confirm(
   cat: &str,
   body: &str,
   source_refs: &[String],
-) -> Result<String, String> {
+) -> Result<String, AppError> {
   let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
   let entry = Entry {
     meta: EntryMeta {
@@ -154,7 +155,7 @@ mod tests {
 
     let error = ensure_active_kb(&second_path, first_path.to_str().unwrap()).unwrap_err();
 
-    assert!(error.contains("知识库已切换"));
+    assert_eq!(error.code, "err.workshop.kbSwitchedDuringSave");
   }
 
   #[test]

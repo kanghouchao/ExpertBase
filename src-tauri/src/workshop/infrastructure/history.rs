@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::AppError;
 use crate::workshop::domain::{
   conversation_title, WorkshopConversation, WorkshopConversationPage, WorkshopConversationSummary,
   WorkshopMessage,
@@ -32,9 +33,9 @@ enum Line {
 }
 
 /// 会話 JSONL の置き場を用意して返す（無ければ作る）。
-pub fn open(root: &Path) -> Result<PathBuf, String> {
+pub fn open(root: &Path) -> Result<PathBuf, AppError> {
   let dir = root.join(".expertbase").join("conversations");
-  fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+  fs::create_dir_all(&dir).map_err(AppError::generic)?;
   Ok(dir)
 }
 
@@ -42,26 +43,26 @@ fn conv_path(dir: &Path, id: i64) -> PathBuf {
   dir.join(format!("{id}.jsonl"))
 }
 
-fn to_line(line: &Line) -> Result<String, String> {
-  let mut text = serde_json::to_string(line).map_err(|error| error.to_string())?;
+fn to_line(line: &Line) -> Result<String, AppError> {
+  let mut text = serde_json::to_string(line).map_err(AppError::generic)?;
   text.push('\n');
   Ok(text)
 }
 
-fn read_lines(path: &Path) -> Result<Vec<Line>, String> {
-  let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
+fn read_lines(path: &Path) -> Result<Vec<Line>, AppError> {
+  let text = fs::read_to_string(path).map_err(AppError::generic)?;
   text
     .lines()
     .filter(|line| !line.trim().is_empty())
-    .map(|line| serde_json::from_str::<Line>(line).map_err(|error| error.to_string()))
+    .map(|line| serde_json::from_str::<Line>(line).map_err(AppError::generic))
     .collect()
 }
 
 /// 次の会話 id ＝ 既存ファイル名（数値）の最大 +1。無ければ 1。
-fn next_id(dir: &Path) -> Result<i64, String> {
+fn next_id(dir: &Path) -> Result<i64, AppError> {
   let mut max = 0i64;
-  for entry in fs::read_dir(dir).map_err(|error| error.to_string())? {
-    let entry = entry.map_err(|error| error.to_string())?;
+  for entry in fs::read_dir(dir).map_err(AppError::generic)? {
+    let entry = entry.map_err(AppError::generic)?;
     if let Some(id) = entry
       .path()
       .file_stem()
@@ -96,12 +97,12 @@ fn write_full(
   source_ids: &[String],
   messages: &[WorkshopMessage],
   now: &str,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
   let mut out = to_line(&Line::Meta { id, title, created_at, source_ids: source_ids.to_vec() })?;
   for message in messages {
     out.push_str(&to_line(&Line::Msg { at: now.to_string(), message: message.clone() })?);
   }
-  fs::write(path, out).map_err(|error| error.to_string())
+  fs::write(path, out).map_err(AppError::generic)
 }
 
 pub fn save(
@@ -110,7 +111,7 @@ pub fn save(
   source_ids: &[String],
   messages: &[WorkshopMessage],
   now: &str,
-) -> Result<WorkshopConversation, String> {
+) -> Result<WorkshopConversation, AppError> {
   match id {
     None => {
       let id = next_id(dir)?;
@@ -121,7 +122,7 @@ pub fn save(
     Some(id) => {
       let path = conv_path(dir, id);
       if !path.exists() {
-        return Err(format!("conversation not found: {id}"));
+        return Err(AppError::param("err.workshop.conversationNotFound", "id", id));
       }
       let lines = read_lines(&path)?;
       let existing_count = lines.iter().filter(|line| matches!(line, Line::Msg { .. })).count();
@@ -154,14 +155,14 @@ pub fn save(
       let mut file = fs::OpenOptions::new()
         .append(true)
         .open(&path)
-        .map_err(|error| error.to_string())?;
-      file.write_all(appended.as_bytes()).map_err(|error| error.to_string())?;
+        .map_err(AppError::generic)?;
+      file.write_all(appended.as_bytes()).map_err(AppError::generic)?;
       get(dir, id)
     }
   }
 }
 
-fn build_conversation(id: i64, lines: &[Line]) -> Result<WorkshopConversation, String> {
+fn build_conversation(id: i64, lines: &[Line]) -> Result<WorkshopConversation, AppError> {
   // title/createdAt は不変、sourceIds は最新を採りたいので、いずれも最後の meta から取る。
   let (title, created_at, source_ids) = lines
     .iter()
@@ -172,7 +173,7 @@ fn build_conversation(id: i64, lines: &[Line]) -> Result<WorkshopConversation, S
       }
       _ => None,
     })
-    .ok_or_else(|| format!("conversation has no meta: {id}"))?;
+    .ok_or_else(|| AppError::param("err.workshop.conversationCorrupted", "id", id))?;
   let messages = lines
     .iter()
     .filter_map(|line| match line {
@@ -192,18 +193,18 @@ fn build_conversation(id: i64, lines: &[Line]) -> Result<WorkshopConversation, S
   Ok(WorkshopConversation { id, title, source_ids, messages, created_at, updated_at })
 }
 
-pub fn get(dir: &Path, id: i64) -> Result<WorkshopConversation, String> {
+pub fn get(dir: &Path, id: i64) -> Result<WorkshopConversation, AppError> {
   let path = conv_path(dir, id);
   if !path.exists() {
-    return Err(format!("conversation not found: {id}"));
+    return Err(AppError::param("err.workshop.conversationNotFound", "id", id));
   }
   build_conversation(id, &read_lines(&path)?)
 }
 
-pub fn list(dir: &Path, offset: usize, limit: usize) -> Result<WorkshopConversationPage, String> {
+pub fn list(dir: &Path, offset: usize, limit: usize) -> Result<WorkshopConversationPage, AppError> {
   let mut summaries: Vec<WorkshopConversationSummary> = Vec::new();
-  for entry in fs::read_dir(dir).map_err(|error| error.to_string())? {
-    let entry = entry.map_err(|error| error.to_string())?;
+  for entry in fs::read_dir(dir).map_err(AppError::generic)? {
+    let entry = entry.map_err(AppError::generic)?;
     let path = entry.path();
     if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
       continue;
@@ -332,7 +333,7 @@ mod tests {
       "2026-06-30T01:00:00.000Z",
     )
     .unwrap_err();
-    assert!(error.contains("conversation not found"));
+    assert_eq!(error.code, "err.workshop.conversationNotFound");
   }
 
   #[test]

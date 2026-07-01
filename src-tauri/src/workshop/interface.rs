@@ -8,6 +8,7 @@ use tauri::ipc::Channel;
 use tauri::{Manager, State};
 
 use crate::agent::{ChatTurn, Provider, StreamProgress};
+use crate::error::AppError;
 use crate::workshop::application;
 use crate::workshop::domain::{WorkshopConversation, WorkshopConversationPage, WorkshopMessage};
 
@@ -25,13 +26,13 @@ pub async fn workshop_save_conversation(
   id: Option<i64>,
   source_ids: Vec<String>,
   messages: Vec<WorkshopMessage>,
-) -> Result<WorkshopConversation, String> {
-  let home = app.path().home_dir().map_err(|error| error.to_string())?;
+) -> Result<WorkshopConversation, AppError> {
+  let home = app.path().home_dir().map_err(AppError::generic)?;
   tauri::async_runtime::spawn_blocking(move || {
     application::save_active_conversation(&home, &kb_path, id, source_ids, messages)
   })
   .await
-  .map_err(|error| error.to_string())?
+  .map_err(AppError::generic)?
 }
 
 /// アクティブ KB から指定した対話を取得する。
@@ -39,14 +40,14 @@ pub async fn workshop_save_conversation(
 pub async fn workshop_get_conversation(
   app: tauri::AppHandle,
   id: i64,
-) -> Result<WorkshopConversation, String> {
-  let home = app.path().home_dir().map_err(|error| error.to_string())?;
+) -> Result<WorkshopConversation, AppError> {
+  let home = app.path().home_dir().map_err(AppError::generic)?;
   tauri::async_runtime::spawn_blocking(move || {
     let root = crate::kb::active_kb_root(&home)?;
     application::get_conversation(&root, id)
   })
   .await
-  .map_err(|error| error.to_string())?
+  .map_err(AppError::generic)?
 }
 
 /// アクティブ KB の対話履歴を更新日時の降順で取得する。
@@ -54,14 +55,14 @@ pub async fn workshop_get_conversation(
 pub async fn workshop_list_conversations(
   app: tauri::AppHandle,
   offset: usize,
-) -> Result<WorkshopConversationPage, String> {
-  let home = app.path().home_dir().map_err(|error| error.to_string())?;
+) -> Result<WorkshopConversationPage, AppError> {
+  let home = app.path().home_dir().map_err(AppError::generic)?;
   tauri::async_runtime::spawn_blocking(move || {
     let root = crate::kb::active_kb_root(&home)?;
     application::list_conversations(&root, offset)
   })
   .await
-  .map_err(|error| error.to_string())?
+  .map_err(AppError::generic)?
 }
 
 /// 添付素材 + 会話履歴で対話エージェントを 1 会話分回す。素材は本文を注入せず、検証済みの id
@@ -81,9 +82,9 @@ pub async fn workshop_chat(
   think: bool,
   tools: bool,
   on_event: Channel<StreamProgress>,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
   let _ = tools;
-  let home = app.path().home_dir().map_err(|e| e.to_string())?;
+  let home = app.path().home_dir().map_err(AppError::generic)?;
   // 新しい生成の開始時にフラグを倒す（前回の停止が残らないように）。
   cancel.0.store(false, Ordering::Relaxed);
   let cancel_flag = cancel.0.clone();
@@ -92,14 +93,14 @@ pub async fn workshop_chat(
   // 本文はここでは読まない＝AI が read_source で個別に読む。id は外部ファイルの絶対パスのみ。
   // provider はグローバル設定（前端の設定画面で選択）。model は会話ごとに前端が渡す。
   let (root, sources, provider, base_url) = tauri::async_runtime::spawn_blocking(
-    move || -> Result<(PathBuf, Vec<String>, Provider, String), String> {
+    move || -> Result<(PathBuf, Vec<String>, Provider, String), AppError> {
       let (root, _conn) = crate::kb::open_active(&home)?;
       let mut sources = Vec::with_capacity(source_ids.len());
       for id in &source_ids {
         if std::path::Path::new(id).is_absolute() {
           sources.push(id.clone());
         } else {
-          return Err(format!("source must be an absolute path: {id}"));
+          return Err(AppError::param("err.workshop.sourceMustBeAbsolute", "id", id));
         }
       }
       let settings = crate::agent::settings_store::load(&home)?;
@@ -112,7 +113,7 @@ pub async fn workshop_chat(
     },
   )
   .await
-  .map_err(|e| e.to_string())??;
+  .map_err(AppError::generic)??;
 
   // Rig エージェントを spawn し、進捗 mpsc を Channel へ排出する。tx が drop されると rx が閉じる。
   let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<StreamProgress>();
@@ -122,7 +123,7 @@ pub async fn workshop_chat(
   while let Some(p) = rx.recv().await {
     let _ = on_event.send(p);
   }
-  agent.await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
+  agent.await.map_err(AppError::generic)?
 }
 
 /// 進行中の生成を中断する（停止ボタン）。共有フラグを立てるだけ。
