@@ -9,8 +9,8 @@ use chrono::SecondsFormat;
 use rusqlite::Connection;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::ai::agent::agent_system_with;
-use crate::ai::{AiError, ChatTurn, StreamProgress};
+use crate::agent::agent::agent_system_with;
+use crate::agent::{AiError, ChatTurn, StreamProgress};
 use crate::kb::entry::{Entry, EntryMeta};
 use crate::kb::{index, store};
 
