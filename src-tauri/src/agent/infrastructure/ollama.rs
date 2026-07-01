@@ -9,8 +9,6 @@ use serde_json::json;
 
 use crate::agent::AiError;
 
-const API_BASE: &str = "http://127.0.0.1:11434";
-
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OllamaModel {
@@ -21,24 +19,24 @@ pub struct OllamaModel {
   pub tools: bool,
 }
 
-/// Ollama が起動しているか（/api/version への短時間 ping）。
-pub fn available() -> bool {
+/// Ollama が起動しているか（`{base_url}/api/version` への短時間 ping）。base_url は解決済み。
+pub fn available(base_url: &str) -> bool {
   reqwest::blocking::Client::builder()
     .timeout(Duration::from_millis(800))
     .build()
-    .and_then(|client| client.get(format!("{API_BASE}/api/version")).send())
+    .and_then(|client| client.get(format!("{base_url}/api/version")).send())
     .map(|resp| resp.status().is_success())
     .unwrap_or(false)
 }
 
-/// ローカルのモデル一覧を返す（各モデルの thinking / tools 能力を /api/show で補う）。
-pub fn list_models() -> Result<Vec<OllamaModel>, AiError> {
+/// ローカルのモデル一覧を返す（各モデルの thinking / tools 能力を /api/show で補う）。base_url は解決済み。
+pub fn list_models(base_url: &str) -> Result<Vec<OllamaModel>, AiError> {
   let client = reqwest::blocking::Client::builder()
     .timeout(Duration::from_secs(3))
     .build()
     .map_err(|e| AiError::Network(e.to_string()))?;
   let resp = client
-    .get(format!("{API_BASE}/api/tags"))
+    .get(format!("{base_url}/api/tags"))
     .send()
     .map_err(|e| AiError::Network(e.to_string()))?;
   let status = resp.status();
@@ -50,7 +48,7 @@ pub fn list_models() -> Result<Vec<OllamaModel>, AiError> {
   // 各モデルの thinking / tools 能力を /api/show で補う（ローカル・高速、1 リクエストで両方）。
   for model in &mut models {
     if let Ok(show) = client
-      .post(format!("{API_BASE}/api/show"))
+      .post(format!("{base_url}/api/show"))
       .json(&json!({ "model": model.name }))
       .send()
       .and_then(|r| r.text())

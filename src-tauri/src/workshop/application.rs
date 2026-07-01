@@ -66,7 +66,7 @@ pub fn list_conversations(root: &Path, offset: usize) -> Result<WorkshopConversa
 #[allow(clippy::too_many_arguments)]
 pub async fn chat(
   provider: Provider,
-  base_url: Option<String>,
+  base_url: String,
   model: String,
   think: bool,
   root: PathBuf,
@@ -77,8 +77,8 @@ pub async fn chat(
 ) -> Result<String, AiError> {
   let system = agent_system_with(&sources);
   let toolset = tools::build_toolset(&root, &sources);
-  crate::agent::run(provider, base_url.as_deref(), &model, think, &system, toolset, messages, cancel, &tx)
-    .await
+  // base_url は設定の生値（空欄可）。空欄→provider 既定への解決は agent::run が担う。
+  crate::agent::run(provider, &base_url, &model, think, &system, toolset, messages, cancel, &tx).await
 }
 
 /// 承認された内容を `entries/` に確定し、インデックスを更新する。

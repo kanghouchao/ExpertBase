@@ -54,6 +54,7 @@ mod tests {
     let settings = AiSettings {
       provider: Provider::LlamaApp,
       model: "qwen2.5".into(),
+      ollama_url: "http://127.0.0.1:11434".into(),
       llama_app_url: "http://127.0.0.1:8080/v1".into(),
     };
     save(tmp.path(), &settings).unwrap();

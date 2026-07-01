@@ -73,11 +73,10 @@ export function WorkshopView() {
   const [hasOllama, setHasOllama] = useState(false);
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
-  // AI 設定（provider はグローバル選択、settingsModel は既定モデル、settingsUrl は llama.app の URL）。
-  // 設定画面で編集する。
+  // AI 設定（provider はグローバル選択、settingsModel は既定モデル）。設定画面で編集する。
+  // URL は空欄でも後端が provider 既定へ解決するので、ここでは URL を持たない。
   const [provider, setProvider] = useState<AiProvider>("ollama");
   const [settingsModel, setSettingsModel] = useState("");
-  const [settingsUrl, setSettingsUrl] = useState("");
   // 確定済み（存盤済み）メッセージ。生成中の対話を見ているときはストアの baseHistory を描く。
   const [messages, setMessages] = useState<Msg[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -106,22 +105,27 @@ export function WorkshopView() {
   useEffect(() => {
     if (!available) return;
     void (async () => {
+      // 1) 設定（provider / 既定モデル）は単独で読む。Ollama の可用性に依存させない
+      //    ＝ Ollama が落ちていても llama.app を選べる（設定読み込みを巻き込まない）。
+      let defaultModel = "";
       try {
-        const [settings, ollama, modelList] = await Promise.all([
-          getAiSettings(),
-          aiHasKey(),
-          listOllamaModels(),
-        ]);
+        const settings = await getAiSettings();
         setProvider(settings.provider);
         setSettingsModel(settings.model);
-        setSettingsUrl(settings.llamaAppUrl);
+        defaultModel = settings.model;
+      } catch {
+        // 設定読み込み失敗は既定（Ollama / 空）のまま扱う。
+      }
+      // 2) Ollama の探測とモデル一覧は別系統。失敗しても上の設定は保持する。
+      try {
+        const [ollama, modelList] = await Promise.all([aiHasKey(), listOllamaModels()]);
         setHasOllama(ollama);
         setModels(modelList);
         // 既定モデルの nudge: 設定の既定 → Qwen3（2026 本地工具调用最稳）→ 任意の tools 対応 → 先頭。
         setSelectedModel((current) => {
           const has = (name: string) => modelList.some((model) => model.name === name);
           if (current && has(current)) return current;
-          if (settings.model && has(settings.model)) return settings.model;
+          if (defaultModel && has(defaultModel)) return defaultModel;
           return (
             modelList.find((model) => /qwen3/i.test(model.name))?.name ??
             modelList.find((model) => model.tools)?.name ??
@@ -169,13 +173,9 @@ export function WorkshopView() {
   const selectedTools = selectedModelInfo?.tools ?? false;
 
   // 工作坊は tools 対応モデル必須（素材を read_source で読む・条目を write_entry で書くため）。
-  // llama.app は URL 未設定だと生成できない（後端も弾くが、ここで無駄な往復を防ぎボタンを無効化）。
+  // URL は空欄でも既定へ解決されるのでゲートしない（llama.app は既定モデルが選ばれていれば生成可）。
   const canGenerate =
-    visibleHasOllama &&
-    !!visibleSelectedModel &&
-    selectedTools &&
-    (!isLlamaApp || !!settingsUrl.trim()) &&
-    !someoneGenerating;
+    visibleHasOllama && !!visibleSelectedModel && selectedTools && !someoneGenerating;
 
   // 選択リスト/チップで素材をトグル選択（純ローカル状態。プレビューでも動く）。
   function toggleSource(material: RawMaterial) {

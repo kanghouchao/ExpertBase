@@ -13,15 +13,16 @@ use serde_json::json;
 use tokio::sync::mpsc::UnboundedSender;
 
 use rig_core::agent::{Agent, MultiTurnStreamItem};
-use rig_core::client::{CompletionClient, Nothing};
+use rig_core::client::CompletionClient;
 use rig_core::completion::{CompletionModel, GetTokenUsage};
 use rig_core::message::{Message, Text, ToolResultContent};
+use rig_core::providers::ollama::OllamaApiKey;
 use rig_core::providers::{ollama, openai};
 use rig_core::streaming::{StreamedAssistantContent, StreamedUserContent, StreamingChat};
 use rig_core::tool::ToolDyn;
 use rig_core::OneOrMany;
 
-use crate::agent::{AiError, ChatTurn, Provider, StreamProgress};
+use crate::agent::{resolve_base_url, AiError, ChatTurn, Provider, StreamProgress};
 
 /// エージェントの暴走（無限ツール呼び出し）を抑える反復上限。
 const MAX_TURNS: usize = 6;
@@ -31,7 +32,7 @@ const MAX_TURNS: usize = 6;
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
   provider: Provider,
-  base_url: Option<&str>,
+  base_url: &str,
   model: &str,
   think: bool,
   system: &str,
@@ -50,9 +51,17 @@ pub async fn run(
   // 送信済み・最初のトークン待ち（モデルのロード中を含む）。
   let _ = tx.send(StreamProgress::LoadingModel);
 
+  // 設定の生 URL を解決（空欄は provider 既定へ。「設定可能だが既定値を持つ」）。
+  let base_url = resolve_base_url(provider, base_url);
+
   match provider {
     Provider::Ollama => {
-      let client = ollama::Client::new(Nothing).map_err(|e| AiError::Network(e.to_string()))?;
+      // base_url を明示指定（rig の既定 localhost に頼らず、設定した remote Ollama も効く）。ローカルは no-auth。
+      let client = ollama::Client::builder()
+        .api_key(OllamaApiKey::default())
+        .base_url(&base_url)
+        .build()
+        .map_err(|e| AiError::Network(e.to_string()))?;
       // num_ctx は options へ、think は最上位へ（Ollama provider が additional_params を仕分ける）。
       let agent = client
         .agent(model)
@@ -64,15 +73,11 @@ pub async fn run(
       drive(agent, prompt, history, cancel, tx).await
     }
     Provider::LlamaApp => {
-      // ponytail: llama.app は OpenAI 互換のローカル端点と仮定。独自プロトコルならこの arm 本体だけ差し替える。
-      // interface は未入力でも Some("") を渡す（None にならない）ので、空白も未設定として弾く。
-      let base_url = base_url.map(str::trim).filter(|s| !s.is_empty());
-      let Some(base_url) = base_url else {
-        return Err(AiError::Other("llama.app の URL が未設定です".into()));
-      };
+      // ponytail: llama.app = llama.cpp の `llama serve`（OpenAI 互換ローカル端点）と仮定。
+      // 独自プロトコルならこの arm 本体だけ差し替える（縫い目は不変）。ローカルは key 不要。
       let client = openai::Client::builder()
         .api_key("expertbase-local") // ローカル端点は key 不要。ダミーを渡す。
-        .base_url(base_url)
+        .base_url(&base_url)
         .build()
         .map_err(|e| AiError::Network(e.to_string()))?;
       let agent = client.agent(model).preamble(system).temperature(0.6).tools(tools).build();
@@ -171,56 +176,14 @@ fn first_text(content: &OneOrMany<ToolResultContent>) -> String {
 mod tests {
   use super::*;
 
-  #[tokio::test]
-  async fn run_errors_when_llama_app_url_missing() {
-    // llama.app 選択で URL 未設定なら、サーバへ触れず即エラー（縫い目のガード）。
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let cancel = Arc::new(AtomicBool::new(false));
-    let err = run(
-      Provider::LlamaApp,
-      None,
-      "some-model",
-      false,
-      "system",
-      vec![],
-      vec![ChatTurn { role: "user".into(), content: "hi".into() }],
-      cancel,
-      &tx,
-    )
-    .await
-    .unwrap_err();
-    assert!(matches!(err, AiError::Other(_)));
-  }
-
-  #[tokio::test]
-  async fn run_errors_when_llama_app_url_blank() {
-    // URL が空文字（前端が未入力のまま送る実経路。interface は Some("") を渡す）でも、
-    // None と同様に即エラーにする＝ base_url None ガードだけでは実運用の未設定を捕らえられない。
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let cancel = Arc::new(AtomicBool::new(false));
-    let err = run(
-      Provider::LlamaApp,
-      Some("   "),
-      "some-model",
-      false,
-      "system",
-      vec![],
-      vec![ChatTurn { role: "user".into(), content: "hi".into() }],
-      cancel,
-      &tx,
-    )
-    .await
-    .unwrap_err();
-    // variant ではなく明示メッセージで判定する（drive はどんな流エラーも Other に包むため、
-    // variant だけでは「未設定ガード」と「サーバ接続失敗」を区別できない）。
-    assert!(err.to_string().contains("未設定"), "空 URL は未設定ガードに落ちるべき: {err}");
-  }
-
+  // URL 解決（空欄→provider 既定）は domain::resolve_base_url で単体テスト済み。
+  // 空欄はもはやエラーにせず既定端点へ倒すため、旧「URL 未設定でエラー」テストは廃止。
   #[tokio::test]
   async fn run_errors_on_empty_messages() {
+    // 空メッセージはネットワークに触れる前に即エラー（base_url は空でも解決前に返る）。
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let cancel = Arc::new(AtomicBool::new(false));
-    let err = run(Provider::Ollama, None, "m", false, "s", vec![], vec![], cancel, &tx)
+    let err = run(Provider::Ollama, "", "m", false, "s", vec![], vec![], cancel, &tx)
       .await
       .unwrap_err();
     assert!(matches!(err, AiError::Other(_)));
