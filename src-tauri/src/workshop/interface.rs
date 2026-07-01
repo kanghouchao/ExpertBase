@@ -88,10 +88,11 @@ pub async fn workshop_chat(
   cancel.0.store(false, Ordering::Relaxed);
   let cancel_flag = cancel.0.clone();
 
-  // 素材 id の検証はブロッキング寄り。root + 検証済み sources を別スレッドで用意。
+  // 素材 id の検証 + AI 設定の読み込みはブロッキング寄り。root + 検証済み sources + provider を別スレッドで用意。
   // 本文はここでは読まない＝AI が read_source で個別に読む。id は外部ファイルの絶対パスのみ。
-  let (root, sources) =
-    tauri::async_runtime::spawn_blocking(move || -> Result<(PathBuf, Vec<String>), String> {
+  // provider はグローバル設定（前端の設定画面で選択）。model は会話ごとに前端が渡す。
+  let (root, sources, provider, base_url) = tauri::async_runtime::spawn_blocking(
+    move || -> Result<(PathBuf, Vec<String>, Provider, Option<String>), String> {
       let (root, _conn) = crate::kb::open_active(&home)?;
       let mut sources = Vec::with_capacity(source_ids.len());
       for id in &source_ids {
@@ -101,16 +102,21 @@ pub async fn workshop_chat(
           return Err(format!("source must be an absolute path: {id}"));
         }
       }
-      Ok((root, sources))
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+      let settings = crate::agent::settings_store::load(&home)?;
+      let base_url = match settings.provider {
+        Provider::LlamaApp => Some(settings.llama_app_url),
+        Provider::Ollama => None,
+      };
+      Ok((root, sources, settings.provider, base_url))
+    },
+  )
+  .await
+  .map_err(|e| e.to_string())??;
 
   // Rig エージェントを spawn し、進捗 mpsc を Channel へ排出する。tx が drop されると rx が閉じる。
   let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<StreamProgress>();
-  // provider は設定から読む（Task 5 で配線）。現状は既定の Ollama を素通しし、挙動は不変。
   let agent = tauri::async_runtime::spawn(application::chat(
-    Provider::Ollama, None, model, think, root, sources, messages, cancel_flag, tx,
+    provider, base_url, model, think, root, sources, messages, cancel_flag, tx,
   ));
   while let Some(p) = rx.recv().await {
     let _ = on_event.send(p);
