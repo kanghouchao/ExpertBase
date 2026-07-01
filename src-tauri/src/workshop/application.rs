@@ -9,7 +9,7 @@ use chrono::SecondsFormat;
 use rusqlite::Connection;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::agent::{AiError, ChatTurn, StreamProgress};
+use crate::agent::{AiError, ChatTurn, Provider, StreamProgress};
 
 use super::prompt::agent_system_with;
 use crate::kb::entry::{Entry, EntryMeta};
@@ -64,6 +64,8 @@ pub fn list_conversations(root: &Path, offset: usize) -> Result<WorkshopConversa
 /// だけ起きる＝確定の主導権はユーザー。素材は全て外部絶対パスで、KB へは複製しない。
 #[allow(clippy::too_many_arguments)]
 pub async fn chat(
+  provider: Provider,
+  base_url: Option<String>,
   model: String,
   think: bool,
   root: PathBuf,
@@ -73,7 +75,19 @@ pub async fn chat(
   tx: UnboundedSender<StreamProgress>,
 ) -> Result<String, AiError> {
   let system = agent_system_with(&sources);
-  rig_agent::run(&model, think, &system, &root, &sources, messages, cancel, &tx).await
+  rig_agent::run(
+    provider,
+    base_url.as_deref(),
+    &model,
+    think,
+    &system,
+    &root,
+    &sources,
+    messages,
+    cancel,
+    &tx,
+  )
+  .await
 }
 
 /// 承認された内容を `entries/` に確定し、インデックスを更新する。

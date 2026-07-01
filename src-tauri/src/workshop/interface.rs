@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tauri::ipc::Channel;
 use tauri::{Manager, State};
 
-use crate::agent::{ChatTurn, StreamProgress};
+use crate::agent::{ChatTurn, Provider, StreamProgress};
 use crate::workshop::application;
 use crate::workshop::domain::{WorkshopConversation, WorkshopConversationPage, WorkshopMessage};
 
@@ -108,8 +108,9 @@ pub async fn workshop_chat(
 
   // Rig エージェントを spawn し、進捗 mpsc を Channel へ排出する。tx が drop されると rx が閉じる。
   let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<StreamProgress>();
+  // provider は設定から読む（Task 5 で配線）。現状は既定の Ollama を素通しし、挙動は不変。
   let agent = tauri::async_runtime::spawn(application::chat(
-    model, think, root, sources, messages, cancel_flag, tx,
+    Provider::Ollama, None, model, think, root, sources, messages, cancel_flag, tx,
   ));
   while let Some(p) = rx.recv().await {
     let _ = on_event.send(p);
