@@ -62,6 +62,18 @@ pub enum Provider {
   LlamaApp,
 }
 
+/// AI 設定（`~/.expertBase/ai.toml` に永続化、前端の設定画面で編集）。
+/// provider はグローバル選択、model は既定モデル、llama_app_url は llama.app のローカル端点。
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSettings {
+  pub provider: Provider,
+  #[serde(default)]
+  pub model: String,
+  #[serde(default)]
+  pub llama_app_url: String,
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
