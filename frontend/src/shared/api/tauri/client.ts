@@ -1,6 +1,9 @@
 import { invoke, isTauri, Channel } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
+/** 後端 IPC の統一エラー契約。code は前端辞書の完全な key（例 "err.kb.nameRequired"）。*/
+export type AppError = { code: string; params?: Record<string, string> };
+
 // ナレッジベースはパスを一意な識別子として扱う（Rust 側と同じ契約）。
 export type Kb = {
   name: string;
