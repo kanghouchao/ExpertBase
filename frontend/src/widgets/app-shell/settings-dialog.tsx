@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import { cn } from "@/shared/lib/utils";
 import {
   Dialog,
@@ -8,8 +10,22 @@ import {
   DialogTitle,
 } from "@/shared/ui/dialog";
 import { Switch } from "@/shared/ui/switch";
+import { Input } from "@/shared/ui/input";
+import { SegTabs } from "@/shared/ui/seg-tabs";
 import { ACCENTS, useI18n, useTheme } from "@/shared/providers/providers";
 import { LANGS } from "@/shared/i18n/dictionaries";
+import {
+  getAiSettings,
+  setAiSettings,
+  type AiProvider,
+  type AiSettings,
+} from "@/shared/api/tauri/client";
+
+const PROVIDERS = ["ollama", "llamaApp"] as const;
+const PROVIDER_LABELS: Record<AiProvider, string> = {
+  ollama: "Ollama",
+  llamaApp: "llama.app",
+};
 
 // The product equivalent of the prototype's dev-only Tweaks panel + Profile
 // modal: appearance (dark + accent) and interface language.
@@ -22,6 +38,18 @@ export function SettingsDialog({
 }) {
   const { dark, setDark, accent, setAccent } = useTheme();
   const { lang, setLang, t } = useI18n();
+
+  // AI 設定はダイアログを開くたびに読み直す。編集は即保存（テーマ/言語と同じ即時反映）。
+  const [ai, setAi] = useState<AiSettings | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    void getAiSettings().then(setAi);
+  }, [open]);
+
+  function saveAi(next: AiSettings) {
+    setAi(next);
+    void setAiSettings(next);
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -82,6 +110,46 @@ export function SettingsDialog({
               })}
             </div>
           </div>
+
+          {ai && (
+            <>
+              <div className="font-mono text-[10px] font-semibold tracking-[0.12em] text-ink-faint uppercase">
+                {t("cfg.ai")}
+              </div>
+
+              <div className="flex flex-col gap-2.5">
+                <span className="text-sm font-medium">{t("cfg.aiProvider")}</span>
+                <SegTabs<AiProvider>
+                  tabs={PROVIDERS}
+                  value={ai.provider}
+                  onChange={(provider) => saveAi({ ...ai, provider })}
+                  label={(p) => PROVIDER_LABELS[p]}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2.5">
+                <span className="text-sm font-medium">{t("cfg.aiModel")}</span>
+                <Input
+                  value={ai.model}
+                  placeholder={ai.provider === "ollama" ? "qwen3:8b" : "qwen2.5"}
+                  onChange={(event) => setAi({ ...ai, model: event.target.value })}
+                  onBlur={() => saveAi(ai)}
+                />
+              </div>
+
+              {ai.provider === "llamaApp" && (
+                <div className="flex flex-col gap-2.5">
+                  <span className="text-sm font-medium">{t("cfg.aiUrl")}</span>
+                  <Input
+                    value={ai.llamaAppUrl}
+                    placeholder="http://127.0.0.1:8080/v1"
+                    onChange={(event) => setAi({ ...ai, llamaAppUrl: event.target.value })}
+                    onBlur={() => saveAi(ai)}
+                  />
+                </div>
+              )}
+            </>
+          )}
         </div>
       </DialogContent>
     </Dialog>
