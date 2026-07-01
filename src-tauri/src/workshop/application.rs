@@ -1,5 +1,6 @@
 //! workshop アプリケーション層。対話エージェントの編成と条目確定のユースケース。
-//! kb（検索・索引・FS）と Rig エージェント（infra）を編成する。ループ/ツール実体は Rig が持つ。
+//! kb（検索・索引・FS）と汎用 agent を編成する。ツールは infra（tools）で組んで注入し、
+//! ループ/推論は agent が持つ。
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -16,7 +17,7 @@ use crate::kb::entry::{Entry, EntryMeta};
 use crate::kb::{index, store};
 
 use super::domain::{WorkshopConversation, WorkshopConversationPage, WorkshopMessage};
-use super::infrastructure::{history, rig_agent};
+use super::infrastructure::{history, tools};
 
 const HISTORY_PAGE_SIZE: usize = 20;
 
@@ -75,19 +76,9 @@ pub async fn chat(
   tx: UnboundedSender<StreamProgress>,
 ) -> Result<String, AiError> {
   let system = agent_system_with(&sources);
-  rig_agent::run(
-    provider,
-    base_url.as_deref(),
-    &model,
-    think,
-    &system,
-    &root,
-    &sources,
-    messages,
-    cancel,
-    &tx,
-  )
-  .await
+  let toolset = tools::build_toolset(&root, &sources);
+  crate::agent::run(provider, base_url.as_deref(), &model, think, &system, toolset, messages, cancel, &tx)
+    .await
 }
 
 /// 承認された内容を `entries/` に確定し、インデックスを更新する。

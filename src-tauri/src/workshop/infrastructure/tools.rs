@@ -25,6 +25,19 @@ fn remember_source(used_sources: &UsedSources, source: &str) {
   }
 }
 
+/// 工作坊のツール一式を組んで汎用 `agent` へ注入するために返す。
+/// read_source（素材読み取り）・search_kb・write_entry・fetch_web を常に登録する。
+/// used_sources は read/fetch で読んだ素材を write_entry が entry.sources に残すための共有状態。
+pub(crate) fn build_toolset(root: &Path, sources: &[String]) -> Vec<Box<dyn rig_core::tool::ToolDyn>> {
+  let used_sources: UsedSources = Arc::new(Mutex::new(Vec::new()));
+  vec![
+    Box::new(ReadSource { sources: sources.to_vec(), used_sources: used_sources.clone() }),
+    Box::new(SearchKb { root: root.to_path_buf() }),
+    Box::new(WriteEntry { root: root.to_path_buf(), used_sources: used_sources.clone() }),
+    Box::new(FetchWeb { used_sources }),
+  ]
+}
+
 /// read_source の引数。id（素材識別子）を緩く受ける。
 #[derive(Deserialize)]
 pub struct ReadArgs {
