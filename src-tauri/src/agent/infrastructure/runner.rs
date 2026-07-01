@@ -65,6 +65,8 @@ pub async fn run(
     }
     Provider::LlamaApp => {
       // ponytail: llama.app は OpenAI 互換のローカル端点と仮定。独自プロトコルならこの arm 本体だけ差し替える。
+      // interface は未入力でも Some("") を渡す（None にならない）ので、空白も未設定として弾く。
+      let base_url = base_url.map(str::trim).filter(|s| !s.is_empty());
       let Some(base_url) = base_url else {
         return Err(AiError::Other("llama.app の URL が未設定です".into()));
       };
@@ -188,6 +190,30 @@ mod tests {
     .await
     .unwrap_err();
     assert!(matches!(err, AiError::Other(_)));
+  }
+
+  #[tokio::test]
+  async fn run_errors_when_llama_app_url_blank() {
+    // URL が空文字（前端が未入力のまま送る実経路。interface は Some("") を渡す）でも、
+    // None と同様に即エラーにする＝ base_url None ガードだけでは実運用の未設定を捕らえられない。
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let err = run(
+      Provider::LlamaApp,
+      Some("   "),
+      "some-model",
+      false,
+      "system",
+      vec![],
+      vec![ChatTurn { role: "user".into(), content: "hi".into() }],
+      cancel,
+      &tx,
+    )
+    .await
+    .unwrap_err();
+    // variant ではなく明示メッセージで判定する（drive はどんな流エラーも Other に包むため、
+    // variant だけでは「未設定ガード」と「サーバ接続失敗」を区別できない）。
+    assert!(err.to_string().contains("未設定"), "空 URL は未設定ガードに落ちるべき: {err}");
   }
 
   #[tokio::test]
