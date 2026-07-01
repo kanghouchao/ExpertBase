@@ -1,6 +1,6 @@
 //! ai インターフェイス層。Tauri コマンド（IPC アダプタ）。
 
-use crate::ai::infrastructure::ollama;
+use crate::agent::infrastructure::ollama;
 
 #[tauri::command]
 pub fn ai_has_key() -> Result<bool, String> {

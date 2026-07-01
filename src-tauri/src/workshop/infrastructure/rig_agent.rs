@@ -23,7 +23,7 @@ use rig_core::tool::ToolDyn;
 use rig_core::OneOrMany;
 
 use super::tools::{FetchWeb, ReadSource, SearchKb, WriteEntry};
-use crate::ai::{AiError, ChatTurn, StreamProgress};
+use crate::agent::{AiError, ChatTurn, StreamProgress};
 
 /// エージェントの暴走（無限ツール呼び出し）を抑える反復上限。
 const MAX_TURNS: usize = 6;

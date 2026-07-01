@@ -1,4 +1,4 @@
-mod ai;
+mod agent;
 mod extract;
 mod kb;
 mod workshop;
@@ -32,8 +32,8 @@ pub fn run() {
       kb::interface::kb_orphans,
       kb::interface::kb_read_entry,
       kb::interface::kb_save_entry,
-      ai::interface::ai_has_key,
-      ai::interface::ai_list_ollama_models,
+      agent::interface::ai_has_key,
+      agent::interface::ai_list_ollama_models,
       workshop::interface::workshop_chat,
       workshop::interface::workshop_get_conversation,
       workshop::interface::workshop_list_conversations,

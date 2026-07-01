@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tauri::ipc::Channel;
 use tauri::{Manager, State};
 
-use crate::ai::{ChatTurn, StreamProgress};
+use crate::agent::{ChatTurn, StreamProgress};
 use crate::workshop::application;
 use crate::workshop::domain::{WorkshopConversation, WorkshopConversationPage, WorkshopMessage};
 
