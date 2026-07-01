@@ -166,14 +166,32 @@ export async function listOllamaModels(): Promise<OllamaModel[]> {
 /** AI プロバイダ（Rust Provider と一致）。ローカル端点のみ。 */
 export type AiProvider = "ollama" | "llamaApp";
 
-/** AI 設定（Rust AiSettings と一致）。 */
+/** AI 設定（Rust AiSettings と一致）。URL は空欄なら後端が provider 既定へ解決する。 */
 export type AiSettings = {
   provider: AiProvider;
   model: string;
+  ollamaUrl: string;
   llamaAppUrl: string;
 };
 
-const DEFAULT_AI_SETTINGS: AiSettings = { provider: "ollama", model: "", llamaAppUrl: "" };
+export const DEFAULT_AI_SETTINGS: AiSettings = {
+  provider: "ollama",
+  model: "",
+  ollamaUrl: "",
+  llamaAppUrl: "",
+};
+
+/** provider 既定の URL（空欄時のプレースホルダ表示用。実際の解決は後端）。 */
+export const DEFAULT_PROVIDER_URL: Record<AiProvider, string> = {
+  ollama: "http://127.0.0.1:11434",
+  llamaApp: "http://127.0.0.1:8080/v1",
+};
+
+/** 指定 provider + URL でモデル一覧を取る（設定画面の「検証」）。空 URL は後端が既定へ解決。 */
+export async function listModels(provider: AiProvider, baseUrl: string): Promise<OllamaModel[]> {
+  if (!isTauri()) return [];
+  return invoke<OllamaModel[]>("ai_list_models", { provider, baseUrl });
+}
 
 /** 保存済み AI 設定を読む（既定は Ollama）。Tauri 外では既定値。 */
 export async function getAiSettings(): Promise<AiSettings> {

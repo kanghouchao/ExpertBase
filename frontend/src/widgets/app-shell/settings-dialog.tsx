@@ -15,10 +15,14 @@ import { SegTabs } from "@/shared/ui/seg-tabs";
 import { ACCENTS, useI18n, useTheme } from "@/shared/providers/providers";
 import { LANGS } from "@/shared/i18n/dictionaries";
 import {
+  DEFAULT_AI_SETTINGS,
+  DEFAULT_PROVIDER_URL,
   getAiSettings,
+  listModels,
   setAiSettings,
   type AiProvider,
   type AiSettings,
+  type OllamaModel,
 } from "@/shared/api/tauri/client";
 
 const PROVIDERS = ["ollama", "llamaApp"] as const;
@@ -41,14 +45,44 @@ export function SettingsDialog({
 
   // AI 設定はダイアログを開くたびに読み直す。編集は即保存（テーマ/言語と同じ即時反映）。
   const [ai, setAi] = useState<AiSettings | null>(null);
+  // 「検証」で発見したモデル（既定モデル入力の候補になる）と検証状態。provider/URL 変更で無効化。
+  const [models, setModels] = useState<OllamaModel[]>([]);
+  const [verify, setVerify] = useState<"idle" | "loading" | "ok" | "error">("idle");
   useEffect(() => {
     if (!open) return;
-    void getAiSettings().then(setAi);
+    // 開くたびに設定を読み直す。読み込み失敗（不正 ai.toml 等）でも既定値へ倒し、AI 節が静かに
+    // 消えないようにする。前回のモデル候補/検証状態は finally でクリア（effect 本体での同期 setState を避ける）。
+    void getAiSettings()
+      .then(setAi, () => setAi(DEFAULT_AI_SETTINGS))
+      .finally(() => {
+        setModels([]);
+        setVerify("idle");
+      });
   }, [open]);
 
   function saveAi(next: AiSettings) {
     setAi(next);
     void setAiSettings(next);
+  }
+
+  // provider ごとの URL（空欄=既定へフォールバック。表示はプレースホルダで既定を示す）。
+  const currentUrl = ai ? (ai.provider === "ollama" ? ai.ollamaUrl : ai.llamaAppUrl) : "";
+  function setUrl(url: string) {
+    if (!ai) return;
+    setAi(ai.provider === "ollama" ? { ...ai, ollamaUrl: url } : { ...ai, llamaAppUrl: url });
+  }
+
+  async function runVerify() {
+    if (!ai) return;
+    setVerify("loading");
+    try {
+      const list = await listModels(ai.provider, currentUrl);
+      setModels(list);
+      setVerify("ok");
+    } catch {
+      setModels([]);
+      setVerify("error");
+    }
   }
 
   return (
@@ -122,32 +156,62 @@ export function SettingsDialog({
                 <SegTabs<AiProvider>
                   tabs={PROVIDERS}
                   value={ai.provider}
-                  onChange={(provider) => saveAi({ ...ai, provider })}
+                  onChange={(provider) => {
+                    // provider を替えたら前 provider のモデル候補/検証結果は無効。
+                    setModels([]);
+                    setVerify("idle");
+                    saveAi({ ...ai, provider });
+                  }}
                   label={(p) => PROVIDER_LABELS[p]}
                 />
               </div>
 
               <div className="flex flex-col gap-2.5">
+                <span className="text-sm font-medium">{t("cfg.aiUrl")}</span>
+                <div className="flex gap-2">
+                  <Input
+                    value={currentUrl}
+                    placeholder={DEFAULT_PROVIDER_URL[ai.provider]}
+                    onChange={(event) => {
+                      setUrl(event.target.value);
+                      setVerify("idle");
+                    }}
+                    onBlur={() => saveAi(ai)}
+                  />
+                  <button
+                    type="button"
+                    onClick={runVerify}
+                    disabled={verify === "loading"}
+                    className="flex-none rounded-lg border border-line px-3 text-[13px] font-semibold text-ink-soft transition-colors hover:bg-surface-2 disabled:opacity-50"
+                  >
+                    {t("cfg.aiVerify")}
+                  </button>
+                </div>
+                {verify === "ok" && (
+                  <span className="text-xs text-ink-muted">
+                    {t("cfg.aiVerifyOk")} · {models.length}
+                  </span>
+                )}
+                {verify === "error" && (
+                  <span className="text-xs text-destructive">{t("cfg.aiVerifyFail")}</span>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2.5">
                 <span className="text-sm font-medium">{t("cfg.aiModel")}</span>
                 <Input
+                  list="ai-model-options"
                   value={ai.model}
                   placeholder={ai.provider === "ollama" ? "qwen3:8b" : "qwen2.5"}
                   onChange={(event) => setAi({ ...ai, model: event.target.value })}
                   onBlur={() => saveAi(ai)}
                 />
+                <datalist id="ai-model-options">
+                  {models.map((m) => (
+                    <option key={m.name} value={m.name} />
+                  ))}
+                </datalist>
               </div>
-
-              {ai.provider === "llamaApp" && (
-                <div className="flex flex-col gap-2.5">
-                  <span className="text-sm font-medium">{t("cfg.aiUrl")}</span>
-                  <Input
-                    value={ai.llamaAppUrl}
-                    placeholder="http://127.0.0.1:8080/v1"
-                    onChange={(event) => setAi({ ...ai, llamaAppUrl: event.target.value })}
-                    onBlur={() => saveAi(ai)}
-                  />
-                </div>
-              )}
             </>
           )}
         </div>

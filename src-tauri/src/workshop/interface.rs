@@ -92,7 +92,7 @@ pub async fn workshop_chat(
   // 本文はここでは読まない＝AI が read_source で個別に読む。id は外部ファイルの絶対パスのみ。
   // provider はグローバル設定（前端の設定画面で選択）。model は会話ごとに前端が渡す。
   let (root, sources, provider, base_url) = tauri::async_runtime::spawn_blocking(
-    move || -> Result<(PathBuf, Vec<String>, Provider, Option<String>), String> {
+    move || -> Result<(PathBuf, Vec<String>, Provider, String), String> {
       let (root, _conn) = crate::kb::open_active(&home)?;
       let mut sources = Vec::with_capacity(source_ids.len());
       for id in &source_ids {
@@ -103,9 +103,10 @@ pub async fn workshop_chat(
         }
       }
       let settings = crate::agent::settings_store::load(&home)?;
+      // provider ごとの生 URL（空欄可、既定へは agent::run が解決）。
       let base_url = match settings.provider {
-        Provider::LlamaApp => Some(settings.llama_app_url),
-        Provider::Ollama => None,
+        Provider::LlamaApp => settings.llama_app_url,
+        Provider::Ollama => settings.ollama_url,
       };
       Ok((root, sources, settings.provider, base_url))
     },

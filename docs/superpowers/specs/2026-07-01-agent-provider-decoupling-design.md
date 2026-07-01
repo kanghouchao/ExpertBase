@@ -80,3 +80,13 @@ async fn drive<M: CompletionModel + 'static>(agent: Agent<M>, prompt, history, c
 
 - llama.app が OpenAI 互換 `/v1` であること（最有力。違えば arm 差し替え）。
 - `drive<M>` の where 句は rig の `StreamingChat for Agent<M,P>` 実装（`M: CompletionModel + 'static`, `M::StreamingResponse: GetTokenUsage`）に合わせてコンパイラで確定する。
+
+## 追記（2026-07-01・2 巡目：URL 設定 + モデル検証・発見）
+
+ユーザー要望で上記 YAGNI 境界のうち「モデル発見なし／接続 UI なし」を撤回し、以下を追加した。
+
+- **URL は両 provider とも設定可能・既定値あり**。`AiSettings` に `ollama_url` を追加し `{ provider, model, ollama_url, llama_app_url }`。空欄は `domain::resolve_base_url(provider, raw)` が provider 既定へ解決（Ollama=`http://127.0.0.1:11434`、llama.app=`http://127.0.0.1:8080/v1`）。llama.app は llama.cpp の `llama serve`（OpenAI 互換、既定 8080）と判明。
+- **モデル発見を llama.app にも**。新コマンド `ai_list_models(provider, base_url)`：Ollama は既存 `/api/tags`+`/api/show`、llama.app は OpenAI `GET {base}/models`（能力は返らないので tools=true / thinking=false 固定）。設定画面の「検証」ボタンが叩き、成功＝端点が生きている＝既定モデル入力が `datalist` で「可選可手填」になる。
+- **挙動変更**：空 URL は既定へ解決するので、1 巡目で入れた「llama.app URL 未設定エラー」ガードは廃止（空＝既定という新要件と両立しない）。URL 解決は `domain::resolve_base_url` の単体テストで担保。
+- **runner**：`run` の `base_url` は `Option<&str>` → 生 `&str`（空欄可）。両 arm とも `base_url` を明示指定（Ollama も `Client::builder().base_url()` で remote 可）。
+- **レビュー修正（Copilot）**：`provider` に `#[serde(default)]`（旧/手編集 ai.toml の欠落耐性）、前端は設定読み込みを Ollama 可用性と分離（Ollama 未起動でも llama.app を選べる）、設定ダイアログの読み込み失敗は既定へフォールバック。
