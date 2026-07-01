@@ -1,12 +1,11 @@
-//! AI 機能。DDD レイヤ構成（domain ポート / infrastructure アダプタ / interface）。
-//! application 層は持たない（AI を編成するユースケースは workshop が担う）。
-//! agent: プロバイダ非依存の指示層（system プロンプト）。transport から切り離す。
+//! 汎用 agent 機能（ブラックボックス）。DDD レイヤ構成（domain / infrastructure / interface）。
+//! 業務（kb / workshop）に依存せず、注入されたツール集でツールループと推論を回す。
+//! 指示層（system プロンプト）は業務固有なので呼び出し側（workshop）が持つ。
 
-pub mod agent;
 mod domain;
 mod infrastructure;
 pub mod interface;
 
-// ai 機能の公開 API（workshop 等が参照する安定面）。
+// agent 機能の公開 API（workshop 等が参照する安定面）。
 // 他機能はこの面のみを参照し、各レイヤ内部へ直接到達しない。
 pub use domain::{AiError, ChatTurn, StreamProgress};
