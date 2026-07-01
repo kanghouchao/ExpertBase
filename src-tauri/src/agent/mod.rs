@@ -10,3 +10,4 @@ pub mod interface;
 // 他機能はこの面のみを参照し、各レイヤ内部へ直接到達しない。
 pub use domain::{AiError, ChatTurn, Provider, StreamProgress};
 pub use infrastructure::runner::run;
+pub use infrastructure::settings_store;
