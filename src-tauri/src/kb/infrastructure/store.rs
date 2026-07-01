@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use crate::error::AppError;
 #[cfg(test)]
 use crate::kb::domain::entry::parse_entry;
 use crate::kb::domain::entry::{serialize_entry, Entry};
@@ -20,9 +21,9 @@ fn slug(title: &str) -> String {
 }
 
 /// 条目を `entries/<slug>.md` に書き出し、相対パスを返す。重複時は連番を付ける。
-pub fn write_entry(root: &Path, entry: &Entry) -> Result<String, String> {
+pub fn write_entry(root: &Path, entry: &Entry) -> Result<String, AppError> {
   let dir = root.join("entries");
-  fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+  fs::create_dir_all(&dir).map_err(AppError::generic)?;
   let base = slug(&entry.meta.title);
   let mut rel = format!("entries/{base}.md");
   let mut n = 2;
@@ -30,21 +31,21 @@ pub fn write_entry(root: &Path, entry: &Entry) -> Result<String, String> {
     rel = format!("entries/{base}-{n}.md");
     n += 1;
   }
-  fs::write(root.join(&rel), serialize_entry(entry)?).map_err(|e| e.to_string())?;
+  fs::write(root.join(&rel), serialize_entry(entry)?).map_err(AppError::generic)?;
   Ok(rel)
 }
 
 /// 既存条目を相対パスから読む。
 #[cfg(test)]
-pub fn read_entry(root: &Path, rel_path: &str) -> Result<Entry, String> {
-  let text = fs::read_to_string(root.join(rel_path)).map_err(|e| e.to_string())?;
+pub fn read_entry(root: &Path, rel_path: &str) -> Result<Entry, AppError> {
+  let text = fs::read_to_string(root.join(rel_path)).map_err(AppError::generic)?;
   parse_entry(&text)
 }
 
 /// 既存条目を上書き保存する（相対パス指定）。
 #[cfg(test)]
-pub fn save_entry(root: &Path, rel_path: &str, entry: &Entry) -> Result<(), String> {
-  fs::write(root.join(rel_path), serialize_entry(entry)?).map_err(|e| e.to_string())
+pub fn save_entry(root: &Path, rel_path: &str, entry: &Entry) -> Result<(), AppError> {
+  fs::write(root.join(rel_path), serialize_entry(entry)?).map_err(AppError::generic)
 }
 
 #[cfg(test)]

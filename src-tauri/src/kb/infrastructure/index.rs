@@ -3,6 +3,7 @@ use std::path::Path;
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 
+use crate::error::AppError;
 use crate::kb::domain::entry::{extract_links, word_count, Entry};
 
 /// インデックスの軽量な条目参照（一覧・バックリンク・孤立で共用）。
@@ -44,7 +45,7 @@ pub struct GraphData {
 /// スキーマを作成する（存在すれば何もしない）。
 /// 全文検索は trigram トークナイザを使う。日本語/中国語を含む部分一致が効くが、
 /// クエリは 3 文字以上必要（trigram の仕様）。
-pub fn ensure_schema(conn: &Connection) -> Result<(), String> {
+pub fn ensure_schema(conn: &Connection) -> Result<(), AppError> {
   conn
     .execute_batch(
       "CREATE TABLE IF NOT EXISTS entries(
@@ -67,33 +68,33 @@ pub fn ensure_schema(conn: &Connection) -> Result<(), String> {
        CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts
          USING fts5(title, body, path UNINDEXED, tokenize='trigram');",
     )
-    .map_err(|e| e.to_string())
+    .map_err(AppError::generic)
 }
 
 /// `.expertbase/index.sqlite` を開き、スキーマを保証する。
-pub fn open_index(root: &Path) -> Result<Connection, String> {
+pub fn open_index(root: &Path) -> Result<Connection, AppError> {
   let dir = root.join(".expertbase");
-  std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-  let conn = Connection::open(dir.join("index.sqlite")).map_err(|e| e.to_string())?;
+  std::fs::create_dir_all(&dir).map_err(AppError::generic)?;
+  let conn = Connection::open(dir.join("index.sqlite")).map_err(AppError::generic)?;
   ensure_schema(&conn)?;
   Ok(conn)
 }
 
 /// ディスクの entries/ を走査してインデックスを再構築する。
 /// 真実のソースは常に Markdown。壊れたインデックスはこれで作り直せる。
-pub fn rebuild(conn: &Connection, root: &Path) -> Result<(), String> {
+pub fn rebuild(conn: &Connection, root: &Path) -> Result<(), AppError> {
   conn
     .execute_batch("DELETE FROM entries; DELETE FROM links; DELETE FROM entries_fts;")
-    .map_err(|e| e.to_string())?;
+    .map_err(AppError::generic)?;
 
   let entries_dir = root.join("entries");
   if entries_dir.is_dir() {
-    for ent in std::fs::read_dir(&entries_dir).map_err(|e| e.to_string())? {
-      let path = ent.map_err(|e| e.to_string())?.path();
+    for ent in std::fs::read_dir(&entries_dir).map_err(AppError::generic)? {
+      let path = ent.map_err(AppError::generic)?.path();
       if path.extension().and_then(|s| s.to_str()) != Some("md") {
         continue;
       }
-      let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+      let text = std::fs::read_to_string(&path).map_err(AppError::generic)?;
       let entry = crate::kb::domain::entry::parse_entry(&text)?;
       let rel = format!("entries/{}", path.file_name().unwrap().to_string_lossy());
       upsert_entry(conn, &rel, &entry)?;
@@ -103,7 +104,7 @@ pub fn rebuild(conn: &Connection, root: &Path) -> Result<(), String> {
 }
 
 /// 条目をインデックスへ upsert する（メタ + リンク + FTS）。
-pub fn upsert_entry(conn: &Connection, rel_path: &str, entry: &Entry) -> Result<(), String> {
+pub fn upsert_entry(conn: &Connection, rel_path: &str, entry: &Entry) -> Result<(), AppError> {
   let duplicate_path = conn
     .query_row(
       "SELECT path FROM entries WHERE title=?1 AND path<>?2 LIMIT 1",
@@ -111,9 +112,9 @@ pub fn upsert_entry(conn: &Connection, rel_path: &str, entry: &Entry) -> Result<
       |r| r.get::<_, String>(0),
     )
     .optional()
-    .map_err(|e| e.to_string())?;
+    .map_err(AppError::generic)?;
   if let Some(path) = duplicate_path {
-    return Err(format!("同名の条目が既に存在します: {}", path));
+    return Err(AppError::param("err.kb.duplicateEntryName", "path", path));
   }
 
   delete_entry(conn, rel_path)?;
@@ -133,57 +134,57 @@ pub fn upsert_entry(conn: &Connection, rel_path: &str, entry: &Entry) -> Result<
         word_count(&entry.body) as i64,
       ],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(AppError::generic)?;
   for dst in extract_links(&entry.body) {
     conn
       .execute(
         "INSERT INTO links(src_path,dst_title) VALUES(?1,?2)",
         rusqlite::params![rel_path, dst],
       )
-      .map_err(|e| e.to_string())?;
+      .map_err(AppError::generic)?;
   }
   conn
     .execute(
       "INSERT INTO entries_fts(title,body,path) VALUES(?1,?2,?3)",
       rusqlite::params![entry.meta.title, entry.body, rel_path],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(AppError::generic)?;
   Ok(())
 }
 
 /// 条目をインデックスの全テーブルから削除する。
-pub fn delete_entry(conn: &Connection, rel_path: &str) -> Result<(), String> {
+pub fn delete_entry(conn: &Connection, rel_path: &str) -> Result<(), AppError> {
   conn
     .execute("DELETE FROM entries WHERE path=?1", [rel_path])
-    .map_err(|e| e.to_string())?;
+    .map_err(AppError::generic)?;
   conn
     .execute("DELETE FROM links WHERE src_path=?1", [rel_path])
-    .map_err(|e| e.to_string())?;
+    .map_err(AppError::generic)?;
   conn
     .execute("DELETE FROM entries_fts WHERE path=?1", [rel_path])
-    .map_err(|e| e.to_string())?;
+    .map_err(AppError::generic)?;
   Ok(())
 }
 
 /// 指定タイトルを参照している条目（バックリンク）。
-pub fn backlinks(conn: &Connection, title: &str) -> Result<Vec<EntryRef>, String> {
+pub fn backlinks(conn: &Connection, title: &str) -> Result<Vec<EntryRef>, AppError> {
   let mut stmt = conn
     .prepare(
       "SELECT e.path,e.title,e.cat FROM links l
          JOIN entries e ON e.path=l.src_path
          WHERE l.dst_title=?1 ORDER BY e.path",
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(AppError::generic)?;
   let rows = stmt
     .query_map([title], |r| {
       Ok(EntryRef { path: r.get(0)?, title: r.get(1)?, cat: r.get(2)? })
     })
-    .map_err(|e| e.to_string())?;
-  rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+    .map_err(AppError::generic)?;
+  rows.collect::<Result<_, _>>().map_err(AppError::generic)
 }
 
 /// 孤立条目: 他から参照されず(inbound 無し)かつ自身もリンクを持たない(outbound 無し)。
-pub fn orphans(conn: &Connection) -> Result<Vec<EntryRef>, String> {
+pub fn orphans(conn: &Connection) -> Result<Vec<EntryRef>, AppError> {
   let mut stmt = conn
     .prepare(
       "SELECT e.path,e.title,e.cat FROM entries e
@@ -191,17 +192,17 @@ pub fn orphans(conn: &Connection) -> Result<Vec<EntryRef>, String> {
            AND e.title NOT IN (SELECT dst_title FROM links)
          ORDER BY e.path",
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(AppError::generic)?;
   let rows = stmt
     .query_map([], |r| {
       Ok(EntryRef { path: r.get(0)?, title: r.get(1)?, cat: r.get(2)? })
     })
-    .map_err(|e| e.to_string())?;
-  rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+    .map_err(AppError::generic)?;
+  rows.collect::<Result<_, _>>().map_err(AppError::generic)
 }
 
 /// FTS5 全文検索。マッチ箇所のスニペットを返す。クエリは 3 文字以上を想定。
-pub fn search(conn: &Connection, query: &str) -> Result<Vec<SearchHit>, String> {
+pub fn search(conn: &Connection, query: &str) -> Result<Vec<SearchHit>, AppError> {
   if query.trim().is_empty() {
     return Ok(vec![]);
   }
@@ -210,53 +211,53 @@ pub fn search(conn: &Connection, query: &str) -> Result<Vec<SearchHit>, String> 
       "SELECT path,title,snippet(entries_fts,1,'[',']','…',12) FROM entries_fts
          WHERE entries_fts MATCH ?1 ORDER BY rank LIMIT 50",
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(AppError::generic)?;
   // クエリ全体をフレーズとして引用し、FTS5 構文記号を無効化する。
   let phrase = format!("\"{}\"", query.trim().replace('"', "\"\""));
   let rows = stmt
     .query_map([phrase], |r| {
       Ok(SearchHit { path: r.get(0)?, title: r.get(1)?, excerpt: r.get(2)? })
     })
-    .map_err(|e| e.to_string())?;
-  rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+    .map_err(AppError::generic)?;
+  rows.collect::<Result<_, _>>().map_err(AppError::generic)
 }
 
 /// インデックス全体から条目一覧を返す（更新が新しい順）。
-pub fn list_entries(conn: &Connection) -> Result<Vec<EntryRef>, String> {
+pub fn list_entries(conn: &Connection) -> Result<Vec<EntryRef>, AppError> {
   let mut stmt = conn
     .prepare("SELECT path,title,cat FROM entries ORDER BY updated DESC, path")
-    .map_err(|e| e.to_string())?;
+    .map_err(AppError::generic)?;
   let rows = stmt
     .query_map([], |r| {
       Ok(EntryRef { path: r.get(0)?, title: r.get(1)?, cat: r.get(2)? })
     })
-    .map_err(|e| e.to_string())?;
-  rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+    .map_err(AppError::generic)?;
+  rows.collect::<Result<_, _>>().map_err(AppError::generic)
 }
 
 /// ダッシュボード用の統計。
-pub fn stats(conn: &Connection) -> Result<Stats, String> {
+pub fn stats(conn: &Connection) -> Result<Stats, AppError> {
   let entries = conn
     .query_row("SELECT COUNT(*) FROM entries", [], |r| r.get::<_, i64>(0))
-    .map_err(|e| e.to_string())? as usize;
+    .map_err(AppError::generic)? as usize;
   let links = conn
     .query_row("SELECT COUNT(*) FROM links", [], |r| r.get::<_, i64>(0))
-    .map_err(|e| e.to_string())? as usize;
+    .map_err(AppError::generic)? as usize;
   let orphans = orphans(conn)?.len();
   Ok(Stats { entries, links, orphans })
 }
 
 /// グラフ描画用のノード + 解決済みエッジ（dst_title を既存条目 path へ解決）。
-pub fn graph(conn: &Connection) -> Result<GraphData, String> {
+pub fn graph(conn: &Connection) -> Result<GraphData, AppError> {
   let nodes = list_entries(conn)?;
   let mut stmt = conn
     .prepare("SELECT l.src_path,e.path FROM links l JOIN entries e ON e.title=l.dst_title")
-    .map_err(|e| e.to_string())?;
+    .map_err(AppError::generic)?;
   let edges = stmt
     .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-    .map_err(|e| e.to_string())?
+    .map_err(AppError::generic)?
     .collect::<Result<Vec<_>, _>>()
-    .map_err(|e| e.to_string())?;
+    .map_err(AppError::generic)?;
   Ok(GraphData { nodes, edges })
 }
 
@@ -318,7 +319,8 @@ mod tests {
 
     let err = upsert_entry(&conn, "entries/b.md", &second).unwrap_err();
 
-    assert!(err.contains("同名の条目"));
+    assert_eq!(err.code, "err.kb.duplicateEntryName");
+    assert_eq!(err.params.unwrap().get("path"), Some(&"entries/a.md".to_string()));
     assert_eq!(list_entries(&conn).unwrap().len(), 1);
   }
 

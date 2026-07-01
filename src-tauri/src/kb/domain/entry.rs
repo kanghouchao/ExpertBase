@@ -3,6 +3,8 @@ use std::sync::OnceLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+use crate::error::AppError;
+
 /// 通常条目の `type` 既定値（OKF 互換の必須フィールド）。
 fn default_entry_type() -> String {
   "Entry".to_string()
@@ -37,17 +39,17 @@ const FENCE: &str = "---";
 
 /// frontmatter(YAML) と本文に分割する共通ヘルパ。条目と受信箱素材で共用する。
 /// 返り値: (YAML 文字列, 本文文字列)。
-pub fn split_frontmatter(raw: &str) -> Result<(String, String), String> {
+pub fn split_frontmatter(raw: &str) -> Result<(String, String), AppError> {
   // 先頭 BOM と CR を許容する。
   let raw = raw.strip_prefix('\u{feff}').unwrap_or(raw);
   let rest = raw
     .strip_prefix(&format!("{FENCE}\n"))
     .or_else(|| raw.strip_prefix(&format!("{FENCE}\r\n")))
-    .ok_or_else(|| "frontmatter が見つかりません".to_string())?;
+    .ok_or_else(|| AppError::code("err.kb.entryFrontmatterMissing"))?;
   // 終端フェンス（行頭の `\n---`）を探す。
   let end = rest
     .find(&format!("\n{FENCE}"))
-    .ok_or_else(|| "frontmatter の終端が見つかりません".to_string())?;
+    .ok_or_else(|| AppError::code("err.kb.entryFrontmatterUnterminated"))?;
   let yaml = rest[..end].to_string();
   // 終端フェンス行とその後の改行を飛ばして本文を取り出す。
   let after = &rest[end + 1 + FENCE.len()..];
@@ -64,15 +66,15 @@ pub fn split_frontmatter(raw: &str) -> Result<(String, String), String> {
 }
 
 /// frontmatter 付き Markdown を Entry に解析する。
-pub fn parse_entry(raw: &str) -> Result<Entry, String> {
+pub fn parse_entry(raw: &str) -> Result<Entry, AppError> {
   let (yaml, body) = split_frontmatter(raw)?;
-  let meta: EntryMeta = serde_yaml::from_str(&yaml).map_err(|e| e.to_string())?;
+  let meta: EntryMeta = serde_yaml::from_str(&yaml).map_err(AppError::generic)?;
   Ok(Entry { meta, body })
 }
 
 /// Entry を frontmatter 付き Markdown 文字列へ直列化する。
-pub fn serialize_entry(entry: &Entry) -> Result<String, String> {
-  let yaml = serde_yaml::to_string(&entry.meta).map_err(|e| e.to_string())?;
+pub fn serialize_entry(entry: &Entry) -> Result<String, AppError> {
+  let yaml = serde_yaml::to_string(&entry.meta).map_err(AppError::generic)?;
   Ok(format!("{FENCE}\n{yaml}{FENCE}\n\n{}", entry.body))
 }
 

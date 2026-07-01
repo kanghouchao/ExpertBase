@@ -2,6 +2,8 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::AppError;
+
 /// 登録済みナレッジベースの 1 件。パスを一意な識別子として扱う。
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct KbEntry {
@@ -38,10 +40,10 @@ pub(crate) fn expand_home(home: &Path, raw: &str) -> PathBuf {
 }
 
 /// IPC から受け取る KB 内パスを、許可された直下 Markdown ファイルに限定する。
-pub(crate) fn checked_kb_markdown_path(rel_path: &str, dir: &str) -> Result<PathBuf, String> {
+pub(crate) fn checked_kb_markdown_path(rel_path: &str, dir: &str) -> Result<PathBuf, AppError> {
   let path = Path::new(rel_path);
   if path.is_absolute() {
-    return Err("知识库路径必须是相对路径".into());
+    return Err(AppError::code("err.kb.pathMustBeRelative"));
   }
   let parts = path.components().collect::<Vec<_>>();
   match parts.as_slice() {
@@ -52,7 +54,7 @@ pub(crate) fn checked_kb_markdown_path(rel_path: &str, dir: &str) -> Result<Path
     {
       Ok(PathBuf::from(dir).join(file))
     }
-    _ => Err("知识库路径不在允许的 Markdown 目录内".into()),
+    _ => Err(AppError::code("err.kb.pathOutsideAllowedDir")),
   }
 }
 

@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::error::AppError;
 use crate::kb::domain::registry::{KbConfig, Registry};
 
 /// グローバル設定ディレクトリ（ユーザーホーム直下）。
@@ -22,23 +23,23 @@ pub fn kb_config_path(kb_root: &Path) -> PathBuf {
 }
 
 /// グローバル設定を読み込む。ファイルが無ければ空の Registry を返す。
-pub fn load_registry(home: &Path) -> Result<Registry, String> {
+pub fn load_registry(home: &Path) -> Result<Registry, AppError> {
   let path = config_path(home);
   if !path.exists() {
     return Ok(Registry::default());
   }
-  let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-  toml::from_str(&text).map_err(|e| e.to_string())
+  let text = fs::read_to_string(&path).map_err(AppError::generic)?;
+  toml::from_str(&text).map_err(AppError::generic)
 }
 
 /// グローバル設定を書き込む。`.expertBase` ディレクトリが無ければ作成する。
-pub fn save_registry(home: &Path, registry: &Registry) -> Result<(), String> {
+pub fn save_registry(home: &Path, registry: &Registry) -> Result<(), AppError> {
   let path = config_path(home);
   if let Some(dir) = path.parent() {
-    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(dir).map_err(AppError::generic)?;
   }
-  let text = toml::to_string_pretty(registry).map_err(|e| e.to_string())?;
-  fs::write(&path, text).map_err(|e| e.to_string())
+  let text = toml::to_string_pretty(registry).map_err(AppError::generic)?;
+  fs::write(&path, text).map_err(AppError::generic)
 }
 
 /// 指定 KB ルートに既に kb.toml が存在するか。
@@ -47,13 +48,13 @@ pub fn kb_config_exists(kb_root: &Path) -> bool {
 }
 
 /// KB ルート直下に `.expertbase/kb.toml` を作成する（`.expertbase` が無ければ作る）。
-pub fn write_kb_config(kb_root: &Path, config: &KbConfig) -> Result<(), String> {
+pub fn write_kb_config(kb_root: &Path, config: &KbConfig) -> Result<(), AppError> {
   let path = kb_config_path(kb_root);
   if let Some(dir) = path.parent() {
-    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(dir).map_err(AppError::generic)?;
   }
-  let text = toml::to_string_pretty(config).map_err(|e| e.to_string())?;
-  fs::write(path, text).map_err(|e| e.to_string())
+  let text = toml::to_string_pretty(config).map_err(AppError::generic)?;
+  fs::write(path, text).map_err(AppError::generic)
 }
 
 #[cfg(test)]

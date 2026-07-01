@@ -6,19 +6,20 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
+use crate::error::AppError;
 use crate::kb::domain::entry;
 use crate::kb::domain::registry::{self, KbConfig, KbEntry};
 use crate::kb::infrastructure::{config_store, index};
 
 /// アクティブなナレッジベースのルートパスを返す。未選択ならエラー。
-pub(crate) fn active_kb_root(home: &Path) -> Result<PathBuf, String> {
+pub(crate) fn active_kb_root(home: &Path) -> Result<PathBuf, AppError> {
   let reg = config_store::load_registry(home)?;
-  let active = reg.active.ok_or("没有激活的知识库")?;
+  let active = reg.active.ok_or_else(|| AppError::code("err.kb.noActiveKb"))?;
   Ok(PathBuf::from(active))
 }
 
 /// アクティブ KB のルートとインデックス接続をまとめて開く。
-pub(crate) fn open_active(home: &Path) -> Result<(PathBuf, Connection), String> {
+pub(crate) fn open_active(home: &Path) -> Result<(PathBuf, Connection), AppError> {
   let root = active_kb_root(home)?;
   let conn = index::open_index(&root)?;
   Ok((root, conn))
@@ -30,25 +31,25 @@ pub fn create_kb(
   name: &str,
   description: &str,
   raw_path: &str,
-) -> Result<KbEntry, String> {
+) -> Result<KbEntry, AppError> {
   let name = name.trim();
   if name.is_empty() {
-    return Err("知识库名称不能为空".into());
+    return Err(AppError::code("err.kb.nameRequired"));
   }
   let raw_path = raw_path.trim();
   if raw_path.is_empty() {
-    return Err("存储位置不能为空".into());
+    return Err(AppError::code("err.kb.pathRequired"));
   }
   let path = registry::expand_home(home, raw_path);
   let path_str = path.to_string_lossy().into_owned();
 
   let mut reg = config_store::load_registry(home)?;
   if reg.knowledge_bases.iter().any(|k| k.path == path_str) {
-    return Err("该位置已注册为知识库".into());
+    return Err(AppError::code("err.kb.pathAlreadyRegistered"));
   }
 
   if config_store::kb_config_exists(&path) {
-    return Err("该目录已经包含 ExpertBase 知识库，请选择其他位置".into());
+    return Err(AppError::code("err.kb.pathAlreadyHasKb"));
   }
   config_store::write_kb_config(
     &path,
@@ -69,10 +70,10 @@ pub fn create_kb(
 }
 
 /// 登録済みナレッジベースをアクティブに切り替える。
-pub fn set_active(home: &Path, path: &str) -> Result<(), String> {
+pub fn set_active(home: &Path, path: &str) -> Result<(), AppError> {
   let mut reg = config_store::load_registry(home)?;
   if !reg.knowledge_bases.iter().any(|k| k.path == path) {
-    return Err("未找到该知识库".into());
+    return Err(AppError::code("err.kb.notFound"));
   }
   reg.active = Some(path.into());
   config_store::save_registry(home, &reg)
@@ -80,27 +81,27 @@ pub fn set_active(home: &Path, path: &str) -> Result<(), String> {
 
 /// 登録済みナレッジベースを削除する。ExpertBase のメタデータだけを削除し、
 /// 空になった場合に限ってルートも削除してからレジストリを更新する。
-pub fn delete_kb(home: &Path, path: &str) -> Result<(), String> {
+pub fn delete_kb(home: &Path, path: &str) -> Result<(), AppError> {
   let mut reg = config_store::load_registry(home)?;
   let idx = reg
     .knowledge_bases
     .iter()
     .position(|k| k.path == path)
-    .ok_or("未找到该知识库")?;
+    .ok_or_else(|| AppError::code("err.kb.notFound"))?;
   let root = Path::new(path);
   let metadata = root.join(".expertbase");
   if metadata.exists() {
     if !metadata.is_dir() {
-      return Err("知识库元数据不是目录".into());
+      return Err(AppError::code("err.kb.metaNotDirectory"));
     }
-    fs::remove_dir_all(&metadata).map_err(|e| e.to_string())?;
+    fs::remove_dir_all(&metadata).map_err(AppError::generic)?;
   }
   match fs::remove_dir(root) {
     Ok(()) => {}
     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
     // ponytail: 空でないルートはユーザーデータを含む可能性があるため残す。
     Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => {}
-    Err(e) => return Err(e.to_string()),
+    Err(e) => return Err(AppError::generic(e)),
   }
 
   reg.knowledge_bases.remove(idx);
@@ -111,19 +112,19 @@ pub fn delete_kb(home: &Path, path: &str) -> Result<(), String> {
 }
 
 /// 条目を上書き保存する（frontmatter 検証付き）。保存前に検証し、不正なら書き込まない。
-pub fn save_entry(home: &Path, rel_path: &str, content: &str) -> Result<(), String> {
+pub fn save_entry(home: &Path, rel_path: &str, content: &str) -> Result<(), AppError> {
   let (root, conn) = open_active(home)?;
   let rel = registry::checked_kb_markdown_path(rel_path, "entries")?;
   let parsed = entry::parse_entry(content)?;
-  fs::write(root.join(&rel), content).map_err(|e| e.to_string())?;
+  fs::write(root.join(&rel), content).map_err(AppError::generic)?;
   index::upsert_entry(&conn, &rel.to_string_lossy(), &parsed)
 }
 
 /// 条目の生 Markdown を読む。
-pub fn read_entry(home: &Path, rel_path: &str) -> Result<String, String> {
+pub fn read_entry(home: &Path, rel_path: &str) -> Result<String, AppError> {
   let root = active_kb_root(home)?;
   let rel = registry::checked_kb_markdown_path(rel_path, "entries")?;
-  fs::read_to_string(root.join(rel)).map_err(|e| e.to_string())
+  fs::read_to_string(root.join(rel)).map_err(AppError::generic)
 }
 
 #[cfg(test)]
