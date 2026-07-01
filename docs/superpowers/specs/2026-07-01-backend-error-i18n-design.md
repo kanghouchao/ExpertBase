@@ -80,6 +80,8 @@ impl AppError {
 | `err.agent.cancelled` | 已取消 | — |
 | `err.workshop.kbSwitchedDuringSave` | 知识库已切换，已取消保存对话 | — |
 | `err.workshop.sourceMustBeAbsolute` | source must be an absolute path | `id` |
+| `err.workshop.conversationNotFound` | conversation not found（`history.rs`、実装中に発見） | `id` |
+| `err.workshop.conversationCorrupted` | conversation has no meta（`history.rs`、実装中に発見） | `id` |
 | `err.generic` | （新設）汎用フォールバック — 翻訳済み前置き + 原文詳細 | `detail` |
 
 各キーは zh/en/ja 三言語ぶん、`dictionaries.ts` に追記する（既存の `{param}` 補間をそのまま使う）。

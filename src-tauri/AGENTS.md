@@ -42,7 +42,7 @@ All current features (`kb`, `ai`, `extract`, `workshop`) are split into the DDD 
 
 ## IPC Command Practices
 
-- Define commands with `#[tauri::command]` returning `Result<T, String>`, mapping internal errors with `map_err(|e| e.to_string())`.
+- Define commands with `#[tauri::command]` returning `Result<T, AppError>` (`src/error.rs`). Hand-authored user-facing errors use `AppError::code(...)` / `::param(...)` / `::params(...)` with a key matching the frontend i18n dictionary (e.g. `"err.kb.nameRequired"`). Passthrough errors from lower-level libraries (io/sqlite/reqwest/etc.) use `AppError::generic(e)`, which maps to a single generic frontend key (`"err.generic"`) carrying the raw detail as a param. Do not implement `Display` for domain error types that flow to the IPC boundary — that reintroduces hardcoded human text.
 - Structs crossing the IPC boundary derive `Serialize` with `#[serde(rename_all = "camelCase")]` to match the TypeScript client in `frontend/src/shared/api/tauri`.
 - Keep commands as thin wrappers: parse IPC inputs, call application services or plain functions, and format IPC outputs. Do not put business rules in command handlers.
 
