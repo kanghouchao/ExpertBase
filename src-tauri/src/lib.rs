@@ -1,4 +1,5 @@
 mod agent;
+mod error;
 mod extract;
 mod kb;
 mod workshop;
