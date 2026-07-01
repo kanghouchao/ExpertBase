@@ -51,6 +51,17 @@ impl std::fmt::Display for AiError {
   }
 }
 
+/// AI プロバイダの選択。本 MVP はローカル端点のみ（クラウド・API キーなし）。
+/// Ollama は固定の localhost、LlamaApp は OpenAI 互換のローカル端点（base_url は設定から）。
+/// 追加プロバイダは runner の match に arm を足すだけ（縫い目はここと domain）。
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Provider {
+  #[default]
+  Ollama,
+  LlamaApp,
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -58,6 +69,17 @@ mod tests {
   #[test]
   fn ai_error_displays_messages() {
     assert_eq!(AiError::Other("x".into()).to_string(), "x");
+  }
+
+  #[test]
+  fn provider_defaults_to_ollama_and_serializes_camel_case() {
+    // 既定はローカルの Ollama。ワイヤ形式は camelCase（前端契約と一致）。
+    assert_eq!(Provider::default(), Provider::Ollama);
+    assert_eq!(serde_json::to_value(Provider::LlamaApp).unwrap(), "llamaApp");
+    assert_eq!(
+      serde_json::from_value::<Provider>(serde_json::json!("ollama")).unwrap(),
+      Provider::Ollama
+    );
   }
 
   #[test]
