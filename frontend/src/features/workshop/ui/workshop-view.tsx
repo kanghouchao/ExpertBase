@@ -73,9 +73,11 @@ export function WorkshopView() {
   const [hasOllama, setHasOllama] = useState(false);
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
-  // AI 設定（provider はグローバル選択、settingsModel は既定モデル）。設定画面で編集する。
+  // AI 設定（provider はグローバル選択、settingsModel は既定モデル、settingsUrl は llama.app の URL）。
+  // 設定画面で編集する。
   const [provider, setProvider] = useState<AiProvider>("ollama");
   const [settingsModel, setSettingsModel] = useState("");
+  const [settingsUrl, setSettingsUrl] = useState("");
   // 確定済み（存盤済み）メッセージ。生成中の対話を見ているときはストアの baseHistory を描く。
   const [messages, setMessages] = useState<Msg[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -112,6 +114,7 @@ export function WorkshopView() {
         ]);
         setProvider(settings.provider);
         setSettingsModel(settings.model);
+        setSettingsUrl(settings.llamaAppUrl);
         setHasOllama(ollama);
         setModels(modelList);
         // 既定モデルの nudge: 設定の既定 → Qwen3（2026 本地工具调用最稳）→ 任意の tools 対応 → 先頭。
@@ -166,10 +169,12 @@ export function WorkshopView() {
   const selectedTools = selectedModelInfo?.tools ?? false;
 
   // 工作坊は tools 対応モデル必須（素材を read_source で読む・条目を write_entry で書くため）。
+  // llama.app は URL 未設定だと生成できない（後端も弾くが、ここで無駄な往復を防ぎボタンを無効化）。
   const canGenerate =
     visibleHasOllama &&
     !!visibleSelectedModel &&
     selectedTools &&
+    (!isLlamaApp || !!settingsUrl.trim()) &&
     !someoneGenerating;
 
   // 選択リスト/チップで素材をトグル選択（純ローカル状態。プレビューでも動く）。
