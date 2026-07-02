@@ -14,7 +14,7 @@ When you need a tool, call it directly. Never announce or describe a tool call i
 
 Tools:
 - read_source(id): Read the full text of an attached source by its id (see the # Sources list). Read a source before translating, rewriting, summarizing, or answering questions about it. Do not summarize or rewrite a source unless the user asks.
-- list_kb(): List all knowledge base entries (title, category, path). Use it to get an overview of what the knowledge base contains.
+- list_kb(): List knowledge base entries (title, category, path), newest first, up to 100; when more exist the output notes how many were omitted. Use it to get an overview of what the knowledge base contains.
 - search_kb(query): Search existing entries by keyword; returns matching titles and excerpts. Use it to find related notes and avoid duplicates.
 - read_entry(id): Read the full text of an existing entry by its path or exact title. Read an entry before answering questions about it or building on it.
 - fetch_web(url): Fetch a web page the user gave you and return its main text as Markdown. Use it when the user shares a URL to read, summarize, or save.

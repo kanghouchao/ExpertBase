@@ -160,7 +160,7 @@ impl Tool for ListKb {
     ToolDefinition {
       name: Self::NAME.to_string(),
       description:
-        "List all knowledge base entries (title, category, path), newest first. Use it to get an overview of what the knowledge base contains."
+        "List knowledge base entries (title, category, path), newest first. Shows at most 100 entries; if more exist, the output ends with how many were omitted."
           .to_string(),
       parameters: json!({ "type": "object", "properties": {} }),
     }
@@ -369,7 +369,11 @@ fn read_entry_blocking(root: &Path, id: &str) -> String {
   let Some(hit) = refs.iter().find(|r| r.path == id || r.title == id) else {
     return format!("(no entry found: {id})");
   };
-  match std::fs::read_to_string(root.join(&hit.path)) {
+  // 索引由来のパスでも entries/*.md に限定して再検証する（索引が壊れていても越境読みを防ぐ）。
+  let Ok(rel) = crate::kb::checked_kb_markdown_path(&hit.path, "entries") else {
+    return format!("(invalid entry path in index: {})", hit.path);
+  };
+  match std::fs::read_to_string(root.join(rel)) {
     Ok(text) => text,
     Err(e) => format!("(read error: {e})"),
   }
@@ -677,5 +681,22 @@ mod tests {
     assert!(empty.contains("non-empty"), "was: {empty}");
     let out = tool.call(ReadEntryArgs { id: "無い".into() }).await.unwrap();
     assert!(out.contains("no entry found"), "was: {out}");
+  }
+
+  #[tokio::test]
+  async fn read_entry_tool_refuses_out_of_tree_paths_from_corrupted_index() {
+    // 索引が壊れて entries/ 外のパスを含んでも、読み出しは拒否する（防御的再検証）。
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("kb");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(tmp.path().join("secret.md"), "機密").unwrap();
+    let conn = index::open_index(&root).unwrap();
+    seed_entry(&conn, "../secret.md", "機密メモ", "x");
+
+    let tool = ReadEntry { root: root.clone() };
+    let out = tool.call(ReadEntryArgs { id: "機密メモ".into() }).await.unwrap();
+
+    assert!(out.contains("invalid entry path"), "was: {out}");
+    assert!(!out.contains("機密"), "must not leak file content: {out}");
   }
 }
