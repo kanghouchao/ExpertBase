@@ -176,6 +176,7 @@ export type AiSettings = {
   model: string;
   ollamaUrl: string;
   llamaAppUrl: string;
+  braveApiKey: string;
 };
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
@@ -183,6 +184,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   model: "",
   ollamaUrl: "",
   llamaAppUrl: "",
+  braveApiKey: "",
 };
 
 /** provider 既定の URL（空欄時のプレースホルダ表示用。実際の解決は後端）。 */

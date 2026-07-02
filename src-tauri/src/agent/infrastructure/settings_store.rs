@@ -57,8 +57,23 @@ mod tests {
       model: "qwen2.5".into(),
       ollama_url: "http://127.0.0.1:11434".into(),
       llama_app_url: "http://127.0.0.1:8080/v1".into(),
+      brave_api_key: "brave-secret".into(),
     };
     save(tmp.path(), &settings).unwrap();
     assert_eq!(load(tmp.path()).unwrap(), settings);
+  }
+
+  #[test]
+  fn save_then_load_round_trips_brave_api_key() {
+    let tmp = tempfile::tempdir().unwrap();
+    let settings: AiSettings = toml::from_str(
+      "provider = \"ollama\"\nmodel = \"qwen3:8b\"\nbraveApiKey = \"brave-secret\"\n",
+    )
+    .unwrap();
+
+    save(tmp.path(), &settings).unwrap();
+    let saved = serde_json::to_value(load(tmp.path()).unwrap()).unwrap();
+
+    assert_eq!(saved["braveApiKey"], "brave-secret");
   }
 }
