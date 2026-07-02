@@ -58,16 +58,9 @@ pub struct ReadArgs {
   id: String,
 }
 
-/// search_kb の引数。弱いモデルが欠落させても落ちないよう default で緩く受ける。
+/// search_kb / search_web の引数。弱いモデルが欠落させても落ちないよう default で緩く受ける。
 #[derive(Deserialize)]
 pub struct SearchArgs {
-  #[serde(default)]
-  query: String,
-}
-
-/// search_web の引数。検索語を緩く受ける。
-#[derive(Deserialize)]
-pub struct SearchWebArgs {
   #[serde(default)]
   query: String,
 }
@@ -167,14 +160,14 @@ pub struct SearchWeb {
 impl Tool for SearchWeb {
   const NAME: &'static str = "search_web";
   type Error = Infallible;
-  type Args = SearchWebArgs;
+  type Args = SearchArgs;
   type Output = String;
 
   async fn definition(&self, _prompt: String) -> ToolDefinition {
     ToolDefinition {
       name: Self::NAME.to_string(),
       description:
-        "Search the web by keywords. Returns JSON results with title, URL, and snippet. Use fetch_web on a selected URL to read the page."
+        "Search the web by keywords. Returns a JSON array of results with title, url, and snippet; returns a parenthesized plain-text notice when there are no results or the search fails. Use fetch_web on a selected URL to read the page."
           .to_string(),
       parameters: json!({
         "type": "object",
@@ -192,6 +185,8 @@ impl Tool for SearchWeb {
       return Ok("(search_web needs a non-empty query)".to_string());
     }
     match self.backend.search(query.to_string()).await {
+      // 空結果は兄弟ツールと同じ括弧書きの案内で返す（裸の "[]" は弱いモデルが誤読する）。
+      Ok(results) if results.is_empty() => Ok("(no web results)".to_string()),
       Ok(results) => Ok(
         serde_json::to_string(&results)
           .unwrap_or_else(|e| format!("(search_web result serialization failed: {e})")),
@@ -780,7 +775,7 @@ mod tests {
       backend: Arc::new(FakeSearchBackend { calls: calls.clone(), result: Ok(vec![]) }),
     };
 
-    let out = tool.call(SearchWebArgs { query: "  ".into() }).await.unwrap();
+    let out = tool.call(SearchArgs { query: "  ".into() }).await.unwrap();
 
     assert_eq!(out, "(search_web needs a non-empty query)");
     assert_eq!(calls.load(Ordering::Relaxed), 0);
@@ -799,12 +794,26 @@ mod tests {
       }),
     };
 
-    let out = tool.call(SearchWebArgs { query: "ExpertBase".into() }).await.unwrap();
+    let out = tool.call(SearchArgs { query: "ExpertBase".into() }).await.unwrap();
     let results: serde_json::Value = serde_json::from_str(&out).unwrap();
 
     assert_eq!(results[0]["title"], "ExpertBase");
     assert_eq!(results[0]["url"], "https://example.com/expertbase");
     assert_eq!(results[0]["snippet"], "Local-first knowledge base");
+  }
+
+  #[tokio::test]
+  async fn search_web_returns_notice_for_empty_results() {
+    let tool = SearchWeb {
+      backend: Arc::new(FakeSearchBackend {
+        calls: Arc::new(AtomicUsize::new(0)),
+        result: Ok(vec![]),
+      }),
+    };
+
+    let out = tool.call(SearchArgs { query: "ExpertBase".into() }).await.unwrap();
+
+    assert_eq!(out, "(no web results)");
   }
 
   #[tokio::test]
@@ -816,7 +825,7 @@ mod tests {
       }),
     };
 
-    let out = tool.call(SearchWebArgs { query: "ExpertBase".into() }).await.unwrap();
+    let out = tool.call(SearchArgs { query: "ExpertBase".into() }).await.unwrap();
 
     assert_eq!(out, "(search_web error: Brave Search request failed with HTTP 429)");
   }

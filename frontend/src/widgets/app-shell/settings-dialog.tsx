@@ -65,6 +65,13 @@ export function SettingsDialog({
     void setAiSettings(next);
   }
 
+  // Esc やバックドロップで閉じると入力中フィールドの blur が走らないことがあるため、
+  // 閉じる瞬間に現在の編集内容を保存してから閉じる（保存漏れの防止）。
+  function handleOpenChange(next: boolean) {
+    if (!next && ai) void setAiSettings(ai);
+    onOpenChange(next);
+  }
+
   // provider ごとの URL（空欄=既定へフォールバック。表示はプレースホルダで既定を示す）。
   const currentUrl = ai ? (ai.provider === "ollama" ? ai.ollamaUrl : ai.llamaAppUrl) : "";
   function setUrl(url: string) {
@@ -86,8 +93,8 @@ export function SettingsDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-sm">
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>{t("cfg.title")}</DialogTitle>
         </DialogHeader>

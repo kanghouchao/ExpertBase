@@ -1,10 +1,13 @@
 use dom_smoothie::Readability;
 
+/// 出站 HTTP の自己識別 UA（fetch_web / search_web で共用）。
+pub const APP_USER_AGENT: &str = "ExpertBase/0.1 (+local capture)";
+
 /// URL から HTML を取得する。取得は HTTPS、原始 HTML はクラウドへ送らない（抽出はローカル）。
 pub async fn fetch_html(url: &str) -> Result<String, String> {
   reqwest::Client::new()
     .get(url)
-    .header("User-Agent", "ExpertBase/0.1 (+local capture)")
+    .header("User-Agent", APP_USER_AGENT)
     .send()
     .await
     .map_err(|e| e.to_string())?
