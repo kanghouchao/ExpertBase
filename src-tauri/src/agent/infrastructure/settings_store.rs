@@ -27,13 +27,20 @@ pub fn load(home: &Path) -> Result<AiSettings, AppError> {
 }
 
 /// AI 設定を書き込む。`.expertBase` ディレクトリが無ければ作成する。
+/// brave_api_key（秘密情報）を含むため、unix では所有者のみ読み書き（0600）へ絞る。
 pub fn save(home: &Path, settings: &AiSettings) -> Result<(), AppError> {
   let path = settings_path(home);
   if let Some(dir) = path.parent() {
     fs::create_dir_all(dir).map_err(AppError::generic)?;
   }
   let text = toml::to_string_pretty(settings).map_err(AppError::generic)?;
-  fs::write(path, text).map_err(AppError::generic)
+  fs::write(&path, text).map_err(AppError::generic)?;
+  #[cfg(unix)]
+  {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).map_err(AppError::generic)?;
+  }
+  Ok(())
 }
 
 #[cfg(test)]
@@ -57,8 +64,35 @@ mod tests {
       model: "qwen2.5".into(),
       ollama_url: "http://127.0.0.1:11434".into(),
       llama_app_url: "http://127.0.0.1:8080/v1".into(),
+      brave_api_key: "brave-secret".into(),
     };
     save(tmp.path(), &settings).unwrap();
     assert_eq!(load(tmp.path()).unwrap(), settings);
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn save_restricts_file_permissions_to_owner() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+
+    save(tmp.path(), &AiSettings::default()).unwrap();
+
+    let mode = fs::metadata(settings_path(tmp.path())).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o600);
+  }
+
+  #[test]
+  fn save_then_load_round_trips_brave_api_key() {
+    let tmp = tempfile::tempdir().unwrap();
+    let settings: AiSettings = toml::from_str(
+      "provider = \"ollama\"\nmodel = \"qwen3:8b\"\nbraveApiKey = \"brave-secret\"\n",
+    )
+    .unwrap();
+
+    save(tmp.path(), &settings).unwrap();
+    let saved = serde_json::to_value(load(tmp.path()).unwrap()).unwrap();
+
+    assert_eq!(saved["braveApiKey"], "brave-secret");
   }
 }

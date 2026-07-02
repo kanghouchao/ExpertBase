@@ -65,6 +65,13 @@ export function SettingsDialog({
     void setAiSettings(next);
   }
 
+  // Esc やバックドロップで閉じると入力中フィールドの blur が走らないことがあるため、
+  // 閉じる瞬間に現在の編集内容を保存してから閉じる（保存漏れの防止）。
+  function handleOpenChange(next: boolean) {
+    if (!next && ai) void setAiSettings(ai);
+    onOpenChange(next);
+  }
+
   // provider ごとの URL（空欄=既定へフォールバック。表示はプレースホルダで既定を示す）。
   const currentUrl = ai ? (ai.provider === "ollama" ? ai.ollamaUrl : ai.llamaAppUrl) : "";
   function setUrl(url: string) {
@@ -86,7 +93,7 @@ export function SettingsDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>{t("cfg.title")}</DialogTitle>
@@ -212,6 +219,23 @@ export function SettingsDialog({
                     <option key={m.name} value={m.name} />
                   ))}
                 </datalist>
+              </div>
+
+              <div className="font-mono text-[10px] font-semibold tracking-[0.12em] text-ink-faint uppercase">
+                {t("cfg.webSearch")}
+              </div>
+
+              <div className="flex flex-col gap-2.5">
+                <span className="text-sm font-medium">{t("cfg.braveApiKey")}</span>
+                <Input
+                  type="password"
+                  autoComplete="off"
+                  value={ai.braveApiKey}
+                  placeholder="BSA…"
+                  onChange={(event) => setAi({ ...ai, braveApiKey: event.target.value })}
+                  onBlur={() => saveAi(ai)}
+                />
+                <span className="text-xs text-ink-muted">{t("cfg.braveApiKeyHint")}</span>
               </div>
             </>
           )}

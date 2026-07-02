@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tauri::ipc::Channel;
 use tauri::{Manager, State};
 
-use crate::agent::{ChatTurn, Provider, StreamProgress};
+use crate::agent::{ChatTurn, StreamProgress};
 use crate::error::AppError;
 use crate::workshop::application;
 use crate::workshop::domain::{WorkshopConversation, WorkshopConversationPage, WorkshopMessage};
@@ -101,11 +101,11 @@ pub async fn workshop_chat(
   cancel.0.store(false, Ordering::Relaxed);
   let cancel_flag = cancel.0.clone();
 
-  // 素材 id の検証 + AI 設定の読み込みはブロッキング寄り。root + 検証済み sources + provider を別スレッドで用意。
+  // 素材 id の検証 + Agent 設定の読み込みはブロッキング寄り。root + sources + 設定を別スレッドで用意。
   // 本文はここでは読まない＝AI が read_source で個別に読む。id は外部ファイルの絶対パスのみ。
-  // provider はグローバル設定（前端の設定画面で選択）。model は会話ごとに前端が渡す。
-  let (root, sources, provider, base_url) = tauri::async_runtime::spawn_blocking(
-    move || -> Result<(PathBuf, Vec<String>, Provider, String), AppError> {
+  // 設定はグローバル（前端の設定画面で編集）。model は会話ごとに前端が渡す。
+  let (root, sources, settings) = tauri::async_runtime::spawn_blocking(
+    move || -> Result<(PathBuf, Vec<String>, crate::agent::AiSettings), AppError> {
       let (root, _conn) = crate::kb::open_active(&home)?;
       let mut sources = Vec::with_capacity(source_ids.len());
       for id in &source_ids {
@@ -116,12 +116,7 @@ pub async fn workshop_chat(
         }
       }
       let settings = crate::agent::settings_store::load(&home)?;
-      // provider ごとの生 URL（空欄可、既定へは agent::run が解決）。
-      let base_url = match settings.provider {
-        Provider::LlamaApp => settings.llama_app_url,
-        Provider::Ollama => settings.ollama_url,
-      };
-      Ok((root, sources, settings.provider, base_url))
+      Ok((root, sources, settings))
     },
   )
   .await
@@ -131,7 +126,7 @@ pub async fn workshop_chat(
   let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<StreamProgress>();
   let pending = confirms.0.clone();
   let agent = tauri::async_runtime::spawn(application::chat(
-    provider, base_url, model, think, root, sources, messages, cancel_flag, tx, pending,
+    settings, model, think, root, sources, messages, cancel_flag, tx, pending,
   ));
   while let Some(p) = rx.recv().await {
     if on_event.send(p).is_err() {

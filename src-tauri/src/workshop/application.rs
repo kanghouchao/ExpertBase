@@ -10,7 +10,7 @@ use chrono::SecondsFormat;
 use rusqlite::Connection;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::agent::{ChatTurn, Provider, StreamProgress};
+use crate::agent::{AiSettings, ChatTurn, Provider, StreamProgress};
 use crate::error::AppError;
 
 use super::prompt::agent_system_with;
@@ -66,8 +66,7 @@ pub fn list_conversations(root: &Path, offset: usize) -> Result<WorkshopConversa
 /// だけ起きる＝確定の主導権はユーザー。素材は全て外部絶対パスで、KB へは複製しない。
 #[allow(clippy::too_many_arguments)]
 pub async fn chat(
-  provider: Provider,
-  base_url: String,
+  settings: AiSettings,
   model: String,
   think: bool,
   root: PathBuf,
@@ -80,8 +79,13 @@ pub async fn chat(
   let system = agent_system_with(&sources);
   // 破壊的ツール用の確認ゲート。進捗 tx へ確認要求を流し、workshop_confirm の回填を待つ。
   let gate = Arc::new(confirm::ConfirmGate { pending, tx: tx.clone(), cancel: cancel.clone() });
-  let toolset = tools::build_toolset(&root, &sources, gate);
-  // base_url は設定の生値（空欄可）。空欄→provider 既定への解決は agent::run が担う。
+  let provider = settings.provider;
+  // provider ごとの生 URL（空欄可）。空欄→provider 既定への解決は agent::run が担う。
+  let base_url = match provider {
+    Provider::LlamaApp => settings.llama_app_url,
+    Provider::Ollama => settings.ollama_url,
+  };
+  let toolset = tools::build_toolset(&root, &sources, settings.brave_api_key, gate);
   crate::agent::run(provider, &base_url, &model, think, &system, toolset, messages, cancel, &tx).await
 }
 

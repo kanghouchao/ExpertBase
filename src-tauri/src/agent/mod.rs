@@ -8,6 +8,6 @@ pub mod interface;
 
 // agent 機能の公開 API（workshop 等が参照する安定面）。
 // 他機能はこの面のみを参照し、各レイヤ内部へ直接到達しない。
-pub use domain::{resolve_base_url, ChatTurn, Provider, StreamProgress};
+pub use domain::{resolve_base_url, AiSettings, ChatTurn, Provider, StreamProgress};
 pub use infrastructure::runner::run;
 pub use infrastructure::settings_store;

@@ -69,8 +69,9 @@ pub fn resolve_base_url(provider: Provider, raw: &str) -> String {
   }
 }
 
-/// AI 設定（`~/.expertBase/ai.toml` に永続化、前端の設定画面で編集）。
+/// Agent 設定（`~/.expertBase/ai.toml` に永続化、前端の設定画面で編集）。
 /// provider はグローバル選択、model は既定モデル、ollama_url / llama_app_url は各端点（空欄=既定）。
+/// brave_api_key は Web 検索用。空欄なら search_web が設定案内を返す。
 /// provider にも `#[serde(default)]` を付け、旧 ai.toml / 手編集で欠落しても既定へ倒れるようにする。
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -83,6 +84,8 @@ pub struct AiSettings {
   pub ollama_url: String,
   #[serde(default)]
   pub llama_app_url: String,
+  #[serde(default)]
+  pub brave_api_key: String,
 }
 
 #[cfg(test)]
@@ -106,6 +109,7 @@ mod tests {
     let s: AiSettings = toml::from_str("model = \"qwen3:8b\"").unwrap();
     assert_eq!(s.provider, Provider::Ollama);
     assert_eq!(s.model, "qwen3:8b");
+    assert_eq!(serde_json::to_value(s).unwrap()["braveApiKey"], "");
   }
 
   #[test]
