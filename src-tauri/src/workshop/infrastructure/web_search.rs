@@ -47,10 +47,12 @@ impl SearchBackend for BraveSearchBackend {
         .header(reqwest::header::ACCEPT, "application/json")
         .header(reqwest::header::USER_AGENT, crate::extract::APP_USER_AGENT)
         // text_decorations=false: title/description への HTML 強調タグ混入を抑止する。
+        // safesearch=moderate（Brave の既定）: strict は医学・法律・歴史等の専門的な検索結果を
+        // 無言で落とすため、露骨なメディアだけ弾く moderate に留める。
         .query(&[
           ("q", query.as_str()),
           ("count", count.as_str()),
-          ("safesearch", "strict"),
+          ("safesearch", "moderate"),
           ("text_decorations", "false"),
         ])
         .timeout(Duration::from_secs(15))
