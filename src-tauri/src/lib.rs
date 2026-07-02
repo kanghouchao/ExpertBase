@@ -34,6 +34,7 @@ pub fn run() {
       kb::interface::kb_orphans,
       kb::interface::kb_read_entry,
       kb::interface::kb_save_entry,
+      kb::interface::kb_delete_entry,
       agent::interface::ai_has_key,
       agent::interface::ai_list_ollama_models,
       agent::interface::ai_list_models,

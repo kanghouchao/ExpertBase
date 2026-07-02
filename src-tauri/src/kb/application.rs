@@ -120,6 +120,37 @@ pub fn save_entry(home: &Path, rel_path: &str, content: &str) -> Result<(), AppE
   index::upsert_entry(&conn, &rel.to_string_lossy(), &parsed)
 }
 
+/// 条目を削除する（ファイル + 索引）。存在しない条目は err.kb.entryNotFound。
+/// 事前検査はせず最初の rename が存在判定を兼ねる（TOCTOU 回避）。ファイルを一時名へ退避 →
+/// 索引を事務で清掃 → 成功時に一時ファイルを削除、失敗時は復元する＝どの段階で失敗しても
+/// 「ファイルだけ消えて索引に残る」幽霊状態を作らない。
+pub fn delete_entry(home: &Path, rel_path: &str) -> Result<(), AppError> {
+  let (root, mut conn) = open_active(home)?;
+  let rel = registry::checked_kb_markdown_path(rel_path, "entries")?;
+  let abs = root.join(&rel);
+  let tmp = abs.with_extension("md.deleting");
+  match fs::rename(&abs, &tmp) {
+    Ok(()) => {}
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+      return Err(AppError::param("err.kb.entryNotFound", "path", rel_path));
+    }
+    Err(e) => return Err(AppError::generic(e)),
+  }
+  let cleaned = (|| {
+    let tx = conn.transaction().map_err(AppError::generic)?;
+    index::delete_entry(&tx, &rel.to_string_lossy())?;
+    tx.commit().map_err(AppError::generic)
+  })();
+  match cleaned {
+    Ok(()) => fs::remove_file(&tmp).map_err(AppError::generic),
+    Err(e) => {
+      // 索引清掃に失敗＝ファイルを元へ戻す（復元自体の失敗は元エラーを優先して返す）。
+      let _ = fs::rename(&tmp, &abs);
+      Err(e)
+    }
+  }
+}
+
 /// 条目の生 Markdown を読む。
 pub fn read_entry(home: &Path, rel_path: &str) -> Result<String, AppError> {
   let root = active_kb_root(home)?;
@@ -286,4 +317,81 @@ mod tests {
     assert!(delete_kb(tmp.path(), "/nowhere").is_err());
   }
 
+  #[test]
+  fn delete_entry_removes_file_and_index() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let kb_path = home.join("kb");
+    create_kb(home, "k", "", kb_path.to_str().unwrap()).unwrap();
+    fs::create_dir_all(kb_path.join("entries")).unwrap();
+    let content =
+      "---\ntype: Entry\ntitle: 緑茶\ncreated: 2026-06-14\nupdated: 2026-06-14\n---\n\n湯温は70度 [[煎茶]]\n";
+    save_entry(home, "entries/green.md", content).unwrap();
+    let conn = index::open_index(&kb_path).unwrap();
+    assert_eq!(index::stats(&conn).unwrap().entries, 1);
+
+    delete_entry(home, "entries/green.md").unwrap();
+
+    assert!(!kb_path.join("entries/green.md").exists());
+    assert_eq!(index::stats(&conn).unwrap().entries, 0);
+    assert_eq!(index::stats(&conn).unwrap().links, 0);
+    assert!(index::search(&conn, "湯温は").unwrap().is_empty());
+  }
+
+  #[test]
+  fn delete_entry_restores_file_when_index_cleanup_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let kb_path = home.join("kb");
+    create_kb(home, "k", "", kb_path.to_str().unwrap()).unwrap();
+    fs::create_dir_all(kb_path.join("entries")).unwrap();
+    let content =
+      "---\ntype: Entry\ntitle: 緑茶\ncreated: 2026-06-14\nupdated: 2026-06-14\n---\n\n本文\n";
+    save_entry(home, "entries/green.md", content).unwrap();
+    // entries_fts を通常表（path 列なし）に差し替えて索引清掃を失敗させる
+    // （ensure_schema は IF NOT EXISTS なので作り直されない）。
+    let conn = index::open_index(&kb_path).unwrap();
+    conn
+      .execute_batch("DROP TABLE entries_fts; CREATE TABLE entries_fts(dummy);")
+      .unwrap();
+    drop(conn);
+
+    let result = delete_entry(home, "entries/green.md");
+
+    // 失敗を返し、ファイルは復元される＝「ファイルだけ消えて索引に残る」幽霊状態を作らない。
+    assert!(result.is_err());
+    assert!(kb_path.join("entries/green.md").exists());
+    assert!(!kb_path.join("entries/green.md.deleting").exists());
+  }
+
+  #[test]
+  fn delete_entry_maps_missing_file_to_entry_not_found_without_precheck() {
+    // 連続削除（並行削除の直列化と同型）: 2 回目は err.generic ではなく entryNotFound。
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let kb_path = home.join("kb");
+    create_kb(home, "k", "", kb_path.to_str().unwrap()).unwrap();
+    fs::create_dir_all(kb_path.join("entries")).unwrap();
+    let content =
+      "---\ntype: Entry\ntitle: 緑茶\ncreated: 2026-06-14\nupdated: 2026-06-14\n---\n\n本文\n";
+    save_entry(home, "entries/green.md", content).unwrap();
+
+    delete_entry(home, "entries/green.md").unwrap();
+    let err = delete_entry(home, "entries/green.md").unwrap_err();
+
+    assert_eq!(err.code, "err.kb.entryNotFound");
+  }
+
+  #[test]
+  fn delete_entry_rejects_missing_entry_and_bad_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let kb_path = home.join("kb");
+    create_kb(home, "k", "", kb_path.to_str().unwrap()).unwrap();
+
+    let err = delete_entry(home, "entries/nope.md").unwrap_err();
+    assert_eq!(err.code, "err.kb.entryNotFound");
+    // KB 外パスは checked_kb_markdown_path で拒否される。
+    assert!(delete_entry(home, "../secret.md").is_err());
+  }
 }
