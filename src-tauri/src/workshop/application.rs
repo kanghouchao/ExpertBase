@@ -120,6 +120,17 @@ pub fn confirm(
   Ok(rel)
 }
 
+/// 既存条目の本文を上書きし、インデックスを更新する（update_entry ツールの実体）。
+/// メタ（title / cat / sources / created 等）は維持し、updated だけ当日へ進める。
+pub fn overwrite(root: &Path, conn: &Connection, rel: &str, body: &str) -> Result<(), AppError> {
+  let text = std::fs::read_to_string(root.join(rel)).map_err(AppError::generic)?;
+  let mut entry = crate::kb::entry::parse_entry(&text)?;
+  entry.body = body.to_string();
+  entry.meta.updated = chrono::Utc::now().format("%Y-%m-%d").to_string();
+  store::save_entry(root, rel, &entry)?;
+  index::upsert_entry(conn, rel, &entry)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -176,6 +187,29 @@ mod tests {
     let saved = std::fs::read_to_string(root.join(&rel)).unwrap();
     let entry = crate::kb::entry::parse_entry(&saved).unwrap();
     assert_eq!(entry.meta.sources, vec!["/abs/report.pdf".to_string()]);
+  }
+
+  #[test]
+  fn overwrite_replaces_body_keeps_meta_and_reindexes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let conn = index::open_index(root).unwrap();
+    let rel = confirm(root, &conn, "緑茶", "tea", "湯温は70度", &["/abs/a.pdf".into()]).unwrap();
+
+    overwrite(root, &conn, &rel, "湯温は80度 [[煎茶]]").unwrap();
+
+    // メタ（title / cat / sources / created）は維持、本文差し替え、updated は当日へ。
+    let saved = std::fs::read_to_string(root.join(&rel)).unwrap();
+    let entry = crate::kb::entry::parse_entry(&saved).unwrap();
+    assert_eq!(entry.body, "湯温は80度 [[煎茶]]");
+    assert_eq!(entry.meta.title, "緑茶");
+    assert_eq!(entry.meta.cat, "tea");
+    assert_eq!(entry.meta.sources, vec!["/abs/a.pdf".to_string()]);
+    assert_eq!(entry.meta.updated, chrono::Utc::now().format("%Y-%m-%d").to_string());
+    // 索引も新本文で引ける（旧本文は消える）。
+    assert_eq!(index::search(&conn, "湯温は80度").unwrap().len(), 1);
+    assert!(index::search(&conn, "湯温は70度").unwrap().is_empty());
+    assert_eq!(index::backlinks(&conn, "煎茶").unwrap().len(), 1);
   }
 
   #[test]
