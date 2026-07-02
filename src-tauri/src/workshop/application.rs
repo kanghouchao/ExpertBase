@@ -68,6 +68,7 @@ pub fn list_conversations(root: &Path, offset: usize) -> Result<WorkshopConversa
 pub async fn chat(
   provider: Provider,
   base_url: String,
+  brave_api_key: String,
   model: String,
   think: bool,
   root: PathBuf,
@@ -80,7 +81,7 @@ pub async fn chat(
   let system = agent_system_with(&sources);
   // 破壊的ツール用の確認ゲート。進捗 tx へ確認要求を流し、workshop_confirm の回填を待つ。
   let gate = Arc::new(confirm::ConfirmGate { pending, tx: tx.clone(), cancel: cancel.clone() });
-  let toolset = tools::build_toolset(&root, &sources, gate);
+  let toolset = tools::build_toolset(&root, &sources, brave_api_key, gate);
   // base_url は設定の生値（空欄可）。空欄→provider 既定への解決は agent::run が担う。
   crate::agent::run(provider, &base_url, &model, think, &system, toolset, messages, cancel, &tx).await
 }

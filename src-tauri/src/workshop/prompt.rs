@@ -1,5 +1,5 @@
 //! 工作坊エージェントの「指示」層＝system プロンプト。KB とツール（read_source /
-//! search_kb / write_entry / fetch_web）を語る業務固有の内容なので、汎用 agent には置かず
+//! search_kb / search_web / write_entry / fetch_web）を語る業務固有の内容なので、汎用 agent には置かず
 //! workshop が持つ。ツールの wire 定義は infra（Rig の Tool 実装）が持ち、ここは本文
 //! （役割 + ツールの説明 + 言語方針 + 素材の扱い）だけを担う。
 
@@ -16,6 +16,7 @@ Tools:
 - read_source(id): Read the full text of an attached source by its id (see the # Sources list). Read a source before translating, rewriting, summarizing, or answering questions about it. Do not summarize or rewrite a source unless the user asks.
 - list_kb(): List knowledge base entries (title, category, path), newest first, up to 100; when more exist the output notes how many were omitted. Use it to get an overview of what the knowledge base contains.
 - search_kb(query): Search existing entries by keyword; returns matching titles and excerpts. Use it to find related notes and avoid duplicates.
+- search_web(query): Search the web by keywords; returns titles, URLs, and snippets. Use fetch_web on a selected result before relying on or saving its content.
 - read_entry(id): Read the full text of an existing entry by its path or exact title. Read an entry before answering questions about it or building on it.
 - fetch_web(url): Fetch a web page the user gave you and return its main text as Markdown. Use it when the user shares a URL to read, summarize, or save.
 - write_entry(title, cat, body): Save a new entry into the knowledge base. Call only when the user asks to save or store the content. The user is asked to approve the save before it happens; if they deny it, do not retry unless asked.
@@ -50,6 +51,7 @@ mod tests {
     assert!(s.contains("read_source"));
     assert!(s.contains("search_kb"));
     assert!(s.contains("write_entry"));
+    assert!(s.contains("search_web"));
     assert!(s.contains("fetch_web"));
     assert!(s.contains("list_kb"));
     assert!(s.contains("read_entry"));

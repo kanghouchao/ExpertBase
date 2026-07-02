@@ -17,6 +17,7 @@ use crate::extract::{extract_docx, extract_pdf, extract_readable, fetch_html};
 use crate::kb::index;
 
 use super::confirm::ConfirmGate;
+use super::web_search::{BraveSearchBackend, SearchBackend};
 
 pub(crate) type UsedSources = Arc<Mutex<Vec<String>>>;
 
@@ -28,12 +29,14 @@ fn remember_source(used_sources: &UsedSources, source: &str) {
 }
 
 /// 工作坊のツール一式を組んで汎用 `agent` へ注入するために返す。
-/// read_source（素材読み取り）・list_kb・search_kb・read_entry・write_entry・fetch_web を常に登録する。
+/// read_source・list_kb・search_kb・search_web・read_entry・write_entry・fetch_web を常に登録する。
 /// used_sources は read/fetch で読んだ素材を write_entry が entry.sources に残すための共有状態。
+/// brave_api_key は search_web の backend へだけ渡し、ツール出力には含めない。
 /// gate は破壊的ツール（write_entry）が実行前にユーザー確認を取るための確認ゲート。
 pub(crate) fn build_toolset(
   root: &Path,
   sources: &[String],
+  brave_api_key: String,
   gate: Arc<ConfirmGate>,
 ) -> Vec<Box<dyn rig_core::tool::ToolDyn>> {
   let used_sources: UsedSources = Arc::new(Mutex::new(Vec::new()));
@@ -41,6 +44,7 @@ pub(crate) fn build_toolset(
     Box::new(ReadSource { sources: sources.to_vec(), used_sources: used_sources.clone() }),
     Box::new(ListKb { root: root.to_path_buf() }),
     Box::new(SearchKb { root: root.to_path_buf() }),
+    Box::new(SearchWeb { backend: Arc::new(BraveSearchBackend::new(brave_api_key)) }),
     Box::new(ReadEntry { root: root.to_path_buf() }),
     Box::new(WriteEntry { root: root.to_path_buf(), used_sources: used_sources.clone(), gate }),
     Box::new(FetchWeb { used_sources }),
@@ -57,6 +61,13 @@ pub struct ReadArgs {
 /// search_kb の引数。弱いモデルが欠落させても落ちないよう default で緩く受ける。
 #[derive(Deserialize)]
 pub struct SearchArgs {
+  #[serde(default)]
+  query: String,
+}
+
+/// search_web の引数。検索語を緩く受ける。
+#[derive(Deserialize)]
+pub struct SearchWebArgs {
   #[serde(default)]
   query: String,
 }
@@ -145,6 +156,48 @@ impl Tool for SearchKb {
       .await
       .unwrap_or_else(|e| format!("(search task failed: {e})"));
     Ok(out)
+  }
+}
+
+/// Web 検索で候補 URL を返す。本文は fetch_web で選択的に読む。
+pub struct SearchWeb {
+  pub backend: Arc<dyn SearchBackend>,
+}
+
+impl Tool for SearchWeb {
+  const NAME: &'static str = "search_web";
+  type Error = Infallible;
+  type Args = SearchWebArgs;
+  type Output = String;
+
+  async fn definition(&self, _prompt: String) -> ToolDefinition {
+    ToolDefinition {
+      name: Self::NAME.to_string(),
+      description:
+        "Search the web by keywords. Returns JSON results with title, URL, and snippet. Use fetch_web on a selected URL to read the page."
+          .to_string(),
+      parameters: json!({
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Keywords to search for on the web" }
+        },
+        "required": ["query"]
+      }),
+    }
+  }
+
+  async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+    let query = args.query.trim();
+    if query.is_empty() {
+      return Ok("(search_web needs a non-empty query)".to_string());
+    }
+    match self.backend.search(query.to_string()).await {
+      Ok(results) => Ok(
+        serde_json::to_string(&results)
+          .unwrap_or_else(|e| format!("(search_web result serialization failed: {e})")),
+      ),
+      Err(e) => Ok(format!("(search_web error: {e})")),
+    }
   }
 }
 
@@ -482,8 +535,24 @@ fn format_web_body(title: &str, markdown: &str) -> String {
 mod tests {
   use super::*;
   use crate::kb::entry::{Entry, EntryMeta};
+  use crate::workshop::infrastructure::web_search::{SearchBackend, WebSearchResult};
+  use futures::future::{BoxFuture, FutureExt};
+  use std::sync::atomic::{AtomicUsize, Ordering};
   use std::sync::{Arc, Mutex};
   use unicode_normalization::UnicodeNormalization;
+
+  struct FakeSearchBackend {
+    calls: Arc<AtomicUsize>,
+    result: Result<Vec<WebSearchResult>, String>,
+  }
+
+  impl SearchBackend for FakeSearchBackend {
+    fn search(&self, _query: String) -> BoxFuture<'static, Result<Vec<WebSearchResult>, String>> {
+      self.calls.fetch_add(1, Ordering::Relaxed);
+      let result = self.result.clone();
+      async move { result }.boxed()
+    }
+  }
 
   /// 確認要求へ自動応答するゲート（approve = 許可 / 拒否）。確認そのものが主題でないテスト用。
   fn auto_gate(approve: bool) -> Arc<ConfirmGate> {
@@ -702,6 +771,54 @@ mod tests {
       .unwrap();
     assert!(out.contains("needs a non-empty url"), "was: {out}");
     assert!(used_sources.lock().unwrap().is_empty());
+  }
+
+  #[tokio::test]
+  async fn search_web_rejects_empty_query_without_calling_backend() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let tool = SearchWeb {
+      backend: Arc::new(FakeSearchBackend { calls: calls.clone(), result: Ok(vec![]) }),
+    };
+
+    let out = tool.call(SearchWebArgs { query: "  ".into() }).await.unwrap();
+
+    assert_eq!(out, "(search_web needs a non-empty query)");
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+  }
+
+  #[tokio::test]
+  async fn search_web_returns_structured_results() {
+    let tool = SearchWeb {
+      backend: Arc::new(FakeSearchBackend {
+        calls: Arc::new(AtomicUsize::new(0)),
+        result: Ok(vec![WebSearchResult {
+          title: "ExpertBase".into(),
+          url: "https://example.com/expertbase".into(),
+          snippet: "Local-first knowledge base".into(),
+        }]),
+      }),
+    };
+
+    let out = tool.call(SearchWebArgs { query: "ExpertBase".into() }).await.unwrap();
+    let results: serde_json::Value = serde_json::from_str(&out).unwrap();
+
+    assert_eq!(results[0]["title"], "ExpertBase");
+    assert_eq!(results[0]["url"], "https://example.com/expertbase");
+    assert_eq!(results[0]["snippet"], "Local-first knowledge base");
+  }
+
+  #[tokio::test]
+  async fn search_web_returns_backend_errors_without_failing_tool_loop() {
+    let tool = SearchWeb {
+      backend: Arc::new(FakeSearchBackend {
+        calls: Arc::new(AtomicUsize::new(0)),
+        result: Err("Brave Search request failed with HTTP 429".into()),
+      }),
+    };
+
+    let out = tool.call(SearchWebArgs { query: "ExpertBase".into() }).await.unwrap();
+
+    assert_eq!(out, "(search_web error: Brave Search request failed with HTTP 429)");
   }
 
   #[test]
