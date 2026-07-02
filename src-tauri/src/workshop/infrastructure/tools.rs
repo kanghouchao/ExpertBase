@@ -32,7 +32,7 @@ fn remember_source(used_sources: &UsedSources, source: &str) {
 /// read_source・list_kb・search_kb・search_web・read_entry・write_entry・fetch_web を常に登録する。
 /// used_sources は read/fetch で読んだ素材を write_entry が entry.sources に残すための共有状態。
 /// brave_api_key は search_web の backend へだけ渡し、ツール出力には含めない。
-/// gate は破壊的ツール（write_entry）が実行前にユーザー確認を取るための確認ゲート。
+/// gate は破壊的ツール（write_entry / update_entry）が実行前にユーザー確認を取るための確認ゲート。
 pub(crate) fn build_toolset(
   root: &Path,
   sources: &[String],
@@ -46,7 +46,8 @@ pub(crate) fn build_toolset(
     Box::new(SearchKb { root: root.to_path_buf() }),
     Box::new(SearchWeb { backend: Arc::new(BraveSearchBackend::new(brave_api_key)) }),
     Box::new(ReadEntry { root: root.to_path_buf() }),
-    Box::new(WriteEntry { root: root.to_path_buf(), used_sources: used_sources.clone(), gate }),
+    Box::new(WriteEntry { root: root.to_path_buf(), used_sources: used_sources.clone(), gate: gate.clone() }),
+    Box::new(UpdateEntry { root: root.to_path_buf(), gate }),
     Box::new(FetchWeb { used_sources }),
   ]
 }
@@ -326,6 +327,77 @@ impl Tool for WriteEntry {
   }
 }
 
+/// update_entry の引数。id（path / 正確な title）と新しい本文を緩く受ける。
+#[derive(Deserialize)]
+pub struct UpdateEntryArgs {
+  #[serde(default)]
+  id: String,
+  #[serde(default)]
+  body: String,
+}
+
+/// 既存条目の本文を上書きするツール（application::overwrite へ委譲）。
+/// 上書きは破壊的操作＝実行前に確認ゲートでユーザーの許可を取る。
+/// 確認カードには対象条目と新旧の差異概要（文字数）を載せる。
+pub struct UpdateEntry {
+  pub root: PathBuf,
+  pub gate: Arc<ConfirmGate>,
+}
+
+impl Tool for UpdateEntry {
+  const NAME: &'static str = "update_entry";
+  type Error = Infallible;
+  type Args = UpdateEntryArgs;
+  type Output = String;
+
+  async fn definition(&self, _prompt: String) -> ToolDefinition {
+    ToolDefinition {
+      name: Self::NAME.to_string(),
+      description:
+        "Overwrite the body of an existing knowledge base entry, located by its path (entries/*.md) or exact title. The new body replaces the old one entirely. Call only when the user asks to change a saved entry."
+          .to_string(),
+      parameters: json!({
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Entry path (entries/*.md) or exact entry title" },
+          "body": { "type": "string", "description": "New entry body in Markdown (replaces the old body)" }
+        },
+        "required": ["id", "body"]
+      }),
+    }
+  }
+
+  async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+    // 引数検証と位置決めを先に＝不正・不在の要求で確認カードを出さない。
+    let id = args.id.trim().to_string();
+    let body = args.body.trim().to_string();
+    if id.is_empty() || body.is_empty() {
+      return Ok("(update_entry needs a non-empty id and body)".to_string());
+    }
+    let root = self.root.clone();
+    let prep = tokio::task::spawn_blocking(move || update_prepare(&root, &id))
+      .await
+      .unwrap_or_else(|e| Err(format!("(update task failed: {e})")));
+    let (rel, title, old_chars) = match prep {
+      Ok(found) => found,
+      Err(notice) => return Ok(notice),
+    };
+    // 破壊的操作＝実行前にユーザー確認。拒否は説明文で返し、agent ループは継続する。
+    let summary = format!(
+      "update_entry: overwrite \"{title}\" ({rel})\nbody: {old_chars} chars -> {} chars",
+      body.chars().count()
+    );
+    if !self.gate.request(&summary).await {
+      return Ok(format!("(user denied update_entry: {title})"));
+    }
+    let root = self.root.clone();
+    let out = tokio::task::spawn_blocking(move || update_blocking(&root, &rel, &body))
+      .await
+      .unwrap_or_else(|e| format!("(update task failed: {e})"));
+    Ok(out)
+  }
+}
+
 /// 素材読み取り（ブロッキング）。id を許可集合で検証してから、拡張子で抽出器を選ぶ。
 /// source は外部絶対パスのみ（pdf/docx は抽出、その他はテキスト読み）。
 /// エラーは全てモデル向け文字列で返す（ループ継続）。読み取りのみ・KB へ落とさない。
@@ -417,31 +489,58 @@ fn list_blocking(root: &Path) -> String {
   }
 }
 
+/// id（path / 正確な title）を索引で既存条目へ解決し、entries/*.md へ再検証した相対パスと
+/// タイトルを返す（read_entry / update_entry 共用）。失敗は全てモデル向け文字列（ループ継続）。
+fn resolve_entry_blocking(root: &Path, id: &str) -> Result<(String, String), String> {
+  let conn = index::open_index(root).map_err(|e| format!("(index error: {e:?})"))?;
+  let refs = index::list_entries(&conn).map_err(|e| format!("(index error: {e:?})"))?;
+  // ponytail: 線形探索。条目一覧はメモリに収まる規模なので専用 SQL は不要。
+  let Some(hit) = refs.into_iter().find(|r| r.path == id || r.title == id) else {
+    return Err(format!("(no entry found: {id})"));
+  };
+  // 索引由来のパスでも entries/*.md に限定して再検証する（索引が壊れていても越境を防ぐ）。
+  let Ok(rel) = crate::kb::checked_kb_markdown_path(&hit.path, "entries") else {
+    return Err(format!("(invalid entry path in index: {})", hit.path));
+  };
+  Ok((rel.to_string_lossy().into_owned(), hit.title))
+}
+
 /// 条目全文読み（ブロッキング）。id（path / title）を索引で解決してから開く。
 fn read_entry_blocking(root: &Path, id: &str) -> String {
   let id = id.trim();
   if id.is_empty() {
     return "(read_entry needs a non-empty path or title)".to_string();
   }
-  let conn = match index::open_index(root) {
-    Ok(c) => c,
-    Err(e) => return format!("(index error: {e:?})"),
-  };
-  let refs = match index::list_entries(&conn) {
-    Ok(r) => r,
-    Err(e) => return format!("(index error: {e:?})"),
-  };
-  // ponytail: 線形探索。条目一覧はメモリに収まる規模なので専用 SQL は不要。
-  let Some(hit) = refs.iter().find(|r| r.path == id || r.title == id) else {
-    return format!("(no entry found: {id})");
-  };
-  // 索引由来のパスでも entries/*.md に限定して再検証する（索引が壊れていても越境読みを防ぐ）。
-  let Ok(rel) = crate::kb::checked_kb_markdown_path(&hit.path, "entries") else {
-    return format!("(invalid entry path in index: {})", hit.path);
+  let rel = match resolve_entry_blocking(root, id) {
+    Ok((rel, _title)) => rel,
+    Err(notice) => return notice,
   };
   match std::fs::read_to_string(root.join(rel)) {
     Ok(text) => text,
     Err(e) => format!("(read error: {e})"),
+  }
+}
+
+/// update_entry の位置決め（ブロッキング・読み取りのみ）。対象の相対パス・タイトル・
+/// 旧本文の文字数（確認カードの差異概要用）を返す。
+fn update_prepare(root: &Path, id: &str) -> Result<(String, String, usize), String> {
+  let (rel, title) = resolve_entry_blocking(root, id)?;
+  let text = std::fs::read_to_string(root.join(&rel)).map_err(|e| format!("(read error: {e})"))?;
+  let entry =
+    crate::kb::entry::parse_entry(&text).map_err(|e| format!("(parse error: {e:?})"))?;
+  // 差異概要の文字数は前後の空白を除いて数える（末尾改行で 1 ずれた数字を出さない）。
+  Ok((rel, title, entry.body.trim().chars().count()))
+}
+
+/// 条目上書き（ブロッキング）。application::overwrite で本文差し替え + 索引更新。
+fn update_blocking(root: &Path, rel: &str, body: &str) -> String {
+  let conn = match index::open_index(root) {
+    Ok(c) => c,
+    Err(e) => return format!("(index error: {e:?})"),
+  };
+  match crate::workshop::application::overwrite(root, &conn, rel, body) {
+    Ok(()) => format!("Updated {rel}"),
+    Err(e) => format!("(update error: {e:?})"),
   }
 }
 
@@ -755,6 +854,114 @@ mod tests {
     // 拒否は説明文としてモデルへ返り、KB には何も書かれない（ループは継続）。
     assert!(out.contains("user denied write_entry"), "was: {out}");
     assert_eq!(index::stats(&conn).unwrap().entries, 0);
+  }
+
+  /// 更新対象の条目をファイル + 索引の両方へ植える（update/delete 系テスト用）。
+  fn seed_entry_file(root: &Path, rel: &str, title: &str, body: &str) {
+    std::fs::create_dir_all(root.join("entries")).unwrap();
+    let content = format!(
+      "---\ntype: Entry\ntitle: {title}\ncreated: 2026-06-14\nupdated: 2026-06-14\n---\n\n{body}\n"
+    );
+    std::fs::write(root.join(rel), content).unwrap();
+    let conn = index::open_index(root).unwrap();
+    seed_entry(&conn, rel, title, body);
+  }
+
+  #[tokio::test]
+  async fn update_entry_tool_overwrites_body_and_index_after_approval() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    seed_entry_file(root, "entries/green.md", "緑茶", "湯温は70度");
+
+    let tool = UpdateEntry { root: root.to_path_buf(), gate: auto_gate(true) };
+    let out = tool
+      .call(UpdateEntryArgs { id: "緑茶".into(), body: "湯温は80度 [[煎茶]]".into() })
+      .await
+      .unwrap();
+
+    assert!(out.starts_with("Updated"), "was: {out}");
+    // ファイル: 本文だけ差し替わり、メタ（title / created）は維持、updated は当日へ進む。
+    let saved = std::fs::read_to_string(root.join("entries/green.md")).unwrap();
+    let entry = crate::kb::entry::parse_entry(&saved).unwrap();
+    assert_eq!(entry.body, "湯温は80度 [[煎茶]]");
+    assert_eq!(entry.meta.title, "緑茶");
+    assert_eq!(entry.meta.created, "2026-06-14");
+    assert_ne!(entry.meta.updated, "2026-06-14");
+    // 索引: 新本文で検索でき、旧本文は消え、リンクも張り直される。
+    let conn = index::open_index(root).unwrap();
+    assert_eq!(index::search(&conn, "湯温は80度").unwrap().len(), 1);
+    assert!(index::search(&conn, "湯温は70度").unwrap().is_empty());
+    assert_eq!(index::backlinks(&conn, "煎茶").unwrap().len(), 1);
+  }
+
+  #[tokio::test]
+  async fn update_entry_denial_keeps_entry_unchanged() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    seed_entry_file(root, "entries/green.md", "緑茶", "湯温は70度");
+    let before = std::fs::read_to_string(root.join("entries/green.md")).unwrap();
+
+    let tool = UpdateEntry { root: root.to_path_buf(), gate: auto_gate(false) };
+    let out = tool
+      .call(UpdateEntryArgs { id: "緑茶".into(), body: "改ざん".into() })
+      .await
+      .unwrap();
+
+    // 拒否は説明文としてモデルへ返り、ファイルも索引も変わらない（ループは継続）。
+    assert!(out.contains("user denied update_entry"), "was: {out}");
+    assert_eq!(std::fs::read_to_string(root.join("entries/green.md")).unwrap(), before);
+    let conn = index::open_index(root).unwrap();
+    assert_eq!(index::search(&conn, "湯温は70度").unwrap().len(), 1);
+  }
+
+  #[tokio::test]
+  async fn update_entry_reports_unknown_entry_and_missing_args() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    index::open_index(root).unwrap();
+    // gate は拒否固定＝以下の応答が拒否文でないことが「確認前に返っている」ことの証明。
+    let tool = UpdateEntry { root: root.to_path_buf(), gate: auto_gate(false) };
+
+    let out = tool.call(UpdateEntryArgs { id: "無い".into(), body: "x".into() }).await.unwrap();
+    assert!(out.contains("no entry found"), "was: {out}");
+    let empty = tool.call(UpdateEntryArgs { id: "  ".into(), body: "  ".into() }).await.unwrap();
+    assert!(empty.contains("non-empty"), "was: {empty}");
+  }
+
+  #[tokio::test]
+  async fn update_entry_confirm_summary_shows_change_overview() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    seed_entry_file(root, "entries/green.md", "緑茶", "湯温は70度");
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let gate = Arc::new(ConfirmGate {
+      pending: Default::default(),
+      tx,
+      cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    });
+    let pending = gate.pending.clone();
+    let tool = UpdateEntry { root: root.to_path_buf(), gate };
+    let task = tokio::spawn(async move {
+      tool
+        .call(UpdateEntryArgs { id: "entries/green.md".into(), body: "湯温は80度です".into() })
+        .await
+        .unwrap()
+    });
+
+    // 確認カードには「どの条目か」と新旧の差異概要（文字数）が載り、応答まで書き込まれない。
+    let Some(crate::agent::StreamProgress::ConfirmRequest { id, summary }) = rx.recv().await else {
+      panic!("expected ConfirmRequest event");
+    };
+    assert!(summary.contains("緑茶"), "was: {summary}");
+    assert!(summary.contains("entries/green.md"), "was: {summary}");
+    assert!(summary.contains("6 chars -> 8 chars"), "was: {summary}");
+    let unchanged = std::fs::read_to_string(root.join("entries/green.md")).unwrap();
+    assert!(unchanged.contains("湯温は70度"), "must not write before approval");
+
+    crate::workshop::infrastructure::confirm::resolve(&pending, id, true);
+    let out = task.await.unwrap();
+    assert!(out.starts_with("Updated"), "was: {out}");
   }
 
   #[tokio::test]

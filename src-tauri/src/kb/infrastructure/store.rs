@@ -43,7 +43,6 @@ pub fn read_entry(root: &Path, rel_path: &str) -> Result<Entry, AppError> {
 }
 
 /// 既存条目を上書き保存する（相対パス指定）。
-#[cfg(test)]
 pub fn save_entry(root: &Path, rel_path: &str, entry: &Entry) -> Result<(), AppError> {
   fs::write(root.join(rel_path), serialize_entry(entry)?).map_err(AppError::generic)
 }
