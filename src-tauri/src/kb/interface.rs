@@ -112,3 +112,9 @@ pub fn kb_save_entry(app: tauri::AppHandle, path: String, content: String) -> Re
   let home = app.path().home_dir().map_err(AppError::generic)?;
   application::save_entry(&home, &path, &content)
 }
+
+#[tauri::command]
+pub fn kb_delete_entry(app: tauri::AppHandle, path: String) -> Result<(), AppError> {
+  let home = app.path().home_dir().map_err(AppError::generic)?;
+  application::delete_entry(&home, &path)
+}
