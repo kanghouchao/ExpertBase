@@ -16,6 +16,8 @@ use unicode_normalization::UnicodeNormalization;
 use crate::extract::{extract_docx, extract_pdf, extract_readable, fetch_html};
 use crate::kb::index;
 
+use super::confirm::ConfirmGate;
+
 pub(crate) type UsedSources = Arc<Mutex<Vec<String>>>;
 
 fn remember_source(used_sources: &UsedSources, source: &str) {
@@ -28,12 +30,17 @@ fn remember_source(used_sources: &UsedSources, source: &str) {
 /// 工作坊のツール一式を組んで汎用 `agent` へ注入するために返す。
 /// read_source（素材読み取り）・search_kb・write_entry・fetch_web を常に登録する。
 /// used_sources は read/fetch で読んだ素材を write_entry が entry.sources に残すための共有状態。
-pub(crate) fn build_toolset(root: &Path, sources: &[String]) -> Vec<Box<dyn rig_core::tool::ToolDyn>> {
+/// gate は破壊的ツール（write_entry）が実行前にユーザー確認を取るための確認ゲート。
+pub(crate) fn build_toolset(
+  root: &Path,
+  sources: &[String],
+  gate: Arc<ConfirmGate>,
+) -> Vec<Box<dyn rig_core::tool::ToolDyn>> {
   let used_sources: UsedSources = Arc::new(Mutex::new(Vec::new()));
   vec![
     Box::new(ReadSource { sources: sources.to_vec(), used_sources: used_sources.clone() }),
     Box::new(SearchKb { root: root.to_path_buf() }),
-    Box::new(WriteEntry { root: root.to_path_buf(), used_sources: used_sources.clone() }),
+    Box::new(WriteEntry { root: root.to_path_buf(), used_sources: used_sources.clone(), gate }),
     Box::new(FetchWeb { used_sources }),
   ]
 }
@@ -141,9 +148,11 @@ impl Tool for SearchKb {
 
 /// 新しい条目を KB へ書き込むツール（application::confirm へ委譲）。
 /// 同じ実行内で正常に読んだファイル / URL を entry.sources に記録する。
+/// 書き込みは破壊的操作＝実行前に確認ゲートでユーザーの許可を取る。
 pub struct WriteEntry {
   pub root: PathBuf,
   pub used_sources: UsedSources,
+  pub gate: Arc<ConfirmGate>,
 }
 
 impl Tool for WriteEntry {
@@ -171,6 +180,15 @@ impl Tool for WriteEntry {
   }
 
   async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+    // 引数検証を先に＝不正な要求で確認カードを出さない。
+    let title = args.title.trim().to_string();
+    if title.is_empty() || args.body.trim().is_empty() {
+      return Ok("(write_entry needs a non-empty title and body)".to_string());
+    }
+    // 破壊的操作＝実行前にユーザー確認。拒否は説明文で返し、agent ループは継続する。
+    if !self.gate.request(&format!("write_entry: save new entry \"{title}\"")).await {
+      return Ok(format!("(user denied write_entry: {title})"));
+    }
     let root = self.root.clone();
     let source_refs = self.used_sources.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let out = tokio::task::spawn_blocking(move || write_blocking(&root, &source_refs, args))
@@ -329,6 +347,25 @@ mod tests {
   use std::sync::{Arc, Mutex};
   use unicode_normalization::UnicodeNormalization;
 
+  /// 確認要求へ自動応答するゲート（approve = 許可 / 拒否）。確認そのものが主題でないテスト用。
+  fn auto_gate(approve: bool) -> Arc<ConfirmGate> {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let gate = Arc::new(ConfirmGate {
+      pending: Default::default(),
+      tx,
+      cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    });
+    let pending = gate.pending.clone();
+    tokio::spawn(async move {
+      while let Some(event) = rx.recv().await {
+        if let crate::agent::StreamProgress::ConfirmRequest { id, .. } = event {
+          crate::workshop::infrastructure::confirm::resolve(&pending, id, approve);
+        }
+      }
+    });
+    gate
+  }
+
   fn seed_entry(conn: &rusqlite::Connection, path: &str, title: &str, body: &str) {
     let entry = Entry {
       meta: EntryMeta {
@@ -425,7 +462,7 @@ mod tests {
     let conn = index::open_index(root).unwrap();
 
     let used_sources = Arc::new(Mutex::new(vec!["/abs/report.pdf".into()]));
-    let tool = WriteEntry { root: root.to_path_buf(), used_sources };
+    let tool = WriteEntry { root: root.to_path_buf(), used_sources, gate: auto_gate(true) };
     let out = tool
       .call(WriteArgs { title: "緑茶".into(), cat: "tea".into(), body: "湯温は [[煎茶]] で70度".into() })
       .await
@@ -449,6 +486,7 @@ mod tests {
     let tool = WriteEntry {
       root: root.to_path_buf(),
       used_sources: Arc::new(Mutex::new(Vec::new())),
+      gate: auto_gate(true),
     };
 
     let out = tool
@@ -456,6 +494,65 @@ mod tests {
       .await
       .unwrap();
     assert!(out.contains("needs a non-empty title and body"));
+  }
+
+  #[tokio::test]
+  async fn write_entry_waits_for_user_confirmation_before_saving() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let conn = index::open_index(root).unwrap();
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let gate = Arc::new(ConfirmGate {
+      pending: Default::default(),
+      tx,
+      cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    });
+    let pending = gate.pending.clone();
+    let tool = WriteEntry {
+      root: root.to_path_buf(),
+      used_sources: Arc::new(Mutex::new(Vec::new())),
+      gate,
+    };
+    let task = tokio::spawn(async move {
+      tool
+        .call(WriteArgs { title: "緑茶".into(), cat: "tea".into(), body: "本文".into() })
+        .await
+        .unwrap()
+    });
+
+    // 確認要求が流れ、応答するまで書き込まれない。
+    let Some(crate::agent::StreamProgress::ConfirmRequest { id, summary }) = rx.recv().await else {
+      panic!("expected ConfirmRequest event");
+    };
+    assert!(summary.contains("緑茶"), "was: {summary}");
+    assert_eq!(index::stats(&conn).unwrap().entries, 0);
+
+    crate::workshop::infrastructure::confirm::resolve(&pending, id, true);
+    let out = task.await.unwrap();
+    assert!(out.starts_with("Saved entry to"), "was: {out}");
+    assert_eq!(index::stats(&conn).unwrap().entries, 1);
+  }
+
+  #[tokio::test]
+  async fn write_entry_denial_returns_notice_and_saves_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let conn = index::open_index(root).unwrap();
+    let tool = WriteEntry {
+      root: root.to_path_buf(),
+      used_sources: Arc::new(Mutex::new(Vec::new())),
+      gate: auto_gate(false),
+    };
+
+    let out = tool
+      .call(WriteArgs { title: "緑茶".into(), cat: "tea".into(), body: "本文".into() })
+      .await
+      .unwrap();
+
+    // 拒否は説明文としてモデルへ返り、KB には何も書かれない（ループは継続）。
+    assert!(out.contains("user denied write_entry"), "was: {out}");
+    assert_eq!(index::stats(&conn).unwrap().entries, 0);
   }
 
   #[tokio::test]

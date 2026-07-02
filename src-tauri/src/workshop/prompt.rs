@@ -16,7 +16,7 @@ Tools:
 - read_source(id): Read the full text of an attached source by its id (see the # Sources list). Read a source before translating, rewriting, summarizing, or answering questions about it. Do not summarize or rewrite a source unless the user asks.
 - search_kb(query): Search existing entries by keyword; returns matching titles and excerpts. Use it to find related notes and avoid duplicates.
 - fetch_web(url): Fetch a web page the user gave you and return its main text as Markdown. Use it when the user shares a URL to read, summarize, or save.
-- write_entry(title, cat, body): Save a new entry into the knowledge base. Call only when the user asks to save or store the content.
+- write_entry(title, cat, body): Save a new entry into the knowledge base. Call only when the user asks to save or store the content. The user is asked to approve the save before it happens; if they deny it, do not retry unless asked.
   - title: a concise heading.
   - cat: a short lowercase English category, e.g. tea, finance, privacy.
   - body: the entry body in Markdown, using [[title]] links to related notes."###;

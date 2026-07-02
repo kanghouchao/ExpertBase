@@ -229,16 +229,27 @@ export function stopActive(
   return rollback;
 }
 
-/** 表示中の実行の確認要求へ応答し（許可 / 拒否を後端へ回填）、カードを畳む。 */
-export function answerConfirm(
+/** 表示中の実行の確認要求へ応答し（許可 / 拒否を後端へ回填）、カードを畳む。
+ * IPC が失敗したらカードを残す（再試行の入口）＝後端が待ち続けるのに応答手段を失わない。 */
+export async function answerConfirm(
   kbPath: string | null | undefined,
   conversationId: number | null,
   approved: boolean
-): void {
+): Promise<void> {
   const active = state.active;
   if (!isRunForConversation(active, kbPath, conversationId) || !active.confirm) return;
-  void workshopConfirm(active.confirm.id, approved);
-  patch(active.kbPath, active.conversationId, { confirm: null });
+  const request = active.confirm;
+  try {
+    await workshopConfirm(request.id, approved);
+    patch(active.kbPath, active.conversationId, { confirm: null });
+  } catch (cause) {
+    if (!isActive(active.kbPath, active.conversationId)) return;
+    // カードは残したまま、エラーは既存のエラー経路（実行中も横に表示される）で見せる。
+    emit({
+      active: state.active,
+      error: { kbPath: active.kbPath, conversationId: active.conversationId, cause },
+    });
+  }
 }
 
 /** KB 切替など: 進行中の実行を捨てる（存盤目標が動くので保存しない）。 */

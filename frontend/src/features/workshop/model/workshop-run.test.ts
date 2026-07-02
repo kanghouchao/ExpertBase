@@ -25,15 +25,16 @@ let saveCalls: {
 }[] = [];
 let cancelCalls = 0;
 let confirmCalls: { id: number; approved: boolean }[] = [];
+let confirmImpl = async (id: number, approved: boolean) => {
+  confirmCalls.push({ id, approved });
+};
 
 mock.module("@/shared/api/tauri/client", () => ({
   workshopChat: (...args: Parameters<ChatImpl>) => chatImpl(...args),
   workshopCancel: async () => {
     cancelCalls += 1;
   },
-  workshopConfirm: async (id: number, approved: boolean) => {
-    confirmCalls.push({ id, approved });
-  },
+  workshopConfirm: (id: number, approved: boolean) => confirmImpl(id, approved),
   saveWorkshopConversation: async (input: (typeof saveCalls)[number]) => {
     saveCalls.push(input);
     return {
@@ -71,6 +72,9 @@ beforeEach(() => {
   saveCalls = [];
   cancelCalls = 0;
   confirmCalls = [];
+  confirmImpl = async (id: number, approved: boolean) => {
+    confirmCalls.push({ id, approved });
+  };
 });
 
 test("run identity includes the opaque KB path on every platform", () => {
@@ -166,13 +170,46 @@ describe("answerConfirm", () => {
     expect(getSnapshot().active?.confirm).toEqual({ id: 42, summary: "delete entries/a.md" });
 
     // 応答すると後端へ回填され、カードは畳まれる。
-    answerConfirm("/home/user/ExpertBase/tea", 11, true);
+    await answerConfirm("/home/user/ExpertBase/tea", 11, true);
     expect(confirmCalls).toEqual([{ id: 42, approved: true }]);
     expect(getSnapshot().active?.confirm).toBeNull();
 
     // 応答済み・要求なしの二重応答は無視される。
-    answerConfirm("/home/user/ExpertBase/tea", 11, false);
+    await answerConfirm("/home/user/ExpertBase/tea", 11, false);
     expect(confirmCalls).toHaveLength(1);
+
+    resolveChat("done");
+    await tick();
+  });
+
+  test("keeps the card and surfaces the error when the confirm IPC fails", async () => {
+    confirmImpl = async () => {
+      throw new Error("ipc down");
+    };
+    let resolveChat: (v: string) => void = () => {};
+    chatImpl = (_s, _m, _mo, _th, _to, onPhase) => {
+      onPhase?.({ phase: "confirmRequest", id: 5, summary: "write_entry: 緑茶" });
+      return new Promise<string>((resolve) => {
+        resolveChat = resolve;
+      });
+    };
+
+    startRun({
+      kbPath: "/home/user/ExpertBase/tea",
+      conversationId: 13,
+      sourceIds: [],
+      baseHistory: [{ role: "user", text: "問" }],
+      model: "qwen3:8b",
+      think: false,
+      tools: true,
+    });
+    await tick();
+
+    await answerConfirm("/home/user/ExpertBase/tea", 13, true);
+
+    // IPC 失敗＝カードは残り（再試行の入口）、エラーは既存のエラー経路で見える。
+    expect(getSnapshot().active?.confirm).toEqual({ id: 5, summary: "write_entry: 緑茶" });
+    expect(getSnapshot().error?.conversationId).toBe(13);
 
     resolveChat("done");
     await tick();

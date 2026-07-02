@@ -26,8 +26,13 @@ fn lock(pending: &PendingConfirms) -> MutexGuard<'_, HashMap<u64, oneshot::Sende
   pending.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// 破壊的ツール（update/delete）が実行前にユーザー確認を取るためのゲート。
+/// 破壊的ツール（write/update/delete）が実行前にユーザー確認を取るためのゲート。
 /// 1 回の workshop_chat 実行ごとに tx / cancel を束ねて作り、ツールへ渡す。
+///
+/// cancel は「実行全体の停止」を意味する共有フラグ（停止ボタン / KB 切替）。ここでの拒否は
+/// ブロック中のツールを速やかに解放するためのもので、その後 runner が同じフラグを見て実行を
+/// 打ち切る＝停止の意味論として意図どおり。ユーザーの「拒否」は workshop_confirm 経由で回填され、
+/// 拒否文がツール結果として agent に返り、実行は継続する。
 pub struct ConfirmGate {
   pub pending: PendingConfirms,
   pub tx: UnboundedSender<StreamProgress>,
@@ -70,6 +75,14 @@ impl ConfirmGate {
 pub fn resolve(pending: &PendingConfirms, id: u64, approved: bool) {
   if let Some(sender) = lock(pending).remove(&id) {
     let _ = sender.send(approved);
+  }
+}
+
+/// 未応答の確認を全て拒否として解決する（UI へイベントが届かなくなったときの解放弁）。
+/// ローカルモデルは直列＝実行は同時に 1 本なので、全部拒否で足りる。
+pub fn deny_all(pending: &PendingConfirms) {
+  for (_, sender) in lock(pending).drain() {
+    let _ = sender.send(false);
   }
 }
 
@@ -131,5 +144,20 @@ mod tests {
     let (gate, _rx) = make_gate();
     assert!(!gate.request_with("x", Duration::from_millis(10)).await);
     assert!(lock(&gate.pending).is_empty());
+  }
+
+  #[tokio::test]
+  async fn deny_all_resolves_waiting_requests_as_denied() {
+    let (gate, mut rx) = make_gate();
+    let pending = gate.pending.clone();
+    let task = tokio::spawn(async move { gate.request("x").await });
+    let Some(StreamProgress::ConfirmRequest { .. }) = rx.recv().await else {
+      panic!("expected ConfirmRequest event");
+    };
+
+    deny_all(&pending);
+
+    assert!(!task.await.unwrap());
+    assert!(lock(&pending).is_empty());
   }
 }

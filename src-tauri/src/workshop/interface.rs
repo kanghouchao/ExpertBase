@@ -87,6 +87,7 @@ pub async fn workshop_list_conversations(
 pub async fn workshop_chat(
   app: tauri::AppHandle,
   cancel: State<'_, WorkshopCancel>,
+  confirms: State<'_, WorkshopConfirm>,
   source_ids: Vec<String>,
   messages: Vec<ChatTurn>,
   model: String,
@@ -128,11 +129,15 @@ pub async fn workshop_chat(
 
   // Rig エージェントを spawn し、進捗 mpsc を Channel へ排出する。tx が drop されると rx が閉じる。
   let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<StreamProgress>();
+  let pending = confirms.0.clone();
   let agent = tauri::async_runtime::spawn(application::chat(
-    provider, base_url, model, think, root, sources, messages, cancel_flag, tx,
+    provider, base_url, model, think, root, sources, messages, cancel_flag, tx, pending,
   ));
   while let Some(p) = rx.recv().await {
-    let _ = on_event.send(p);
+    if on_event.send(p).is_err() {
+      // UI チャネル切断＝確認カードは誰にも見えない。未応答の確認を即拒否して塞がない。
+      confirm::deny_all(&confirms.0);
+    }
   }
   agent.await.map_err(AppError::generic)?
 }
