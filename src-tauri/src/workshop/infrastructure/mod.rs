@@ -5,3 +5,4 @@
 pub(crate) mod confirm;
 pub(crate) mod history;
 pub(crate) mod tools;
+pub(crate) mod web_search;
