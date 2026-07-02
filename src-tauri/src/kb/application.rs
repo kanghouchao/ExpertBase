@@ -120,6 +120,18 @@ pub fn save_entry(home: &Path, rel_path: &str, content: &str) -> Result<(), AppE
   index::upsert_entry(&conn, &rel.to_string_lossy(), &parsed)
 }
 
+/// 条目を削除する（ファイル + 索引）。存在しない条目はエラー。
+pub fn delete_entry(home: &Path, rel_path: &str) -> Result<(), AppError> {
+  let (root, conn) = open_active(home)?;
+  let rel = registry::checked_kb_markdown_path(rel_path, "entries")?;
+  let abs = root.join(&rel);
+  if !abs.is_file() {
+    return Err(AppError::param("err.kb.entryNotFound", "path", rel_path));
+  }
+  fs::remove_file(&abs).map_err(AppError::generic)?;
+  index::delete_entry(&conn, &rel.to_string_lossy())
+}
+
 /// 条目の生 Markdown を読む。
 pub fn read_entry(home: &Path, rel_path: &str) -> Result<String, AppError> {
   let root = active_kb_root(home)?;
@@ -286,4 +298,37 @@ mod tests {
     assert!(delete_kb(tmp.path(), "/nowhere").is_err());
   }
 
+  #[test]
+  fn delete_entry_removes_file_and_index() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let kb_path = home.join("kb");
+    create_kb(home, "k", "", kb_path.to_str().unwrap()).unwrap();
+    fs::create_dir_all(kb_path.join("entries")).unwrap();
+    let content =
+      "---\ntype: Entry\ntitle: 緑茶\ncreated: 2026-06-14\nupdated: 2026-06-14\n---\n\n湯温は70度 [[煎茶]]\n";
+    save_entry(home, "entries/green.md", content).unwrap();
+    let conn = index::open_index(&kb_path).unwrap();
+    assert_eq!(index::stats(&conn).unwrap().entries, 1);
+
+    delete_entry(home, "entries/green.md").unwrap();
+
+    assert!(!kb_path.join("entries/green.md").exists());
+    assert_eq!(index::stats(&conn).unwrap().entries, 0);
+    assert_eq!(index::stats(&conn).unwrap().links, 0);
+    assert!(index::search(&conn, "湯温は").unwrap().is_empty());
+  }
+
+  #[test]
+  fn delete_entry_rejects_missing_entry_and_bad_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let kb_path = home.join("kb");
+    create_kb(home, "k", "", kb_path.to_str().unwrap()).unwrap();
+
+    let err = delete_entry(home, "entries/nope.md").unwrap_err();
+    assert_eq!(err.code, "err.kb.entryNotFound");
+    // KB 外パスは checked_kb_markdown_path で拒否される。
+    assert!(delete_entry(home, "../secret.md").is_err());
+  }
 }
