@@ -120,12 +120,18 @@ pub fn save_entry(home: &Path, rel_path: &str, content: &str) -> Result<(), AppE
   index::upsert_entry(&conn, &rel.to_string_lossy(), &parsed)
 }
 
-/// 条目を削除する（ファイル + 索引）。存在しない条目は err.kb.entryNotFound。
+/// 条目を削除する（ファイル + 索引）。アクティブ KB を解決して delete_entry_in へ委譲する。
+pub fn delete_entry(home: &Path, rel_path: &str) -> Result<(), AppError> {
+  let (root, mut conn) = open_active(home)?;
+  delete_entry_in(&root, &mut conn, rel_path)
+}
+
+/// root 直指版（工作坊の delete_entry ツールなど、アクティブ KB 解決を経ない呼び出し用）。
+/// 存在しない条目は err.kb.entryNotFound。
 /// 事前検査はせず最初の rename が存在判定を兼ねる（TOCTOU 回避）。ファイルを一時名へ退避 →
 /// 索引を事務で清掃 → 成功時に一時ファイルを削除、失敗時は復元する＝どの段階で失敗しても
 /// 「ファイルだけ消えて索引に残る」幽霊状態を作らない。
-pub fn delete_entry(home: &Path, rel_path: &str) -> Result<(), AppError> {
-  let (root, mut conn) = open_active(home)?;
+pub fn delete_entry_in(root: &Path, conn: &mut Connection, rel_path: &str) -> Result<(), AppError> {
   let rel = registry::checked_kb_markdown_path(rel_path, "entries")?;
   let abs = root.join(&rel);
   let tmp = abs.with_extension("md.deleting");

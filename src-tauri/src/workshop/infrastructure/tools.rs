@@ -32,7 +32,8 @@ fn remember_source(used_sources: &UsedSources, source: &str) {
 /// read_source・list_kb・search_kb・search_web・read_entry・write_entry・fetch_web を常に登録する。
 /// used_sources は read/fetch で読んだ素材を write_entry が entry.sources に残すための共有状態。
 /// brave_api_key は search_web の backend へだけ渡し、ツール出力には含めない。
-/// gate は破壊的ツール（write_entry / update_entry）が実行前にユーザー確認を取るための確認ゲート。
+/// gate は破壊的ツール（write_entry / update_entry / delete_entry）が実行前に
+/// ユーザー確認を取るための確認ゲート。
 pub(crate) fn build_toolset(
   root: &Path,
   sources: &[String],
@@ -47,7 +48,8 @@ pub(crate) fn build_toolset(
     Box::new(SearchWeb { backend: Arc::new(BraveSearchBackend::new(brave_api_key)) }),
     Box::new(ReadEntry { root: root.to_path_buf() }),
     Box::new(WriteEntry { root: root.to_path_buf(), used_sources: used_sources.clone(), gate: gate.clone() }),
-    Box::new(UpdateEntry { root: root.to_path_buf(), gate }),
+    Box::new(UpdateEntry { root: root.to_path_buf(), gate: gate.clone() }),
+    Box::new(DeleteEntry { root: root.to_path_buf(), gate }),
     Box::new(FetchWeb { used_sources }),
   ]
 }
@@ -398,6 +400,80 @@ impl Tool for UpdateEntry {
   }
 }
 
+/// delete_entry の引数。id（path / 正確な title）を緩く受ける。
+#[derive(Deserialize)]
+pub struct DeleteEntryArgs {
+  #[serde(default)]
+  id: String,
+}
+
+/// 既存条目を削除するツール（kb::delete_entry_in へ委譲、ファイル + 索引）。
+/// 削除は不可逆な破壊的操作＝実行前に確認ゲートでユーザーの許可を取る。
+/// 確認カードには条目標題と被参照（backlinks）状況を載せ、断リンクを警告する。
+pub struct DeleteEntry {
+  pub root: PathBuf,
+  pub gate: Arc<ConfirmGate>,
+}
+
+impl Tool for DeleteEntry {
+  const NAME: &'static str = "delete_entry";
+  type Error = Infallible;
+  type Args = DeleteEntryArgs;
+  type Output = String;
+
+  async fn definition(&self, _prompt: String) -> ToolDefinition {
+    ToolDefinition {
+      name: Self::NAME.to_string(),
+      description:
+        "Delete an existing knowledge base entry, located by its path (entries/*.md) or exact title. This is irreversible. Call only when the user asks to delete a saved entry."
+          .to_string(),
+      parameters: json!({
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Entry path (entries/*.md) or exact entry title" }
+        },
+        "required": ["id"]
+      }),
+    }
+  }
+
+  async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+    // 引数検証と位置決めを先に＝不正・不在の要求で確認カードを出さない。
+    let id = args.id.trim().to_string();
+    if id.is_empty() {
+      return Ok("(delete_entry needs a non-empty path or title)".to_string());
+    }
+    let root = self.root.clone();
+    let prep = tokio::task::spawn_blocking(move || delete_prepare(&root, &id))
+      .await
+      .unwrap_or_else(|e| Err(format!("(delete task failed: {e})")));
+    let (rel, title, backlinks) = match prep {
+      Ok(found) => found,
+      Err(notice) => return Ok(notice),
+    };
+    // 破壊的操作＝実行前にユーザー確認。被参照状況を添えて断リンクを警告する。
+    let links_line = if backlinks.is_empty() {
+      "no other entries link to it".to_string()
+    } else {
+      format!(
+        "referenced by {} entr{} (their [[links]] will break): {}",
+        backlinks.len(),
+        if backlinks.len() == 1 { "y" } else { "ies" },
+        backlinks.join(", ")
+      )
+    };
+    let summary = format!("delete_entry: delete \"{title}\" ({rel})\n{links_line}");
+    if !self.gate.request(&summary).await {
+      return Ok(format!("(user denied delete_entry: {title})"));
+    }
+    let root = self.root.clone();
+    let out = tokio::task::spawn_blocking(move || delete_blocking(&root, &rel))
+      .await
+      .unwrap_or_else(|e| format!("(delete task failed: {e})"));
+    Ok(out)
+  }
+}
+
 /// 素材読み取り（ブロッキング）。id を許可集合で検証してから、拡張子で抽出器を選ぶ。
 /// source は外部絶対パスのみ（pdf/docx は抽出、その他はテキスト読み）。
 /// エラーは全てモデル向け文字列で返す（ループ継続）。読み取りのみ・KB へ落とさない。
@@ -541,6 +617,31 @@ fn update_blocking(root: &Path, rel: &str, body: &str) -> String {
   match crate::workshop::application::overwrite(root, &conn, rel, body) {
     Ok(()) => format!("Updated {rel}"),
     Err(e) => format!("(update error: {e:?})"),
+  }
+}
+
+/// delete_entry の位置決め（ブロッキング・読み取りのみ）。対象の相対パス・タイトル・
+/// 被参照元のタイトル一覧（確認カードの断リンク警告用）を返す。
+fn delete_prepare(root: &Path, id: &str) -> Result<(String, String, Vec<String>), String> {
+  let (rel, title) = resolve_entry_blocking(root, id)?;
+  let conn = index::open_index(root).map_err(|e| format!("(index error: {e:?})"))?;
+  let backlinks = index::backlinks(&conn, &title)
+    .map_err(|e| format!("(index error: {e:?})"))?
+    .into_iter()
+    .map(|r| r.title)
+    .collect();
+  Ok((rel, title, backlinks))
+}
+
+/// 条目削除（ブロッキング）。kb::delete_entry_in でファイルと索引を原子的に消す。
+fn delete_blocking(root: &Path, rel: &str) -> String {
+  let mut conn = match index::open_index(root) {
+    Ok(c) => c,
+    Err(e) => return format!("(index error: {e:?})"),
+  };
+  match crate::kb::delete_entry_in(root, &mut conn, rel) {
+    Ok(()) => format!("Deleted {rel}"),
+    Err(e) => format!("(delete error: {e:?})"),
   }
 }
 
@@ -962,6 +1063,111 @@ mod tests {
     crate::workshop::infrastructure::confirm::resolve(&pending, id, true);
     let out = task.await.unwrap();
     assert!(out.starts_with("Updated"), "was: {out}");
+  }
+
+  #[tokio::test]
+  async fn delete_entry_tool_deletes_file_and_index_after_approval() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    seed_entry_file(root, "entries/green.md", "緑茶", "湯温は70度");
+
+    let tool = DeleteEntry { root: root.to_path_buf(), gate: auto_gate(true) };
+    let out = tool.call(DeleteEntryArgs { id: "緑茶".into() }).await.unwrap();
+
+    assert!(out.starts_with("Deleted"), "was: {out}");
+    assert!(!root.join("entries/green.md").exists());
+    let conn = index::open_index(root).unwrap();
+    assert_eq!(index::stats(&conn).unwrap().entries, 0);
+    assert!(index::search(&conn, "湯温は70度").unwrap().is_empty());
+  }
+
+  #[tokio::test]
+  async fn delete_entry_denial_keeps_entry() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    seed_entry_file(root, "entries/green.md", "緑茶", "湯温は70度");
+
+    let tool = DeleteEntry { root: root.to_path_buf(), gate: auto_gate(false) };
+    let out = tool.call(DeleteEntryArgs { id: "緑茶".into() }).await.unwrap();
+
+    // 拒否は説明文としてモデルへ返り、ファイルも索引も残る（ループは継続）。
+    assert!(out.contains("user denied delete_entry"), "was: {out}");
+    assert!(root.join("entries/green.md").exists());
+    let conn = index::open_index(root).unwrap();
+    assert_eq!(index::stats(&conn).unwrap().entries, 1);
+  }
+
+  #[tokio::test]
+  async fn delete_entry_reports_unknown_entry_and_empty_id() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    index::open_index(root).unwrap();
+    // gate は拒否固定＝以下の応答が拒否文でないことが「確認前に返っている」ことの証明。
+    let tool = DeleteEntry { root: root.to_path_buf(), gate: auto_gate(false) };
+
+    let out = tool.call(DeleteEntryArgs { id: "無い".into() }).await.unwrap();
+    assert!(out.contains("no entry found"), "was: {out}");
+    let empty = tool.call(DeleteEntryArgs { id: "  ".into() }).await.unwrap();
+    assert!(empty.contains("non-empty"), "was: {empty}");
+  }
+
+  #[tokio::test]
+  async fn delete_entry_confirm_summary_includes_title_and_backlinks() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    // 煎茶 は 緑茶 から [[煎茶]] で参照されている＝削除すると断リンクが生じる。
+    seed_entry_file(root, "entries/green.md", "緑茶", "淹れ方は [[煎茶]] を参照");
+    seed_entry_file(root, "entries/sencha.md", "煎茶", "蒸し製の緑茶");
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let gate = Arc::new(ConfirmGate {
+      pending: Default::default(),
+      tx,
+      cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    });
+    let pending = gate.pending.clone();
+    let tool = DeleteEntry { root: root.to_path_buf(), gate };
+    let task =
+      tokio::spawn(async move { tool.call(DeleteEntryArgs { id: "煎茶".into() }).await.unwrap() });
+
+    // 確認カードには条目標題と被参照（backlinks）状況が載り、応答まで削除されない。
+    let Some(crate::agent::StreamProgress::ConfirmRequest { id, summary }) = rx.recv().await else {
+      panic!("expected ConfirmRequest event");
+    };
+    assert!(summary.contains("煎茶"), "was: {summary}");
+    assert!(summary.contains("entries/sencha.md"), "was: {summary}");
+    assert!(summary.contains("緑茶"), "was: {summary}");
+    assert!(root.join("entries/sencha.md").exists(), "must not delete before approval");
+
+    crate::workshop::infrastructure::confirm::resolve(&pending, id, true);
+    let out = task.await.unwrap();
+    assert!(out.starts_with("Deleted"), "was: {out}");
+    assert!(!root.join("entries/sencha.md").exists());
+  }
+
+  #[tokio::test]
+  async fn delete_entry_confirm_summary_notes_absent_backlinks() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    seed_entry_file(root, "entries/green.md", "緑茶", "誰からも参照されない");
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let gate = Arc::new(ConfirmGate {
+      pending: Default::default(),
+      tx,
+      cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    });
+    let pending = gate.pending.clone();
+    let tool = DeleteEntry { root: root.to_path_buf(), gate };
+    let task =
+      tokio::spawn(async move { tool.call(DeleteEntryArgs { id: "緑茶".into() }).await.unwrap() });
+
+    let Some(crate::agent::StreamProgress::ConfirmRequest { id, summary }) = rx.recv().await else {
+      panic!("expected ConfirmRequest event");
+    };
+    assert!(summary.contains("no other entries link to it"), "was: {summary}");
+    crate::workshop::infrastructure::confirm::resolve(&pending, id, false);
+    task.await.unwrap();
   }
 
   #[tokio::test]

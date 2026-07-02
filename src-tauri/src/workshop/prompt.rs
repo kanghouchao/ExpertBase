@@ -23,7 +23,8 @@ Tools:
   - title: a concise heading.
   - cat: a short lowercase English category, e.g. tea, finance, privacy.
   - body: the entry body in Markdown, using [[title]] links to related notes.
-- update_entry(id, body): Overwrite the body of an existing entry, located by its path or exact title. The new body replaces the old one entirely, so read the entry first and include everything that should remain. Call only when the user asks to change a saved entry. The user is asked to approve the change before it happens; if they deny it, do not retry unless asked."###;
+- update_entry(id, body): Overwrite the body of an existing entry, located by its path or exact title. The new body replaces the old one entirely, so read the entry first and include everything that should remain. Call only when the user asks to change a saved entry. The user is asked to approve the change before it happens; if they deny it, do not retry unless asked.
+- delete_entry(id): Delete an existing entry, located by its path or exact title. This is irreversible and breaks [[links]] pointing to the entry. Call only when the user asks to delete a saved entry. The user is asked to approve the deletion before it happens; if they deny it, do not retry unless asked."###;
 
 /// AGENT_SYSTEM に素材の目録（id 一覧）を付ける。本文は注入せず、id だけ並べて
 /// `read_source(id)` で AI 自身に読ませる＝「AI が読んだ内容」と「我々のプロンプト」を構造的に分離。
@@ -57,6 +58,7 @@ mod tests {
     assert!(s.contains("list_kb"));
     assert!(s.contains("read_entry"));
     assert!(s.contains("update_entry"));
+    assert!(s.contains("delete_entry"));
   }
 
   #[test]
