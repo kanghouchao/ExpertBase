@@ -10,3 +10,4 @@ pub mod interface;
 pub use domain::entry;
 pub use infrastructure::{index, store};
 pub(crate) use application::{active_kb_root, open_active};
+pub(crate) use domain::registry::checked_kb_markdown_path;
