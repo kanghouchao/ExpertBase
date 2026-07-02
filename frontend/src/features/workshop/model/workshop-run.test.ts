@@ -24,12 +24,17 @@ let saveCalls: {
   messages: { role: string; text: string }[];
 }[] = [];
 let cancelCalls = 0;
+let confirmCalls: { id: number; approved: boolean }[] = [];
+let confirmImpl = async (id: number, approved: boolean) => {
+  confirmCalls.push({ id, approved });
+};
 
 mock.module("@/shared/api/tauri/client", () => ({
   workshopChat: (...args: Parameters<ChatImpl>) => chatImpl(...args),
   workshopCancel: async () => {
     cancelCalls += 1;
   },
+  workshopConfirm: (id: number, approved: boolean) => confirmImpl(id, approved),
   saveWorkshopConversation: async (input: (typeof saveCalls)[number]) => {
     saveCalls.push(input);
     return {
@@ -43,8 +48,15 @@ mock.module("@/shared/api/tauri/client", () => ({
   },
 }));
 
-const { startRun, stopActive, discardActive, isRunForConversation, subscribe, getSnapshot } =
-  await import("./workshop-run");
+const {
+  startRun,
+  stopActive,
+  discardActive,
+  isRunForConversation,
+  subscribe,
+  getSnapshot,
+  answerConfirm,
+} = await import("./workshop-run");
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 const HISTORY_EVENT = "expertbase:workshop:history-changed";
@@ -59,6 +71,10 @@ beforeEach(() => {
   chatImpl = async () => "";
   saveCalls = [];
   cancelCalls = 0;
+  confirmCalls = [];
+  confirmImpl = async (id: number, approved: boolean) => {
+    confirmCalls.push({ id, approved });
+  };
 });
 
 test("run identity includes the opaque KB path on every platform", () => {
@@ -70,6 +86,7 @@ test("run identity includes the opaque KB path on every platform", () => {
     narration: "",
     thinking: "",
     tools: [],
+    confirm: null,
   };
 
   expect(isRunForConversation(run, "C:\\Users\\user\\ExpertBase\\tea", 1)).toBeTrue();
@@ -125,6 +142,105 @@ describe("startRun", () => {
 
     unsub();
     window.removeEventListener(HISTORY_EVENT, onHistory);
+  });
+});
+
+describe("answerConfirm", () => {
+  test("surfaces the confirm request and relays the user's answer", async () => {
+    let resolveChat: (v: string) => void = () => {};
+    chatImpl = (_s, _m, _mo, _th, _to, onPhase) => {
+      onPhase?.({ phase: "confirmRequest", id: 42, summary: "delete entries/a.md" });
+      return new Promise<string>((resolve) => {
+        resolveChat = resolve;
+      });
+    };
+
+    startRun({
+      kbPath: "/home/user/ExpertBase/tea",
+      conversationId: 11,
+      sourceIds: [],
+      baseHistory: [{ role: "user", text: "問" }],
+      model: "qwen3:8b",
+      think: false,
+      tools: true,
+    });
+    await tick();
+
+    // 確認要求がカード用状態として現れる。
+    expect(getSnapshot().active?.confirm).toEqual({ id: 42, summary: "delete entries/a.md" });
+
+    // 応答すると後端へ回填され、カードは畳まれる。
+    await answerConfirm("/home/user/ExpertBase/tea", 11, true);
+    expect(confirmCalls).toEqual([{ id: 42, approved: true }]);
+    expect(getSnapshot().active?.confirm).toBeNull();
+
+    // 応答済み・要求なしの二重応答は無視される。
+    await answerConfirm("/home/user/ExpertBase/tea", 11, false);
+    expect(confirmCalls).toHaveLength(1);
+
+    resolveChat("done");
+    await tick();
+  });
+
+  test("keeps the card and surfaces the error when the confirm IPC fails", async () => {
+    confirmImpl = async () => {
+      throw new Error("ipc down");
+    };
+    let resolveChat: (v: string) => void = () => {};
+    chatImpl = (_s, _m, _mo, _th, _to, onPhase) => {
+      onPhase?.({ phase: "confirmRequest", id: 5, summary: "write_entry: 緑茶" });
+      return new Promise<string>((resolve) => {
+        resolveChat = resolve;
+      });
+    };
+
+    startRun({
+      kbPath: "/home/user/ExpertBase/tea",
+      conversationId: 13,
+      sourceIds: [],
+      baseHistory: [{ role: "user", text: "問" }],
+      model: "qwen3:8b",
+      think: false,
+      tools: true,
+    });
+    await tick();
+
+    await answerConfirm("/home/user/ExpertBase/tea", 13, true);
+
+    // IPC 失敗＝カードは残り（再試行の入口）、エラーは既存のエラー経路で見える。
+    expect(getSnapshot().active?.confirm).toEqual({ id: 5, summary: "write_entry: 緑茶" });
+    expect(getSnapshot().error?.conversationId).toBe(13);
+
+    resolveChat("done");
+    await tick();
+  });
+
+  test("ignores answers for a different conversation", async () => {
+    let resolveChat: (v: string) => void = () => {};
+    chatImpl = (_s, _m, _mo, _th, _to, onPhase) => {
+      onPhase?.({ phase: "confirmRequest", id: 7, summary: "update entries/b.md" });
+      return new Promise<string>((resolve) => {
+        resolveChat = resolve;
+      });
+    };
+
+    startRun({
+      kbPath: "/home/user/ExpertBase/tea",
+      conversationId: 12,
+      sourceIds: [],
+      baseHistory: [{ role: "user", text: "問" }],
+      model: "qwen3:8b",
+      think: false,
+      tools: true,
+    });
+    await tick();
+
+    answerConfirm("/home/user/ExpertBase/tea", 999, false);
+    expect(confirmCalls).toHaveLength(0);
+    expect(getSnapshot().active?.confirm).toEqual({ id: 7, summary: "update entries/b.md" });
+
+    resolveChat("done");
+    await tick();
   });
 });
 

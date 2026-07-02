@@ -44,6 +44,7 @@ import {
   parseConversationId,
 } from "../model/history";
 import {
+  answerConfirm,
   discardActive,
   getSnapshot,
   isRunForConversation,
@@ -100,6 +101,7 @@ export function WorkshopView() {
   const thinkingBuf = isViewingActive ? activeRun.thinking : "";
   const narrationBuf = isViewingActive ? activeRun.narration : "";
   const toolLog: ToolEvent[] = isViewingActive ? activeRun.tools : [];
+  const confirmReq = isViewingActive ? activeRun.confirm : null;
   // 実行の起止だけ依存に使う（流式 buffer 変化では切替 effect を回さない）。
   const activeRunKey = activeRun ? activeRun.conversationId : 0;
 
@@ -371,6 +373,31 @@ export function WorkshopView() {
                       {toolLog.map((tool, idx) => (
                         <ToolCallCard key={idx} tool={tool} />
                       ))}
+                    </div>
+                  )}
+                  {/* 破壊的操作の確認カード。応答するまでエージェントはツール内で待つ。 */}
+                  {confirmReq && (
+                    <div className="mb-2.5 overflow-hidden rounded-lg border border-line bg-surface-2 text-[12.5px]">
+                      <div className="px-3 py-2">
+                        <div className="mb-1 font-semibold text-ink-soft">
+                          {t("workshop.confirm.request")}
+                        </div>
+                        <div className="font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-ink-faint">
+                          {confirmReq.summary}
+                        </div>
+                      </div>
+                      <div className="flex gap-2 border-t border-line px-3 py-2">
+                        <Button size="sm" onClick={() => answerConfirm(active?.path, viewedId, true)}>
+                          {t("workshop.confirm.allow")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => answerConfirm(active?.path, viewedId, false)}
+                        >
+                          {t("workshop.confirm.deny")}
+                        </Button>
+                      </div>
                     </div>
                   )}
                   {/* 「AI が今書いている本文」を流式表示＝過程が見える（数字ではなく実テキスト）。 */}

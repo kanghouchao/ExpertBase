@@ -6,6 +6,7 @@ import {
   saveWorkshopConversation,
   workshopCancel,
   workshopChat,
+  workshopConfirm,
   type ChatPhase,
   type WorkshopMessage,
 } from "@/shared/api/tauri/client";
@@ -14,6 +15,7 @@ import { notifyWorkshopHistoryChanged } from "./history";
 import { toChatTurn, type ChatUiPhase, type ToolEvent } from "./process-state";
 
 // 進行中の 1 ターンの実時態。baseHistory は送信時に存盤済みの履歴（待回复の user メッセージ含む）。
+// confirm は未応答の確認要求（破壊的ツールの human-in-the-loop）。応答するとカードを畳む。
 export type RunSnapshot = {
   kbPath: string;
   conversationId: number;
@@ -22,6 +24,7 @@ export type RunSnapshot = {
   narration: string;
   thinking: string;
   tools: ToolEvent[];
+  confirm: { id: number; summary: string } | null;
 };
 
 export type RunStoreState = {
@@ -100,6 +103,7 @@ export function startRun(args: StartArgs): void {
       narration: "",
       thinking: "",
       tools: [],
+      confirm: null,
     },
     error: null,
   });
@@ -131,9 +135,12 @@ async function run(args: StartArgs): Promise<void> {
           patch(kbPath, conversationId, { tools: [...tools] });
         } else if (p.phase === "toolResult") {
           // 直近の同名・未完了の呼び出しに結果サマリを埋める。
+          // 確認待ち中は他ツールが動かないので、結果到着＝確認解消としてカードも畳む。
           const target = [...tools].reverse().find((tool) => tool.name === p.name && !tool.summary);
           if (target) target.summary = p.summary;
-          patch(kbPath, conversationId, { tools: [...tools] });
+          patch(kbPath, conversationId, { tools: [...tools], confirm: null });
+        } else if (p.phase === "confirmRequest") {
+          patch(kbPath, conversationId, { confirm: { id: p.id, summary: p.summary } });
         } else {
           patch(kbPath, conversationId, { phase: "loadingModel" });
         }
@@ -220,6 +227,29 @@ export function stopActive(
   emit({ active: null, error: null });
   void workshopCancel();
   return rollback;
+}
+
+/** 表示中の実行の確認要求へ応答し（許可 / 拒否を後端へ回填）、カードを畳む。
+ * IPC が失敗したらカードを残す（再試行の入口）＝後端が待ち続けるのに応答手段を失わない。 */
+export async function answerConfirm(
+  kbPath: string | null | undefined,
+  conversationId: number | null,
+  approved: boolean
+): Promise<void> {
+  const active = state.active;
+  if (!isRunForConversation(active, kbPath, conversationId) || !active.confirm) return;
+  const request = active.confirm;
+  try {
+    await workshopConfirm(request.id, approved);
+    patch(active.kbPath, active.conversationId, { confirm: null });
+  } catch (cause) {
+    if (!isActive(active.kbPath, active.conversationId)) return;
+    // カードは残したまま、エラーは既存のエラー経路（実行中も横に表示される）で見せる。
+    emit({
+      active: state.active,
+      error: { kbPath: active.kbPath, conversationId: active.conversationId, cause },
+    });
+  }
 }
 
 /** KB 切替など: 進行中の実行を捨てる（存盤目標が動くので保存しない）。 */

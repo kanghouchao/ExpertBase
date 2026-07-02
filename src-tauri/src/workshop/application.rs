@@ -18,7 +18,7 @@ use crate::kb::entry::{Entry, EntryMeta};
 use crate::kb::{index, store};
 
 use super::domain::{WorkshopConversation, WorkshopConversationPage, WorkshopMessage};
-use super::infrastructure::{history, tools};
+use super::infrastructure::{confirm, history, tools};
 
 const HISTORY_PAGE_SIZE: usize = 20;
 
@@ -75,9 +75,12 @@ pub async fn chat(
   messages: Vec<ChatTurn>,
   cancel: Arc<AtomicBool>,
   tx: UnboundedSender<StreamProgress>,
+  pending: confirm::PendingConfirms,
 ) -> Result<String, AppError> {
   let system = agent_system_with(&sources);
-  let toolset = tools::build_toolset(&root, &sources);
+  // 破壊的ツール用の確認ゲート。進捗 tx へ確認要求を流し、workshop_confirm の回填を待つ。
+  let gate = Arc::new(confirm::ConfirmGate { pending, tx: tx.clone(), cancel: cancel.clone() });
+  let toolset = tools::build_toolset(&root, &sources, gate);
   // base_url は設定の生値（空欄可）。空欄→provider 既定への解決は agent::run が担う。
   crate::agent::run(provider, &base_url, &model, think, &system, toolset, messages, cancel, &tx).await
 }

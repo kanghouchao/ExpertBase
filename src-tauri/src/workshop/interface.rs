@@ -11,12 +11,23 @@ use crate::agent::{ChatTurn, Provider, StreamProgress};
 use crate::error::AppError;
 use crate::workshop::application;
 use crate::workshop::domain::{WorkshopConversation, WorkshopConversationPage, WorkshopMessage};
+use crate::workshop::infrastructure::confirm;
 
 /// 停止ボタン用の共有中断フラグ。lib.rs で app.manage する。
 /// Ollama は直列なので生成は同時に 1 本だけ ＝ 単一フラグで足りる。
 /// ponytail: 単飛フラグ。並列生成が要るようになったら per-run の登録表に替える。
 #[derive(Default)]
 pub struct WorkshopCancel(pub Arc<AtomicBool>);
+
+/// 未応答の確認要求（id → 応答チャネル）の共有表。lib.rs で app.manage する。
+#[derive(Default)]
+pub struct WorkshopConfirm(pub confirm::PendingConfirms);
+
+/// 確認要求へのユーザー応答を回填する（許可 / 拒否）。未知 id は無視（取消・超時済み）。
+#[tauri::command]
+pub fn workshop_confirm(confirms: State<'_, WorkshopConfirm>, id: u64, approved: bool) {
+  confirm::resolve(&confirms.0, id, approved);
+}
 
 /// 完了済みの対話をアクティブ KB の履歴へ保存する。
 #[tauri::command]
@@ -76,6 +87,7 @@ pub async fn workshop_list_conversations(
 pub async fn workshop_chat(
   app: tauri::AppHandle,
   cancel: State<'_, WorkshopCancel>,
+  confirms: State<'_, WorkshopConfirm>,
   source_ids: Vec<String>,
   messages: Vec<ChatTurn>,
   model: String,
@@ -117,11 +129,15 @@ pub async fn workshop_chat(
 
   // Rig エージェントを spawn し、進捗 mpsc を Channel へ排出する。tx が drop されると rx が閉じる。
   let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<StreamProgress>();
+  let pending = confirms.0.clone();
   let agent = tauri::async_runtime::spawn(application::chat(
-    provider, base_url, model, think, root, sources, messages, cancel_flag, tx,
+    provider, base_url, model, think, root, sources, messages, cancel_flag, tx, pending,
   ));
   while let Some(p) = rx.recv().await {
-    let _ = on_event.send(p);
+    if on_event.send(p).is_err() {
+      // UI チャネル切断＝確認カードは誰にも見えない。未応答の確認を即拒否して塞がない。
+      confirm::deny_all(&confirms.0);
+    }
   }
   agent.await.map_err(AppError::generic)?
 }

@@ -9,6 +9,7 @@ pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
     .manage(workshop::interface::WorkshopCancel::default())
+    .manage(workshop::interface::WorkshopConfirm::default())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -43,7 +44,8 @@ pub fn run() {
       workshop::interface::workshop_get_conversation,
       workshop::interface::workshop_list_conversations,
       workshop::interface::workshop_save_conversation,
-      workshop::interface::workshop_cancel
+      workshop::interface::workshop_cancel,
+      workshop::interface::workshop_confirm
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
