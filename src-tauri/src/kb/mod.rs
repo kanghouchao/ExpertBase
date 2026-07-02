@@ -9,5 +9,5 @@ pub mod interface;
 // 他機能はこの面のみを参照し、各レイヤ内部へ直接到達しない。
 pub use domain::entry;
 pub use infrastructure::{index, store};
-pub(crate) use application::{active_kb_root, open_active};
+pub(crate) use application::{active_kb_root, delete_entry_in, open_active};
 pub(crate) use domain::registry::checked_kb_markdown_path;
