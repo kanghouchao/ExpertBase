@@ -87,7 +87,7 @@ export function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-sm">
+      <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>{t("cfg.title")}</DialogTitle>
         </DialogHeader>
@@ -212,6 +212,23 @@ export function SettingsDialog({
                     <option key={m.name} value={m.name} />
                   ))}
                 </datalist>
+              </div>
+
+              <div className="font-mono text-[10px] font-semibold tracking-[0.12em] text-ink-faint uppercase">
+                {t("cfg.webSearch")}
+              </div>
+
+              <div className="flex flex-col gap-2.5">
+                <span className="text-sm font-medium">{t("cfg.braveApiKey")}</span>
+                <Input
+                  type="password"
+                  autoComplete="off"
+                  value={ai.braveApiKey}
+                  placeholder="BSA…"
+                  onChange={(event) => setAi({ ...ai, braveApiKey: event.target.value })}
+                  onBlur={() => saveAi(ai)}
+                />
+                <span className="text-xs text-ink-muted">{t("cfg.braveApiKeyHint")}</span>
               </div>
             </>
           )}
