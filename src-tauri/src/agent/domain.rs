@@ -28,6 +28,8 @@ pub enum StreamProgress {
   ToolCall { name: String, args: String },
   /// ツール実行結果の要約（件数・保存先など）。呼び出しカードに続けて見せる。
   ToolResult { name: String, summary: String },
+  /// 破壊的操作の実行前確認。フロントがカードで許可/拒否を尋ね、workshop_confirm で回填する。
+  ConfirmRequest { id: u64, summary: String },
 }
 
 /// AI プロバイダの選択。本 MVP はローカル端点のみ（クラウド・API キーなし）。

@@ -94,7 +94,8 @@ export type ChatPhase =
   | { phase: "loadingModel" }
   | { phase: "narration"; delta: string }
   | { phase: "toolCall"; name: string; args: string }
-  | { phase: "toolResult"; name: string; summary: string };
+  | { phase: "toolResult"; name: string; summary: string }
+  | { phase: "confirmRequest"; id: number; summary: string };
 
 export type OllamaModel = {
   name: string;
@@ -234,6 +235,12 @@ export async function workshopChat(
 export async function workshopCancel(): Promise<void> {
   if (!isTauri()) return;
   await invoke("workshop_cancel");
+}
+
+/** エージェントの確認要求へ応答する（許可 / 拒否）。 */
+export async function workshopConfirm(id: number, approved: boolean): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("workshop_confirm", { id, approved });
 }
 
 /** アクティブ KB の対話履歴を取得する。 */

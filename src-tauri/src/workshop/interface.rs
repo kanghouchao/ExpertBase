@@ -11,12 +11,23 @@ use crate::agent::{ChatTurn, Provider, StreamProgress};
 use crate::error::AppError;
 use crate::workshop::application;
 use crate::workshop::domain::{WorkshopConversation, WorkshopConversationPage, WorkshopMessage};
+use crate::workshop::infrastructure::confirm;
 
 /// 停止ボタン用の共有中断フラグ。lib.rs で app.manage する。
 /// Ollama は直列なので生成は同時に 1 本だけ ＝ 単一フラグで足りる。
 /// ponytail: 単飛フラグ。並列生成が要るようになったら per-run の登録表に替える。
 #[derive(Default)]
 pub struct WorkshopCancel(pub Arc<AtomicBool>);
+
+/// 未応答の確認要求（id → 応答チャネル）の共有表。lib.rs で app.manage する。
+#[derive(Default)]
+pub struct WorkshopConfirm(pub confirm::PendingConfirms);
+
+/// 確認要求へのユーザー応答を回填する（許可 / 拒否）。未知 id は無視（取消・超時済み）。
+#[tauri::command]
+pub fn workshop_confirm(confirms: State<'_, WorkshopConfirm>, id: u64, approved: bool) {
+  confirm::resolve(&confirms.0, id, approved);
+}
 
 /// 完了済みの対話をアクティブ KB の履歴へ保存する。
 #[tauri::command]
