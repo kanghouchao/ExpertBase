@@ -39,7 +39,7 @@ export function forceLayout(
 ): Record<string, Point> {
   const n = nodeIds.length;
   if (n === 0) return {};
-  // ponytail: 大規模グラフは O(n) 配置へ退避し、主线程の O(n²) 停止を避ける。
+  // 大規模グラフは O(n) 配置へ退避し、メインスレッドの O(n²) 停止を避ける。
   if (n > MAX_FORCE_NODES) return circularLayout(nodeIds, width, height);
 
   const rnd = seededRng(seed);
