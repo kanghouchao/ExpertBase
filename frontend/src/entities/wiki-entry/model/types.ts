@@ -1,4 +1,4 @@
-// Wiki 条目とグラフ描画のドメイン向けクライアントモデル。
+// Wiki 条目のドメイン向けクライアントモデル。
 
 export type WikiEntry = {
   id: string;
@@ -13,17 +13,4 @@ export type WikiEntry = {
   excerpt: string;
   related: string[];
   orphan: boolean;
-};
-
-export type GraphNode = {
-  id: string;
-  label: string;
-  cat: string;
-  x: number;
-  y: number;
-};
-
-export type GraphData = {
-  nodes: GraphNode[];
-  edges: [string, string][];
 };
