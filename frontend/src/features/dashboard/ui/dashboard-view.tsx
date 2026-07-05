@@ -53,12 +53,14 @@ function PipelineStep({
   count,
   tone,
   last,
+  href,
 }: {
   icon: IconName;
   label: string;
   count?: string;
   tone: Tone | "muted";
   last?: boolean;
+  href?: string;
 }) {
   const square =
     tone === "ai"
@@ -66,23 +68,35 @@ function PipelineStep({
       : tone === "accent"
         ? "bg-brand-wash text-brand"
         : "bg-surface-2 text-ink-muted";
+  const body = (
+    <>
+      <div
+        className={cn(
+          "mx-auto mb-2.5 grid size-12 place-items-center rounded-[13px] border border-line",
+          square
+        )}
+      >
+        <Icon name={icon} size={22} />
+      </div>
+      <div className="text-[13.5px] font-semibold text-ink">{label}</div>
+      {count && <div className="mt-0.75 font-mono text-xs text-ink-faint">{count}</div>}
+    </>
+  );
   return (
     <div className="flex flex-1 items-center">
-      <div className="flex-1 text-center">
-        <div
-          className={cn(
-            "mx-auto mb-2.5 grid size-12 place-items-center rounded-[13px] border border-line",
-            square
-          )}
+      {href ? (
+        <Link
+          href={href}
+          className="flex-1 rounded-xl px-1 py-1.5 text-center transition-colors hover:bg-surface-2"
         >
-          <Icon name={icon} size={22} />
-        </div>
-        <div className="text-[13.5px] font-semibold text-ink">{label}</div>
-        {count && <div className="mt-0.75 font-mono text-xs text-ink-faint">{count}</div>}
-      </div>
+          {body}
+        </Link>
+      ) : (
+        <div className="flex-1 px-1 py-1.5 text-center">{body}</div>
+      )}
       {!last && (
-        <div className="relative -mt-7.5 h-0.5 w-13.5 flex-none bg-line-strong">
-          <span className="absolute -top-0.75 -right-px text-ink-faint">
+        <div className="relative -mt-7.5 h-[2.5px] w-13.5 flex-none rounded-full bg-[linear-gradient(90deg,var(--brand-soft),var(--brand))] opacity-[0.62]">
+          <span className="absolute -top-[3.5px] -right-px text-brand opacity-70">
             <Icon name="chevR" size={8} />
           </span>
         </div>
@@ -140,19 +154,20 @@ export function DashboardView() {
           </div>
         </div>
         <div className="flex items-start">
-          <PipelineStep icon="inbox" label={t("dash.p.collect")} tone="accent" />
-          <PipelineStep icon="merge" label={t("dash.p.work")} tone="accent" />
+          <PipelineStep icon="merge" label={t("dash.p.work")} tone="accent" href="/workshop" />
           <PipelineStep
             icon="book"
             label={t("dash.p.kb")}
             count={count(data.wikiCount, "unit.entries")}
             tone="accent"
+            href="/wiki"
           />
           <PipelineStep
             icon="graph"
             label={t("dash.p.link")}
             count={count(data.links, "unit.links")}
             tone="ai"
+            href="/graph"
           />
           <PipelineStep
             icon="bot"

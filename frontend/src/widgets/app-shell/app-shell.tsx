@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 
 import { TitleBar } from "./title-bar";
 import { Sidebar } from "./sidebar";
@@ -53,7 +53,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen flex-col overflow-hidden">
       <TitleBar kbLabel={active?.name ?? ""} onSettings={() => setSettingsOpen(true)} />
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar onAddKb={() => setWizardOpen(true)} />
+        <Suspense
+          fallback={<div className="w-62 flex-none border-r border-line bg-paper-2" />}
+        >
+          <Sidebar onAddKb={() => setWizardOpen(true)} />
+        </Suspense>
         <main id="main" className="flex-1 overflow-auto px-10 pt-8.5 pb-15">
           {children}
         </main>

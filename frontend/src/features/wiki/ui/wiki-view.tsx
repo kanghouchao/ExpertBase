@@ -14,6 +14,7 @@ import { EmptyState } from "@/shared/ui/empty-state";
 import {
   backlinks as fetchBacklinks,
   listEntries,
+  orphans as fetchOrphans,
   readEntry,
   saveEntry,
   searchEntries,
@@ -29,12 +30,25 @@ import { SegTabs } from "@/shared/ui/seg-tabs";
 // カテゴリはユーザーデータ由来。「全部」だけはセンチネルとして常に先頭に置く。
 const ALL_CAT = "全部";
 
-function EntryCard({ entry, onOpen }: { entry: WikiEntry; onOpen: (entry: WikiEntry) => void }) {
+function EntryCard({
+  entry,
+  orphan,
+  onOpen,
+}: {
+  entry: WikiEntry;
+  orphan?: boolean;
+  onOpen: (entry: WikiEntry) => void;
+}) {
   const { t } = useI18n();
 
   return (
     <button onClick={() => onOpen(entry)} className="block h-full text-left">
       <Panel hover className="relative flex h-full flex-col">
+        {orphan && (
+          <span className="absolute top-3.5 right-3.5 text-brand" title={t("wiki.orphan")}>
+            <Icon name="flag" size={15} />
+          </span>
+        )}
         <div className="mb-2 flex items-baseline gap-2 pr-5">
           <h3 className="font-serif text-[21px] leading-tight font-semibold text-ink">
             {entry.title}
@@ -55,6 +69,7 @@ export function WikiView() {
   const { t } = useI18n();
   const { available } = useKbStore();
   const [entries, setEntries] = useState<WikiEntry[]>([]);
+  const [orphanPaths, setOrphanPaths] = useState<Set<string>>(new Set());
   const [hits, setHits] = useState<WikiEntry[]>([]);
   const [category, setCategory] = useState<string>(ALL_CAT);
   const [query, setQuery] = useState("");
@@ -65,15 +80,17 @@ export function WikiView() {
   const [draft, setDraft] = useState("");
 
   async function reload() {
-    const refs = await listEntries();
+    const [refs, orphanRefs] = await Promise.all([listEntries(), fetchOrphans()]);
     setEntries(refs.map(entryRefToWiki));
+    setOrphanPaths(new Set(orphanRefs.map((o) => o.path)));
   }
 
   useEffect(() => {
     if (!available) return;
     void (async () => {
-      const refs = await listEntries();
+      const [refs, orphanRefs] = await Promise.all([listEntries(), fetchOrphans()]);
       setEntries(refs.map(entryRefToWiki));
+      setOrphanPaths(new Set(orphanRefs.map((o) => o.path)));
     })();
   }, [available]);
 
@@ -160,7 +177,12 @@ export function WikiView() {
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(258px,1fr))] gap-3.5">
           {list.map((entry) => (
-            <EntryCard key={entry.id} entry={entry} onOpen={openEntry} />
+            <EntryCard
+              key={entry.id}
+              entry={entry}
+              orphan={orphanPaths.has(entry.id)}
+              onOpen={openEntry}
+            />
           ))}
         </div>
       )}

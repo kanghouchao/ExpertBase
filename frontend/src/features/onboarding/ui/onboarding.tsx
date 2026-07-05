@@ -148,7 +148,6 @@ export function Onboarding({ onCancel }: { onCancel?: () => void }) {
                 <div className="flex justify-center gap-4.5">
                   {(
                     [
-                      ["inbox", t("ob.w.collect")],
                       ["spark", t("ob.w.work")],
                       ["graph", t("ob.w.link")],
                       ["bot", t("ob.w.serve")],
