@@ -326,22 +326,39 @@ export function WorkshopView() {
 
   return (
     <div className="view-enter flex flex-col lg:h-full">
-      {displayMessages.length === 0 ? (
-        <PageHead
-          eyebrow={t("workshop.eyebrow")}
-          title={t("workshop.title")}
-          sub={t("workshop.listSub")}
-        />
-      ) : (
-        <ProcessTopBar t={t} />
-      )}
+      {displayMessages.length > 0 && <ProcessTopBar t={t} />}
 
       {/* lg 以上は 2 カラム（会話は内部スクロール）、それ未満は 1 カラムでページ全体スクロール。 */}
-      <div className="flex flex-col gap-5 pt-5 lg:min-h-0 lg:flex-1 lg:flex-row">
+      {/* 未開始（空）時は会話列を縦中央へ寄せ、ウェルカム見出し + コンポーザーを中央に置く。 */}
+      <div
+        className={cn(
+          "flex flex-col gap-5 lg:min-h-0 lg:flex-1 lg:flex-row",
+          displayMessages.length > 0 && "pt-5"
+        )}
+      >
         {/* ── 会話列 ── */}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="lg:min-h-0 lg:flex-1 lg:overflow-auto">
+        <div
+          className={cn(
+            "flex min-w-0 flex-1 flex-col",
+            displayMessages.length === 0 && "lg:justify-center"
+          )}
+        >
+          <div
+            className={
+              displayMessages.length === 0
+                ? "lg:flex-none"
+                : "lg:min-h-0 lg:flex-1 lg:overflow-auto"
+            }
+          >
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-1 py-1">
+              {/* 未開始時はウェルカム見出しを中央に置く。 */}
+              {displayMessages.length === 0 && (
+                <PageHead
+                  eyebrow={t("workshop.eyebrow")}
+                  title={t("workshop.title")}
+                  sub={t("workshop.listSub")}
+                />
+              )}
               {/* 会話（多輪）。 */}
               {displayMessages.map((m, i) =>
                 m.role === "user" ? (

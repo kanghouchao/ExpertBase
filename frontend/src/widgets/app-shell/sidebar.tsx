@@ -1,10 +1,14 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
-import { requestNewWorkshopConversation, WorkshopHistoryNav } from "@/features/workshop";
-import { NAV } from "@/shared/config/nav";
+import {
+  parseConversationId,
+  requestNewWorkshopConversation,
+  WorkshopHistoryNav,
+} from "@/features/workshop";
+import { NAV, resolveActiveNav } from "@/shared/config/nav";
 import { useI18n } from "@/shared/providers/providers";
 import { Logo } from "@/shared/ui/logo";
 import { NavItem } from "./nav-item";
@@ -13,9 +17,9 @@ import { KbSwitcher } from "./kb-switcher";
 export function Sidebar({ onAddKb }: { onAddKb: () => void }) {
   const { t } = useI18n();
   const pathname = usePathname();
-  const activeId =
-    NAV.find((n) => pathname === n.href || (n.href !== "/" && pathname.startsWith(`${n.href}/`)))
-      ?.id ?? "dash";
+  const searchParams = useSearchParams();
+  const conversationId = parseConversationId(searchParams.get("conversation"));
+  const activeId = resolveActiveNav(pathname, conversationId);
 
   const renderItem = (item: (typeof NAV)[number]) => (
     <div key={item.id} className="flex flex-col gap-1">
