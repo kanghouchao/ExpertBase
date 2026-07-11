@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 
 import {
   fakeBackend,
@@ -35,7 +35,7 @@ let confirmImpl = async (id: number, approved: boolean) => {
   confirmCalls.push({ id, approved });
 };
 
-setBackend({
+const workshopTestBackend = {
   ...fakeBackend,
   workshop: {
     ...fakeBackend.workshop,
@@ -56,7 +56,7 @@ setBackend({
       };
     },
   },
-});
+};
 
 import {
   answerConfirm,
@@ -85,7 +85,12 @@ beforeEach(() => {
   confirmImpl = async (id: number, approved: boolean) => {
     confirmCalls.push({ id, approved });
   };
+  // 適用はモジュール頂層でなくここ＝ファイル実行順に依存しない。
+  setBackend(workshopTestBackend);
 });
+
+// 上書きを他のテストファイルへ漏らさない。
+afterAll(() => setBackend(fakeBackend));
 
 test("run identity includes the opaque KB path on every platform", () => {
   const run = {
