@@ -105,7 +105,7 @@ export function WikiView() {
         found.map((hit) => ({
           path: hit.path,
           title: hit.title,
-          cat: "uncategorized",
+          cat: hit.cat || "uncategorized",
           excerpt: hit.excerpt,
         }))
       );

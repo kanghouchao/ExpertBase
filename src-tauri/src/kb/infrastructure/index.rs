@@ -21,6 +21,7 @@ pub struct EntryRef {
 pub struct SearchHit {
   pub path: String,
   pub title: String,
+  pub cat: String,
   pub excerpt: String,
 }
 
@@ -208,7 +209,8 @@ pub fn search(conn: &Connection, query: &str) -> Result<Vec<SearchHit>, AppError
   }
   let mut stmt = conn
     .prepare(
-      "SELECT path,title,snippet(entries_fts,1,'[',']','…',12) FROM entries_fts
+      "SELECT f.path,f.title,e.cat,snippet(entries_fts,1,'[',']','…',12)
+         FROM entries_fts f JOIN entries e ON e.path=f.path
          WHERE entries_fts MATCH ?1 ORDER BY rank LIMIT 50",
     )
     .map_err(AppError::generic)?;
@@ -216,7 +218,7 @@ pub fn search(conn: &Connection, query: &str) -> Result<Vec<SearchHit>, AppError
   let phrase = format!("\"{}\"", query.trim().replace('"', "\"\""));
   let rows = stmt
     .query_map([phrase], |r| {
-      Ok(SearchHit { path: r.get(0)?, title: r.get(1)?, excerpt: r.get(2)? })
+      Ok(SearchHit { path: r.get(0)?, title: r.get(1)?, cat: r.get(2)?, excerpt: r.get(3)? })
     })
     .map_err(AppError::generic)?;
   rows.collect::<Result<_, _>>().map_err(AppError::generic)
@@ -293,6 +295,7 @@ mod tests {
     let hits = search(&conn, "湯温は").unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "entries/green.md");
+    assert_eq!(hits[0].cat, "tea");
   }
 
   #[test]
