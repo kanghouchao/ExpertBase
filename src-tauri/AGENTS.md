@@ -38,13 +38,14 @@ Use Domain-Driven Design (DDD) for Rust backend code in `src-tauri/`.
 - Interface code adapts the outside world to the application layer. Tauri commands are interface adapters only.
 - Domain code must not depend on Tauri, storage, filesystem, frontend DTOs, or other infrastructure details.
 
-All current features (`kb`, `ai`, `extract`, `workshop`) are split into the DDD layers they actually use. New feature modules may start as `src/<feature>.rs`, but split into feature-local `domain`, `application`, `infrastructure`, and `interface` modules as they accumulate real business rules or multiple use cases. Create only the layers a feature actually needs — do not add empty layers (e.g. `ai` has no `application` layer; `workshop` has no `infrastructure` layer). Use top-level shared modules only when a cross-feature abstraction is justified by real reuse.
+All current features (`kb`, `agent`, `extract`, `workshop`) are split into the DDD layers they actually use. New feature modules may start as `src/<feature>.rs`, but split into feature-local `domain`, `application`, `infrastructure`, and `interface` modules as they accumulate real business rules or multiple use cases. Create only the layers a feature actually needs — do not add empty layers (e.g. `agent` has no `application` layer; `extract` has only `infrastructure`). Use top-level shared modules only when a cross-feature abstraction is justified by real reuse.
 
 ## IPC Command Practices
 
 - Define commands with `#[tauri::command]` returning `Result<T, AppError>` (`src/error.rs`). Hand-authored user-facing errors use `AppError::code(...)` / `::param(...)` / `::params(...)` with a key matching the frontend i18n dictionary (e.g. `"err.kb.nameRequired"`). Passthrough errors from lower-level libraries (io/sqlite/reqwest/etc.) use `AppError::generic(e)`, which maps to a single generic frontend key (`"err.generic"`) carrying the raw detail as a param. Do not implement `Display` for domain error types that flow to the IPC boundary — that reintroduces hardcoded human text.
 - Structs crossing the IPC boundary derive `Serialize` with `#[serde(rename_all = "camelCase")]` to match the TypeScript client in `frontend/src/shared/api/tauri`.
 - Keep commands as thin wrappers: parse IPC inputs, call application services or plain functions, and format IPC outputs. Do not put business rules in command handlers.
+- The `agent` feature keeps its historical `ai_` command prefix (`ai_has_key`, `ai_get_settings`, …). Do not rename these IPC identifiers when touching the module.
 
 ## Quality Bar
 
