@@ -1,21 +1,18 @@
-//! workshop アプリケーション層。対話エージェントの編成と条目確定のユースケース。
-//! kb（検索・索引・FS）と汎用 agent を編成する。ツールは infra（tools）で組んで注入し、
-//! ループ/推論は agent が持つ。
+//! workshop アプリケーション層。対話エージェントの編成と会話履歴のユースケース。
+//! kb と汎用 agent を編成する。ツールは infra（tools）で組んで注入し、ループ/推論は agent が
+//! 持つ。条目の確定・上書き・削除は kb の条目持久化用例（create_entry 等）へ委譲する。
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use chrono::SecondsFormat;
-use rusqlite::Connection;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::agent::{AiSettings, ChatTurn, Provider, StreamProgress};
 use crate::error::AppError;
 
 use super::prompt::agent_system_with;
-use crate::kb::entry::{Entry, EntryMeta};
-use crate::kb::{index, store};
 
 use super::domain::{WorkshopConversation, WorkshopConversationPage, WorkshopMessage};
 use super::infrastructure::{confirm, history, tools};
@@ -89,48 +86,6 @@ pub async fn chat(
   crate::agent::run(provider, &base_url, &model, think, &system, toolset, messages, cancel, &tx).await
 }
 
-/// 承認された内容を `entries/` に確定し、インデックスを更新する。
-/// write_entry ツール（infra）経由で呼ばれる（書き込みの実体）。複数素材でも同じ経路を通る。
-/// source_refs は実際に読んだ素材の引用文字列（外部絶対パス / URL）。
-/// KB へは複製せず文字列だけ残す。
-pub fn confirm(
-  root: &Path,
-  conn: &Connection,
-  title: &str,
-  cat: &str,
-  body: &str,
-  source_refs: &[String],
-) -> Result<String, AppError> {
-  let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-  let entry = Entry {
-    meta: EntryMeta {
-      kind: "Entry".into(),
-      title: title.to_string(),
-      description: String::new(),
-      cat: cat.to_string(),
-      tags: vec![],
-      sources: source_refs.to_vec(),
-      created: today.clone(),
-      updated: today,
-    },
-    body: body.to_string(),
-  };
-  let rel = store::write_entry(root, &entry)?;
-  index::upsert_entry(conn, &rel, &entry)?;
-  Ok(rel)
-}
-
-/// 既存条目の本文を上書きし、インデックスを更新する（update_entry ツールの実体）。
-/// メタ（title / cat / sources / created 等）は維持し、updated だけ当日へ進める。
-pub fn overwrite(root: &Path, conn: &Connection, rel: &str, body: &str) -> Result<(), AppError> {
-  let text = std::fs::read_to_string(root.join(rel)).map_err(AppError::generic)?;
-  let mut entry = crate::kb::entry::parse_entry(&text)?;
-  entry.body = body.to_string();
-  entry.meta.updated = chrono::Utc::now().format("%Y-%m-%d").to_string();
-  store::save_entry(root, rel, &entry)?;
-  index::upsert_entry(conn, rel, &entry)
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -176,56 +131,4 @@ mod tests {
     assert_eq!(error.code, "err.workshop.kbSwitchedDuringSave");
   }
 
-  #[test]
-  fn confirm_records_source_refs_as_entry_sources() {
-    let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path();
-    let conn = crate::kb::index::open_index(root).unwrap();
-
-    let rel = confirm(root, &conn, "緑茶", "tea", "本文", &["/abs/report.pdf".into()]).unwrap();
-
-    let saved = std::fs::read_to_string(root.join(&rel)).unwrap();
-    let entry = crate::kb::entry::parse_entry(&saved).unwrap();
-    assert_eq!(entry.meta.sources, vec!["/abs/report.pdf".to_string()]);
-  }
-
-  #[test]
-  fn overwrite_replaces_body_keeps_meta_and_reindexes() {
-    let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path();
-    let conn = index::open_index(root).unwrap();
-    let rel = confirm(root, &conn, "緑茶", "tea", "湯温は70度", &["/abs/a.pdf".into()]).unwrap();
-
-    overwrite(root, &conn, &rel, "湯温は80度 [[煎茶]]").unwrap();
-
-    // メタ（title / cat / sources / created）は維持、本文差し替え、updated は当日へ。
-    let saved = std::fs::read_to_string(root.join(&rel)).unwrap();
-    let entry = crate::kb::entry::parse_entry(&saved).unwrap();
-    assert_eq!(entry.body, "湯温は80度 [[煎茶]]");
-    assert_eq!(entry.meta.title, "緑茶");
-    assert_eq!(entry.meta.cat, "tea");
-    assert_eq!(entry.meta.sources, vec!["/abs/a.pdf".to_string()]);
-    assert_eq!(entry.meta.updated, chrono::Utc::now().format("%Y-%m-%d").to_string());
-    // 索引も新本文で引ける（旧本文は消える）。
-    assert_eq!(index::search(&conn, "湯温は80度").unwrap().len(), 1);
-    assert!(index::search(&conn, "湯温は70度").unwrap().is_empty());
-    assert_eq!(index::backlinks(&conn, "煎茶").unwrap().len(), 1);
-  }
-
-  #[test]
-  fn confirm_writes_one_entry_and_indexes_links() {
-    let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path();
-    let conn = index::open_index(root).unwrap();
-
-    // 複数素材を 1 条目に合成する。引用は外部パスの文字列として残す。
-    let refs = vec!["/abs/a.pdf".to_string(), "/abs/b.docx".to_string()];
-    let rel = confirm(root, &conn, "緑茶", "tea", "湯温は [[煎茶]] で70度", &refs).unwrap();
-    assert!(root.join(&rel).is_file());
-    assert_eq!(index::stats(&conn).unwrap().entries, 1);
-    assert_eq!(index::backlinks(&conn, "煎茶").unwrap().len(), 1);
-    let saved = std::fs::read_to_string(root.join(&rel)).unwrap();
-    let entry = crate::kb::entry::parse_entry(&saved).unwrap();
-    assert_eq!(entry.meta.sources, refs);
-  }
 }
