@@ -12,7 +12,7 @@ Expert Base is a private, extensible, local-first knowledge base system for prof
 
 - `frontend/`: UI (Next.js static export). See [package.json](frontend/package.json).
 - `src-tauri/`: Rust core (desktop shell, local data layer). See [Cargo.toml](src-tauri/Cargo.toml).
-- `docs/`: Design docs and implementation plans under `docs/superpowers/{specs,plans}`, named `YYYY-MM-DD-<topic>.md`.
+- `docs/`: Design docs and implementation plans under `docs/superpowers/`; specs are named `YYYY-MM-DD-<topic>-design.md`, plans `YYYY-MM-DD-<topic>.md`.
 
 ### CodeGraph
 

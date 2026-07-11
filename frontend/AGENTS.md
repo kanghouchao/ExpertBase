@@ -91,7 +91,7 @@ src/app -> src/widgets -> src/features -> src/entities -> src/shared
 ## Quality Bar
 
 - For behavior changes, write or update the relevant test before implementation. If a meaningful frontend test cannot be written first, state why before coding.
-- Frontend tests use Bun's built-in runner (`bun:test`), colocated as `*.test.tsx`. Run them with `bun test` from `frontend/`.
+- Frontend tests use Bun's built-in runner (`bun:test`), colocated as `*.test.ts` (or `*.test.tsx` when rendering components). Run them with `bun test` from `frontend/`.
 - Before finishing frontend changes, run `bun run lint`.
 - Run `bun run build` when changing routing, layout, config, imports, or anything that can affect production compilation.
 - If build fails due to local sandbox or network restrictions, report the exact reason instead of hiding it.
