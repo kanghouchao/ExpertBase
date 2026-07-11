@@ -407,7 +407,7 @@ pub struct DeleteEntryArgs {
   id: String,
 }
 
-/// 既存条目を削除するツール（kb::delete_entry_in へ委譲、ファイル + 索引）。
+/// 既存条目を削除するツール（kb::delete_entry_at へ委譲、ファイル + 索引）。
 /// 削除は不可逆な破壊的操作＝実行前に確認ゲートでユーザーの許可を取る。
 /// 確認カードには条目標題と被参照（backlinks）状況を載せ、断リンクを警告する。
 pub struct DeleteEntry {
@@ -608,13 +608,9 @@ fn update_prepare(root: &Path, id: &str) -> Result<(String, String, usize), Stri
   Ok((rel, title, entry.body.trim().chars().count()))
 }
 
-/// 条目上書き（ブロッキング）。application::overwrite で本文差し替え + 索引更新。
+/// 条目上書き（ブロッキング）。kb::update_entry_body（条目持久化）で本文差し替え + 索引更新。
 fn update_blocking(root: &Path, rel: &str, body: &str) -> String {
-  let conn = match index::open_index(root) {
-    Ok(c) => c,
-    Err(e) => return format!("(index error: {e:?})"),
-  };
-  match crate::workshop::application::overwrite(root, &conn, rel, body) {
+  match crate::kb::update_entry_body(root, rel, body) {
     Ok(()) => format!("Updated {rel}"),
     Err(e) => format!("(update error: {e:?})"),
   }
@@ -633,30 +629,22 @@ fn delete_prepare(root: &Path, id: &str) -> Result<(String, String, Vec<String>)
   Ok((rel, title, backlinks))
 }
 
-/// 条目削除（ブロッキング）。kb::delete_entry_in でファイルと索引を原子的に消す。
+/// 条目削除（ブロッキング）。kb::delete_entry_at（条目持久化）でファイルと索引を原子的に消す。
 fn delete_blocking(root: &Path, rel: &str) -> String {
-  let mut conn = match index::open_index(root) {
-    Ok(c) => c,
-    Err(e) => return format!("(index error: {e:?})"),
-  };
-  match crate::kb::delete_entry_in(root, &mut conn, rel) {
+  match crate::kb::delete_entry_at(root, rel) {
     Ok(()) => format!("Deleted {rel}"),
     Err(e) => format!("(delete error: {e:?})"),
   }
 }
 
-/// 条目書き込み（ブロッキング）。title/body を検証 → confirm で確定する。
+/// 条目書き込み（ブロッキング）。title/body を検証 → kb::create_entry（条目持久化）で確定する。
 fn write_blocking(root: &Path, source_refs: &[String], args: WriteArgs) -> String {
   let title = args.title.trim();
   let body = args.body.trim();
   if title.is_empty() || body.is_empty() {
     return "(write_entry needs a non-empty title and body)".to_string();
   }
-  let conn = match index::open_index(root) {
-    Ok(c) => c,
-    Err(e) => return format!("(index error: {e:?})"),
-  };
-  match crate::workshop::application::confirm(root, &conn, title, args.cat.trim(), body, source_refs) {
+  match crate::kb::create_entry(root, title, args.cat.trim(), body, source_refs) {
     Ok(rel) => format!("Saved entry to {rel}"),
     Err(e) => format!("(write error: {e:?})"),
   }

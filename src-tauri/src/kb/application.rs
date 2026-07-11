@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 
 use crate::error::AppError;
-use crate::kb::domain::entry;
+use crate::kb::domain::entry::{self, Entry, EntryMeta};
 use crate::kb::domain::registry::{self, KbConfig, KbEntry};
-use crate::kb::infrastructure::{config_store, index};
+use crate::kb::infrastructure::{config_store, index, store};
 
 /// アクティブなナレッジベースのルートパスを返す。未選択ならエラー。
 pub(crate) fn active_kb_root(home: &Path) -> Result<PathBuf, AppError> {
@@ -120,18 +120,67 @@ pub fn save_entry(home: &Path, rel_path: &str, content: &str) -> Result<(), AppE
   index::upsert_entry(&conn, &rel.to_string_lossy(), &parsed)
 }
 
+/// 新しい条目を確定する（条目持久化）。kind は Entry 固定、created / updated は当日。
+/// source_refs は実際に参照した素材の引用文字列（外部絶対パス / URL）。KB へは複製しない。
+/// ファイルが真源：索引更新に失敗しても書いた条目は残り、索引は rebuild で復元できる。
+pub fn create_entry(
+  root: &Path,
+  title: &str,
+  cat: &str,
+  body: &str,
+  source_refs: &[String],
+) -> Result<String, AppError> {
+  let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+  let entry = Entry {
+    meta: EntryMeta {
+      kind: "Entry".into(),
+      title: title.to_string(),
+      description: String::new(),
+      cat: cat.to_string(),
+      tags: vec![],
+      sources: source_refs.to_vec(),
+      created: today.clone(),
+      updated: today,
+    },
+    body: body.to_string(),
+  };
+  let conn = index::open_index(root)?;
+  let rel = store::write_entry(root, &entry)?;
+  index::upsert_entry(&conn, &rel, &entry)?;
+  Ok(rel)
+}
+
+/// 既存条目の本文だけを差し替える（条目持久化）。メタ（title / cat / sources / created 等）は
+/// 維持し、updated だけ当日へ進める。ファイルが真源：索引更新に失敗しても差し替えは残る。
+pub fn update_entry_body(root: &Path, rel_path: &str, body: &str) -> Result<(), AppError> {
+  let rel = registry::checked_kb_markdown_path(rel_path, "entries")?;
+  let conn = index::open_index(root)?;
+  let text = fs::read_to_string(root.join(&rel)).map_err(AppError::generic)?;
+  let mut entry = entry::parse_entry(&text)?;
+  entry.body = body.to_string();
+  entry.meta.updated = chrono::Utc::now().format("%Y-%m-%d").to_string();
+  store::save_entry(root, &rel.to_string_lossy(), &entry)?;
+  index::upsert_entry(&conn, &rel.to_string_lossy(), &entry)
+}
+
 /// 条目を削除する（ファイル + 索引）。アクティブ KB を解決して delete_entry_in へ委譲する。
 pub fn delete_entry(home: &Path, rel_path: &str) -> Result<(), AppError> {
   let (root, mut conn) = open_active(home)?;
   delete_entry_in(&root, &mut conn, rel_path)
 }
 
-/// root 直指版（工作坊の delete_entry ツールなど、アクティブ KB 解決を経ない呼び出し用）。
+/// root 直指版の削除（条目持久化）。索引接続は内部で開く。
+pub fn delete_entry_at(root: &Path, rel_path: &str) -> Result<(), AppError> {
+  let mut conn = index::open_index(root)?;
+  delete_entry_in(root, &mut conn, rel_path)
+}
+
+/// 削除の実体（delete_entry / delete_entry_at から呼ばれる）。
 /// 存在しない条目は err.kb.entryNotFound。
 /// 事前検査はせず最初の rename が存在判定を兼ねる（TOCTOU 回避）。ファイルを一時名へ退避 →
 /// 索引を事務で清掃 → 成功時に一時ファイルを削除、失敗時は復元する＝どの段階で失敗しても
 /// 「ファイルだけ消えて索引に残る」幽霊状態を作らない。
-pub fn delete_entry_in(root: &Path, conn: &mut Connection, rel_path: &str) -> Result<(), AppError> {
+fn delete_entry_in(root: &Path, conn: &mut Connection, rel_path: &str) -> Result<(), AppError> {
   let rel = registry::checked_kb_markdown_path(rel_path, "entries")?;
   let abs = root.join(&rel);
   let tmp = abs.with_extension("md.deleting");
@@ -399,5 +448,98 @@ mod tests {
     assert_eq!(err.code, "err.kb.entryNotFound");
     // KB 外パスは checked_kb_markdown_path で拒否される。
     assert!(delete_entry(home, "../secret.md").is_err());
+  }
+
+  #[test]
+  fn create_entry_records_source_refs_as_entry_sources() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    let rel = create_entry(root, "緑茶", "tea", "本文", &["/abs/report.pdf".into()]).unwrap();
+
+    let saved = fs::read_to_string(root.join(&rel)).unwrap();
+    let parsed = entry::parse_entry(&saved).unwrap();
+    assert_eq!(parsed.meta.sources, vec!["/abs/report.pdf".to_string()]);
+  }
+
+  #[test]
+  fn create_entry_writes_one_entry_and_indexes_links() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    // 複数素材を 1 条目に合成する。引用は外部パスの文字列として残す。
+    let refs = vec!["/abs/a.pdf".to_string(), "/abs/b.docx".to_string()];
+    let rel = create_entry(root, "緑茶", "tea", "湯温は [[煎茶]] で70度", &refs).unwrap();
+
+    assert!(root.join(&rel).is_file());
+    let conn = index::open_index(root).unwrap();
+    assert_eq!(index::stats(&conn).unwrap().entries, 1);
+    assert_eq!(index::backlinks(&conn, "煎茶").unwrap().len(), 1);
+    let saved = fs::read_to_string(root.join(&rel)).unwrap();
+    let parsed = entry::parse_entry(&saved).unwrap();
+    assert_eq!(parsed.meta.sources, refs);
+  }
+
+  #[test]
+  fn update_entry_body_replaces_body_keeps_meta_and_reindexes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let rel = create_entry(root, "緑茶", "tea", "湯温は70度", &["/abs/a.pdf".into()]).unwrap();
+
+    update_entry_body(root, &rel, "湯温は80度 [[煎茶]]").unwrap();
+
+    // メタ（title / cat / sources / created）は維持、本文差し替え、updated は当日へ。
+    let saved = fs::read_to_string(root.join(&rel)).unwrap();
+    let parsed = entry::parse_entry(&saved).unwrap();
+    assert_eq!(parsed.body, "湯温は80度 [[煎茶]]");
+    assert_eq!(parsed.meta.title, "緑茶");
+    assert_eq!(parsed.meta.cat, "tea");
+    assert_eq!(parsed.meta.sources, vec!["/abs/a.pdf".to_string()]);
+    assert_eq!(parsed.meta.updated, chrono::Utc::now().format("%Y-%m-%d").to_string());
+    // 索引も新本文で引ける（旧本文は消える）。
+    let conn = index::open_index(root).unwrap();
+    assert_eq!(index::search(&conn, "湯温は80度").unwrap().len(), 1);
+    assert!(index::search(&conn, "湯温は70度").unwrap().is_empty());
+    assert_eq!(index::backlinks(&conn, "煎茶").unwrap().len(), 1);
+  }
+
+  #[test]
+  fn update_entry_body_rejects_escaping_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    // KB 外パスは checked_kb_markdown_path で拒否される（delete と同じ防御）。
+    assert!(update_entry_body(tmp.path(), "../secret.md", "x").is_err());
+  }
+
+  #[test]
+  fn delete_entry_at_removes_file_and_index_with_root_only() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let rel = create_entry(root, "緑茶", "tea", "湯温は70度 [[煎茶]]", &[]).unwrap();
+
+    delete_entry_at(root, &rel).unwrap();
+
+    assert!(!root.join(&rel).exists());
+    let conn = index::open_index(root).unwrap();
+    assert_eq!(index::stats(&conn).unwrap().entries, 0);
+    assert_eq!(index::stats(&conn).unwrap().links, 0);
+  }
+
+  #[test]
+  fn create_entry_keeps_file_when_index_update_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    // entries_fts を通常表に差し替えて索引更新を失敗させる
+    // （ensure_schema は IF NOT EXISTS なので作り直されない）。
+    let conn = index::open_index(root).unwrap();
+    conn
+      .execute_batch("DROP TABLE entries_fts; CREATE TABLE entries_fts(dummy);")
+      .unwrap();
+    drop(conn);
+
+    let result = create_entry(root, "緑茶", "tea", "本文", &[]);
+
+    // ファイルが真源：索引更新に失敗しても書いた条目は残る（索引は rebuild で復元可能）。
+    assert!(result.is_err());
+    assert!(root.join("entries/緑茶.md").is_file());
   }
 }
