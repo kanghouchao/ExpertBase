@@ -20,8 +20,6 @@ import {
   searchEntries,
   type EntryRef,
 } from "@/shared/api/tauri/client";
-import { entryRefToWiki } from "@/entities/wiki-entry";
-import type { WikiEntry } from "@/entities/wiki-entry";
 import { wikiCategoryLabel } from "@/shared/i18n/data";
 import { cn } from "@/shared/lib/utils";
 import { useKbStore } from "@/entities/knowledge-base";
@@ -35,9 +33,9 @@ function EntryCard({
   orphan,
   onOpen,
 }: {
-  entry: WikiEntry;
+  entry: EntryRef & { excerpt?: string };
   orphan?: boolean;
-  onOpen: (entry: WikiEntry) => void;
+  onOpen: (entry: EntryRef) => void;
 }) {
   const { t } = useI18n();
 
@@ -68,12 +66,12 @@ function EntryCard({
 export function WikiView() {
   const { t } = useI18n();
   const { available } = useKbStore();
-  const [entries, setEntries] = useState<WikiEntry[]>([]);
+  const [entries, setEntries] = useState<EntryRef[]>([]);
   const [orphanPaths, setOrphanPaths] = useState<Set<string>>(new Set());
-  const [hits, setHits] = useState<WikiEntry[]>([]);
+  const [hits, setHits] = useState<(EntryRef & { excerpt: string })[]>([]);
   const [category, setCategory] = useState<string>(ALL_CAT);
   const [query, setQuery] = useState("");
-  const [open, setOpen] = useState<WikiEntry | null>(null);
+  const [open, setOpen] = useState<EntryRef | null>(null);
   const [body, setBody] = useState("");
   const [links, setLinks] = useState<EntryRef[]>([]);
   const [editing, setEditing] = useState(false);
@@ -81,7 +79,7 @@ export function WikiView() {
 
   async function reload() {
     const [refs, orphanRefs] = await Promise.all([listEntries(), fetchOrphans()]);
-    setEntries(refs.map(entryRefToWiki));
+    setEntries(refs.map((ref) => ({ ...ref, cat: ref.cat || "uncategorized" })));
     setOrphanPaths(new Set(orphanRefs.map((o) => o.path)));
   }
 
@@ -89,7 +87,7 @@ export function WikiView() {
     if (!available) return;
     void (async () => {
       const [refs, orphanRefs] = await Promise.all([listEntries(), fetchOrphans()]);
-      setEntries(refs.map(entryRefToWiki));
+      setEntries(refs.map((ref) => ({ ...ref, cat: ref.cat || "uncategorized" })));
       setOrphanPaths(new Set(orphanRefs.map((o) => o.path)));
     })();
   }, [available]);
@@ -105,7 +103,9 @@ export function WikiView() {
       const found = await searchEntries(q);
       setHits(
         found.map((hit) => ({
-          ...entryRefToWiki({ path: hit.path, title: hit.title, cat: "" }),
+          path: hit.path,
+          title: hit.title,
+          cat: hit.cat || "uncategorized",
           excerpt: hit.excerpt,
         }))
       );
@@ -118,19 +118,19 @@ export function WikiView() {
     ? hits
     : entries.filter((entry) => category === ALL_CAT || entry.cat === category);
 
-  async function openEntry(entry: WikiEntry) {
+  async function openEntry(entry: EntryRef) {
     setOpen(entry);
     setEditing(false);
     setBody("");
     setLinks([]);
-    const [content, back] = await Promise.all([readEntry(entry.id), fetchBacklinks(entry.title)]);
+    const [content, back] = await Promise.all([readEntry(entry.path), fetchBacklinks(entry.title)]);
     setBody(content);
     setLinks(back);
   }
 
   async function handleSave() {
     if (!open) return;
-    await saveEntry(open.id, draft);
+    await saveEntry(open.path, draft);
     setBody(draft);
     setEditing(false);
     await reload();
@@ -178,9 +178,9 @@ export function WikiView() {
         <div className="grid grid-cols-[repeat(auto-fill,minmax(258px,1fr))] gap-3.5">
           {list.map((entry) => (
             <EntryCard
-              key={entry.id}
+              key={entry.path}
               entry={entry}
-              orphan={orphanPaths.has(entry.id)}
+              orphan={orphanPaths.has(entry.path)}
               onOpen={openEntry}
             />
           ))}

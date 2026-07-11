@@ -48,7 +48,7 @@ export async function deleteKb(path: string): Promise<void> {
 export type EntryRef = { path: string; title: string; cat: string };
 
 /** 全文検索の 1 件。 */
-export type SearchHit = { path: string; title: string; excerpt: string };
+export type SearchHit = { path: string; title: string; cat: string; excerpt: string };
 
 /** ダッシュボード統計。 */
 export type Stats = { entries: number; links: number; orphans: number };
