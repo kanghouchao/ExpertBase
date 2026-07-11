@@ -88,7 +88,7 @@ pub async fn run(
 }
 
 /// 組み上げた `Agent<M>` を回す共通ループ（provider 非依存、provider ごとに単態化）。
-/// Rig の流を decode（無状態写像）で自前イベントへ落とし、状態機は pump が一手に持つ。
+/// Rig の流を decode（無状態写像）で自前イベントへ落とし、状態機械は pump が一手に持つ。
 async fn drive<M>(
   agent: Agent<M>,
   prompt: Message,
@@ -110,8 +110,8 @@ where
   pump(events, cancel, tx).await
 }
 
-/// 解読済みの流イベント（自前・非泛型）。decode の出力で pump の入力。
-/// Rig の泛型（`M::StreamingResponse`）をここで断ち切り、pump を脚本列でテスト可能にする。
+/// 解読済みの流イベント（自前・非ジェネリック）。decode の出力で pump の入力。
+/// Rig のジェネリクス（`M::StreamingResponse`）をここで断ち切り、pump をスクリプト列でテスト可能にする。
 #[derive(Debug)]
 enum StreamEvent {
   /// ユーザー向け本文の増分。
@@ -158,9 +158,10 @@ fn decode<R>(item: MultiTurnStreamItem<R>) -> Option<StreamEvent> {
   }
 }
 
-/// イベント列を消費する状態機（ツール名の対応付け・最終本文・中断・上流エラーの一手持ち）。
-/// 中断は各イベント処理前に共有 `AtomicBool` を確認し、立っていれば残りを消費せず即返す。
-/// Final 不在の自然終端は Ok("")（既定語義）。Rig 非依存＝脚本列で全語義をテストできる。
+/// イベント列を消費する状態機械（ツール名の対応付け・最終本文・中断・上流エラーの一手持ち）。
+/// 中断は解読済みイベントごと（decode で読み飛ばした生の流項は対象外）に共有 `AtomicBool` を
+/// 確認し、立っていれば残りを消費せず即返す。
+/// Final 不在の自然終端は Ok("")（既定語義）。Rig 非依存＝スクリプト列で全語義をテストできる。
 async fn pump(
   events: impl futures::Stream<Item = Result<StreamEvent, AppError>>,
   cancel: Arc<AtomicBool>,
@@ -240,7 +241,7 @@ mod tests {
   fn decode_extracts_fields_from_rig_stream_items() {
     use rig_core::agent::FinalResponse;
     use rig_core::completion::Usage;
-    use rig_core::message::{AssistantContent, ToolCall, ToolFunction, ToolResult};
+    use rig_core::message::{AssistantContent, Reasoning, ToolCall, ToolFunction, ToolResult};
 
     // 本文・推論増分は素通し。
     assert!(matches!(
@@ -254,6 +255,14 @@ mod tests {
         StreamedAssistantContent::ReasoningDelta { id: None, reasoning: "思考".into() },
       )),
       Some(StreamEvent::Reasoning(t)) if t == "思考"
+    ));
+
+    // 整段推論（非 delta）は display_text() で本文化され、増分と同じ Reasoning へ落ちる。
+    assert!(matches!(
+      decode::<()>(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(
+        Reasoning::new("思考全文"),
+      ))),
+      Some(StreamEvent::Reasoning(t)) if t == "思考全文"
     ));
 
     // ツール呼び出しは internal_call_id（provider id ではない）を対応付けキーに採る。
@@ -299,7 +308,7 @@ mod tests {
     ));
   }
 
-  // ---- pump（解読済みイベント列の状態機）。脚本列（stream::iter）で全語義を断言する。 ----
+  // ---- pump（解読済みイベント列の状態機械）。スクリプト列（stream::iter）で全語義を断言する。 ----
 
   /// pump 完了後に送信済み進捗を全部吸い出す。
   fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<StreamProgress>) -> Vec<StreamProgress> {
