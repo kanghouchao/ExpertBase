@@ -1,8 +1,4 @@
-import type {
-  ChatTurn,
-  WorkshopMessage,
-  WorkshopToolEvent,
-} from "@/shared/api/tauri/client";
+import type { ChatTurn, WorkshopMessage, WorkshopToolEvent } from "@/shared/api";
 
 // エージェントのツール呼び出し 1 件（表示用）。summary はツール結果到着後に埋まる。
 export type ToolEvent = WorkshopToolEvent;

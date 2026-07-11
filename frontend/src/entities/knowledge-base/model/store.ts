@@ -6,7 +6,7 @@
 
 import { useSyncExternalStore } from "react";
 
-import { createKb, deleteKb, listKbs, setActiveKb, type Kb } from "@/shared/api/tauri/client";
+import { kbApi, type Kb } from "@/shared/api";
 
 export type KbState = {
   // 初回の読み込みが完了したか
@@ -52,7 +52,7 @@ function getServerSnapshot(): KbState {
 /** ナレッジベース一覧を再取得する。 */
 export async function refreshKbs(): Promise<void> {
   try {
-    const list = await listKbs();
+    const list = await kbApi.listKbs();
     if (!list) {
       emit({ ...INITIAL, loaded: true });
       return;
@@ -82,20 +82,20 @@ export async function createAndActivateKb(input: {
   description: string;
   path: string;
 }): Promise<void> {
-  await createKb(input);
+  await kbApi.createKb(input);
   await refreshKbs();
 }
 
 /** アクティブなナレッジベースを切り替え、一覧を更新する。 */
 export async function switchKb(path: string): Promise<void> {
-  await setActiveKb(path);
+  await kbApi.setActiveKb(path);
   await refreshKbs();
 }
 
 /** ナレッジベースを削除し、一覧を更新する。失敗時は例外を投げる。 */
 export async function removeKb(path: string): Promise<void> {
   try {
-    await deleteKb(path);
+    await kbApi.deleteKb(path);
   } finally {
     await refreshKbs();
   }

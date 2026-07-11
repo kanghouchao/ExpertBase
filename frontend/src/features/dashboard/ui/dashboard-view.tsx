@@ -10,7 +10,7 @@ import { PageHead } from "@/shared/ui/page-head";
 import { Icon, type IconName } from "@/shared/ui/icon";
 import { useI18n } from "@/shared/providers/providers";
 import { WikiHealth } from "./wiki-health";
-import { stats as fetchStats } from "@/shared/api/tauri/client";
+import { kbApi } from "@/shared/api";
 import { useKbStore } from "@/entities/knowledge-base";
 
 type Tone = "accent" | "ai";
@@ -113,7 +113,7 @@ export function DashboardView() {
   useEffect(() => {
     if (!available) return;
     void (async () => {
-      const s = await fetchStats();
+      const s = await kbApi.stats();
       setData({ wikiCount: s?.entries ?? 0, links: s?.links ?? 0 });
     })();
   }, [available]);

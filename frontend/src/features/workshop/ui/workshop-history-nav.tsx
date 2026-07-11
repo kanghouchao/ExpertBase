@@ -5,10 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useKbStore } from "@/entities/knowledge-base";
-import {
-  listWorkshopConversations,
-  type WorkshopConversationSummary,
-} from "@/shared/api/tauri/client";
+import { workshopApi, type WorkshopConversationSummary } from "@/shared/api";
 import { cn } from "@/shared/lib/utils";
 import { useI18n } from "@/shared/providers/providers";
 import { Icon } from "@/shared/ui/icon";
@@ -39,7 +36,7 @@ function WorkshopHistoryNavState() {
   const loadFirstPage = useCallback(async () => {
     const request = ++requestRef.current;
     try {
-      const page = await listWorkshopConversations(0);
+      const page = await workshopApi.listConversations(0);
       if (request !== requestRef.current) return;
       setItems(page.items);
       setHasMore(page.hasMore);
@@ -73,7 +70,7 @@ function WorkshopHistoryNavState() {
     setLoading(true);
     setError(false);
     try {
-      const page = await listWorkshopConversations(items.length);
+      const page = await workshopApi.listConversations(items.length);
       if (request !== requestRef.current) return;
       setItems((current) => [...current, ...page.items]);
       setHasMore(page.hasMore);

@@ -1,4 +1,4 @@
-import type { AppError } from "@/shared/api/tauri/client";
+import type { AppError } from "@/shared/api";
 
 import { DICT, type Lang } from "./dictionaries";
 

@@ -1,15 +1,21 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 
-import type { ChatPhase } from "@/shared/api/tauri/client";
+import {
+  fakeBackend,
+  setBackend,
+  type ChatPhase,
+  type ChatTurn,
+  type WorkshopMessage,
+} from "@/shared/api";
 import type { RunStoreState } from "./workshop-run";
 
 // history.ts の window イベントを動かすため EventTarget を window として与える。
 (globalThis as { window?: EventTarget }).window = new EventTarget();
 
-// 後端クライアントを差し替える（実 IPC を呼ばない）。
+// 後端を fake 土台 + workshop 域の上書きで差し替える（実 IPC を呼ばない・猴補なし）。
 type ChatImpl = (
   sourceIds: string[],
-  messages: { role: string; content: string }[],
+  messages: ChatTurn[],
   model: string,
   think: boolean,
   tools: boolean,
@@ -21,7 +27,7 @@ let saveCalls: {
   kbPath: string;
   id: number | null;
   sourceIds: string[];
-  messages: { role: string; text: string }[];
+  messages: WorkshopMessage[];
 }[] = [];
 let cancelCalls = 0;
 let confirmCalls: { id: number; approved: boolean }[] = [];
@@ -29,34 +35,38 @@ let confirmImpl = async (id: number, approved: boolean) => {
   confirmCalls.push({ id, approved });
 };
 
-mock.module("@/shared/api/tauri/client", () => ({
-  workshopChat: (...args: Parameters<ChatImpl>) => chatImpl(...args),
-  workshopCancel: async () => {
-    cancelCalls += 1;
+setBackend({
+  ...fakeBackend,
+  workshop: {
+    ...fakeBackend.workshop,
+    chat: (...args: Parameters<ChatImpl>) => chatImpl(...args),
+    cancel: async () => {
+      cancelCalls += 1;
+    },
+    confirm: (id: number, approved: boolean) => confirmImpl(id, approved),
+    saveConversation: async (input: (typeof saveCalls)[number]) => {
+      saveCalls.push(input);
+      return {
+        id: input.id ?? 99,
+        title: "t",
+        sourceIds: input.sourceIds,
+        messages: input.messages,
+        createdAt: "",
+        updatedAt: "",
+      };
+    },
   },
-  workshopConfirm: (id: number, approved: boolean) => confirmImpl(id, approved),
-  saveWorkshopConversation: async (input: (typeof saveCalls)[number]) => {
-    saveCalls.push(input);
-    return {
-      id: input.id ?? 99,
-      title: "t",
-      sourceIds: input.sourceIds,
-      messages: input.messages,
-      createdAt: "",
-      updatedAt: "",
-    };
-  },
-}));
+});
 
-const {
+import {
+  answerConfirm,
+  discardActive,
+  getSnapshot,
+  isRunForConversation,
   startRun,
   stopActive,
-  discardActive,
-  isRunForConversation,
   subscribe,
-  getSnapshot,
-  answerConfirm,
-} = await import("./workshop-run");
+} from "./workshop-run";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 const HISTORY_EVENT = "expertbase:workshop:history-changed";

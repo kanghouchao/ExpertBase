@@ -11,15 +11,7 @@ import { Button, buttonVariants } from "@/shared/ui/button";
 import { Markdown } from "@/shared/ui/markdown";
 import { useI18n } from "@/shared/providers/providers";
 import { EmptyState } from "@/shared/ui/empty-state";
-import {
-  backlinks as fetchBacklinks,
-  listEntries,
-  orphans as fetchOrphans,
-  readEntry,
-  saveEntry,
-  searchEntries,
-  type EntryRef,
-} from "@/shared/api/tauri/client";
+import { kbApi, type EntryRef } from "@/shared/api";
 import { wikiCategoryLabel } from "@/shared/i18n/data";
 import { cn } from "@/shared/lib/utils";
 import { useKbStore } from "@/entities/knowledge-base";
@@ -78,7 +70,7 @@ export function WikiView() {
   const [draft, setDraft] = useState("");
 
   async function reload() {
-    const [refs, orphanRefs] = await Promise.all([listEntries(), fetchOrphans()]);
+    const [refs, orphanRefs] = await Promise.all([kbApi.listEntries(), kbApi.orphans()]);
     setEntries(refs.map((ref) => ({ ...ref, cat: ref.cat || "uncategorized" })));
     setOrphanPaths(new Set(orphanRefs.map((o) => o.path)));
   }
@@ -86,7 +78,7 @@ export function WikiView() {
   useEffect(() => {
     if (!available) return;
     void (async () => {
-      const [refs, orphanRefs] = await Promise.all([listEntries(), fetchOrphans()]);
+      const [refs, orphanRefs] = await Promise.all([kbApi.listEntries(), kbApi.orphans()]);
       setEntries(refs.map((ref) => ({ ...ref, cat: ref.cat || "uncategorized" })));
       setOrphanPaths(new Set(orphanRefs.map((o) => o.path)));
     })();
@@ -100,7 +92,7 @@ export function WikiView() {
         setHits([]);
         return;
       }
-      const found = await searchEntries(q);
+      const found = await kbApi.search(q);
       setHits(
         found.map((hit) => ({
           path: hit.path,
@@ -123,14 +115,17 @@ export function WikiView() {
     setEditing(false);
     setBody("");
     setLinks([]);
-    const [content, back] = await Promise.all([readEntry(entry.path), fetchBacklinks(entry.title)]);
+    const [content, back] = await Promise.all([
+      kbApi.readEntry(entry.path),
+      kbApi.backlinks(entry.title),
+    ]);
     setBody(content);
     setLinks(back);
   }
 
   async function handleSave() {
     if (!open) return;
-    await saveEntry(open.path, draft);
+    await kbApi.saveEntry(open.path, draft);
     setBody(draft);
     setEditing(false);
     await reload();
