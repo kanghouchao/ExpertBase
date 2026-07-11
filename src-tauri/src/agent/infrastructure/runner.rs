@@ -88,6 +88,7 @@ pub async fn run(
 }
 
 /// 組み上げた `Agent<M>` を回す共通ループ（provider 非依存、provider ごとに単態化）。
+/// Rig の流を decode（無状態写像）で自前イベントへ落とし、状態機は pump が一手に持つ。
 async fn drive<M>(
   agent: Agent<M>,
   prompt: Message,
@@ -99,58 +100,101 @@ where
   M: CompletionModel + 'static,
   M::StreamingResponse: GetTokenUsage,
 {
-  let mut stream = agent.stream_chat(prompt, history).multi_turn(MAX_TURNS).await;
+  let stream = agent.stream_chat(prompt, history).multi_turn(MAX_TURNS).await;
+  let events = stream.filter_map(|item| async move {
+    match item {
+      Ok(item) => decode(item).map(Ok),
+      Err(e) => Some(Err(AppError::generic(e))),
+    }
+  });
+  pump(events, cancel, tx).await
+}
 
+/// 解読済みの流イベント（自前・非泛型）。decode の出力で pump の入力。
+/// Rig の泛型（`M::StreamingResponse`）をここで断ち切り、pump を脚本列でテスト可能にする。
+#[derive(Debug)]
+enum StreamEvent {
+  /// ユーザー向け本文の増分。
+  Text(String),
+  /// 推論トレースの増分。
+  Reasoning(String),
+  /// ツール呼び出し（id は結果との対応付け用の internal_call_id）。
+  ToolCall { id: String, name: String, args: String },
+  /// ツール実行結果（id で呼び出し時の名前を引く）。
+  ToolResult { id: String, summary: String },
+  /// 最終返信本文。
+  Final(String),
+}
+
+/// `MultiTurnStreamItem` → `StreamEvent` の無状態写像。関心外の項は None（読み飛ばし）。
+fn decode<R>(item: MultiTurnStreamItem<R>) -> Option<StreamEvent> {
+  match item {
+    MultiTurnStreamItem::StreamAssistantItem(content) => match content {
+      StreamedAssistantContent::Text(Text { text, .. }) => Some(StreamEvent::Text(text)),
+      StreamedAssistantContent::Reasoning(reasoning) => {
+        Some(StreamEvent::Reasoning(reasoning.display_text()))
+      }
+      StreamedAssistantContent::ReasoningDelta { reasoning, .. } => {
+        Some(StreamEvent::Reasoning(reasoning))
+      }
+      StreamedAssistantContent::ToolCall { tool_call, internal_call_id } => {
+        Some(StreamEvent::ToolCall {
+          id: internal_call_id,
+          name: tool_call.function.name,
+          args: tool_call.function.arguments.to_string(),
+        })
+      }
+      _ => None,
+    },
+    MultiTurnStreamItem::StreamUserItem(StreamedUserContent::ToolResult {
+      tool_result,
+      internal_call_id,
+    }) => Some(StreamEvent::ToolResult {
+      id: internal_call_id,
+      summary: first_text(&tool_result.content),
+    }),
+    MultiTurnStreamItem::FinalResponse(res) => Some(StreamEvent::Final(res.response().to_string())),
+    _ => None,
+  }
+}
+
+/// イベント列を消費する状態機（ツール名の対応付け・最終本文・中断・上流エラーの一手持ち）。
+/// 中断は各イベント処理前に共有 `AtomicBool` を確認し、立っていれば残りを消費せず即返す。
+/// Final 不在の自然終端は Ok("")（既定語義）。Rig 非依存＝脚本列で全語義をテストできる。
+async fn pump(
+  events: impl futures::Stream<Item = Result<StreamEvent, AppError>>,
+  cancel: Arc<AtomicBool>,
+  tx: &UnboundedSender<StreamProgress>,
+) -> Result<String, AppError> {
+  let mut events = std::pin::pin!(events);
   // internal_call_id → ツール名。ToolResult はツール名を持たないので呼び出し時に対応付ける。
   let mut tool_names: HashMap<String, String> = HashMap::new();
-  let mut final_text = String::new();
 
-  while let Some(item) = stream.next().await {
-    // 停止ボタン: 各チャンク前に確認。立っていれば stream を drop して即返す。
+  while let Some(event) = events.next().await {
+    // 停止ボタン: 各イベント前に確認。立っていれば stream を drop して即返す。
     if cancel.load(Ordering::Relaxed) {
       return Err(AppError::code("err.agent.cancelled"));
     }
-    match item {
-      Ok(MultiTurnStreamItem::StreamAssistantItem(content)) => match content {
-        StreamedAssistantContent::Text(Text { text, .. }) => {
-          let _ = tx.send(StreamProgress::Narration { delta: text });
-        }
-        StreamedAssistantContent::Reasoning(reasoning) => {
-          let _ = tx.send(StreamProgress::Thinking { delta: reasoning.display_text() });
-        }
-        StreamedAssistantContent::ReasoningDelta { reasoning, .. } => {
-          let _ = tx.send(StreamProgress::Thinking { delta: reasoning });
-        }
-        StreamedAssistantContent::ToolCall { tool_call, internal_call_id } => {
-          let name = tool_call.function.name.clone();
-          tool_names.insert(internal_call_id, name.clone());
-          let _ = tx.send(StreamProgress::ToolCall {
-            name,
-            args: tool_call.function.arguments.to_string(),
-          });
-        }
-        _ => {}
-      },
-      Ok(MultiTurnStreamItem::StreamUserItem(StreamedUserContent::ToolResult {
-        tool_result,
-        internal_call_id,
-      })) => {
-        let name = tool_names.get(&internal_call_id).cloned().unwrap_or_default();
-        let _ = tx.send(StreamProgress::ToolResult {
-          name,
-          summary: first_text(&tool_result.content),
-        });
+    match event? {
+      StreamEvent::Text(delta) => {
+        let _ = tx.send(StreamProgress::Narration { delta });
       }
-      Ok(MultiTurnStreamItem::FinalResponse(res)) => {
-        final_text = res.response().to_string();
-        break;
+      StreamEvent::Reasoning(delta) => {
+        let _ = tx.send(StreamProgress::Thinking { delta });
       }
-      Ok(_) => {}
-      Err(e) => return Err(AppError::generic(e)),
+      StreamEvent::ToolCall { id, name, args } => {
+        tool_names.insert(id, name.clone());
+        let _ = tx.send(StreamProgress::ToolCall { name, args });
+      }
+      StreamEvent::ToolResult { id, summary } => {
+        let name = tool_names.get(&id).cloned().unwrap_or_default();
+        let _ = tx.send(StreamProgress::ToolResult { name, summary });
+      }
+      StreamEvent::Final(text) => return Ok(text),
     }
   }
 
-  Ok(final_text)
+  Ok(String::new())
 }
 
 /// ChatTurn を Rig の Message へ。role が user 以外は assistant 扱い。
@@ -188,5 +232,217 @@ mod tests {
       .await
       .unwrap_err();
     assert_eq!(err.code, "err.agent.emptyConversation");
+  }
+
+  // ---- decode（Rig 流項 → StreamEvent の無状態写像）。 ----
+
+  #[test]
+  fn decode_extracts_fields_from_rig_stream_items() {
+    use rig_core::agent::FinalResponse;
+    use rig_core::completion::Usage;
+    use rig_core::message::{AssistantContent, ToolCall, ToolFunction, ToolResult};
+
+    // 本文・推論増分は素通し。
+    assert!(matches!(
+      decode::<()>(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(
+        Text { text: "本文".into(), additional_params: None },
+      ))),
+      Some(StreamEvent::Text(t)) if t == "本文"
+    ));
+    assert!(matches!(
+      decode::<()>(MultiTurnStreamItem::StreamAssistantItem(
+        StreamedAssistantContent::ReasoningDelta { id: None, reasoning: "思考".into() },
+      )),
+      Some(StreamEvent::Reasoning(t)) if t == "思考"
+    ));
+
+    // ツール呼び出しは internal_call_id（provider id ではない）を対応付けキーに採る。
+    let call = MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::<()>::ToolCall {
+      tool_call: ToolCall {
+        id: "prov-1".into(),
+        call_id: None,
+        function: ToolFunction {
+          name: "search_kb".into(),
+          arguments: serde_json::json!({"query": "茶"}),
+        },
+        signature: None,
+        additional_params: None,
+      },
+      internal_call_id: "c1".into(),
+    });
+    let Some(StreamEvent::ToolCall { id, name, args }) = decode(call) else {
+      panic!("ToolCall が写像されない");
+    };
+    assert_eq!((id.as_str(), name.as_str()), ("c1", "search_kb"));
+    assert_eq!(args, r#"{"query":"茶"}"#);
+
+    // ツール結果は最初のテキスト断片をサマリに採る（first_text）。
+    let result: MultiTurnStreamItem<()> =
+      MultiTurnStreamItem::StreamUserItem(StreamedUserContent::ToolResult {
+        tool_result: ToolResult {
+          id: "prov-1".into(),
+          call_id: None,
+          content: OneOrMany::one(ToolResultContent::text("2 hits")),
+        },
+        internal_call_id: "c1".into(),
+      });
+    assert!(matches!(
+      decode(result),
+      Some(StreamEvent::ToolResult { id, summary }) if id == "c1" && summary == "2 hits"
+    ));
+
+    // 最終返信は本文テキストへ。
+    let fin = FinalResponse::new(OneOrMany::one(AssistantContent::text("完成")), Usage::new(), None);
+    assert!(matches!(
+      decode::<()>(MultiTurnStreamItem::FinalResponse(fin)),
+      Some(StreamEvent::Final(t)) if t == "完成"
+    ));
+  }
+
+  // ---- pump（解読済みイベント列の状態機）。脚本列（stream::iter）で全語義を断言する。 ----
+
+  /// pump 完了後に送信済み進捗を全部吸い出す。
+  fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<StreamProgress>) -> Vec<StreamProgress> {
+    let mut got = Vec::new();
+    while let Ok(p) = rx.try_recv() {
+      got.push(p);
+    }
+    got
+  }
+
+  /// 全て Ok のイベント列を作る。
+  fn ok_events(
+    events: Vec<StreamEvent>,
+  ) -> impl futures::Stream<Item = Result<StreamEvent, AppError>> {
+    futures::stream::iter(events.into_iter().map(Ok))
+  }
+
+  #[tokio::test]
+  async fn pump_maps_each_event_to_progress_in_order() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let events = ok_events(vec![
+      StreamEvent::Reasoning("考え中".into()),
+      StreamEvent::Text("本文".into()),
+      StreamEvent::ToolCall { id: "c1".into(), name: "search_kb".into(), args: "{}".into() },
+      StreamEvent::ToolResult { id: "c1".into(), summary: "2 hits".into() },
+      StreamEvent::Final("完成".into()),
+    ]);
+
+    let text = pump(events, cancel, &tx).await.unwrap();
+
+    assert_eq!(text, "完成");
+    assert_eq!(
+      drain(&mut rx),
+      vec![
+        StreamProgress::Thinking { delta: "考え中".into() },
+        StreamProgress::Narration { delta: "本文".into() },
+        StreamProgress::ToolCall { name: "search_kb".into(), args: "{}".into() },
+        StreamProgress::ToolResult { name: "search_kb".into(), summary: "2 hits".into() },
+      ]
+    );
+  }
+
+  #[tokio::test]
+  async fn pump_correlates_interleaved_tool_results_by_call_id() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let events = ok_events(vec![
+      StreamEvent::ToolCall { id: "a".into(), name: "search_kb".into(), args: "{}".into() },
+      StreamEvent::ToolCall { id: "b".into(), name: "read_entry".into(), args: "{}".into() },
+      StreamEvent::ToolResult { id: "b".into(), summary: "本文".into() },
+      StreamEvent::ToolResult { id: "a".into(), summary: "3 hits".into() },
+      StreamEvent::Final(String::new()),
+    ]);
+
+    pump(events, cancel, &tx).await.unwrap();
+
+    // 交差した結果でも internal_call_id で各自の名前に紐づく。
+    assert_eq!(
+      drain(&mut rx),
+      vec![
+        StreamProgress::ToolCall { name: "search_kb".into(), args: "{}".into() },
+        StreamProgress::ToolCall { name: "read_entry".into(), args: "{}".into() },
+        StreamProgress::ToolResult { name: "read_entry".into(), summary: "本文".into() },
+        StreamProgress::ToolResult { name: "search_kb".into(), summary: "3 hits".into() },
+      ]
+    );
+  }
+
+  #[tokio::test]
+  async fn pump_uses_empty_name_for_unknown_call_id() {
+    // 既定語義（現状維持）: 未登録 id の結果は名前空欄で流す（落とさない）。
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let events = ok_events(vec![
+      StreamEvent::ToolResult { id: "ghost".into(), summary: "x".into() },
+      StreamEvent::Final(String::new()),
+    ]);
+
+    pump(events, cancel, &tx).await.unwrap();
+
+    assert_eq!(
+      drain(&mut rx),
+      vec![StreamProgress::ToolResult { name: String::new(), summary: "x".into() }]
+    );
+  }
+
+  #[tokio::test]
+  async fn pump_cancels_before_processing_next_event() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let cancel = Arc::new(AtomicBool::new(true));
+    let events = ok_events(vec![StreamEvent::Text("捨てられる".into())]);
+
+    let err = pump(events, cancel, &tx).await.unwrap_err();
+
+    // 各イベント処理前に確認＝立っていれば何も発しない。
+    assert_eq!(err.code, "err.agent.cancelled");
+    assert!(drain(&mut rx).is_empty());
+  }
+
+  #[tokio::test]
+  async fn pump_returns_upstream_error_after_emitting_prior_deltas() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let events = futures::stream::iter(vec![
+      Ok(StreamEvent::Text("前半".into())),
+      Err(AppError::generic("boom")),
+      Ok(StreamEvent::Text("後半".into())),
+    ]);
+
+    let err = pump(events, cancel, &tx).await.unwrap_err();
+
+    // 上流エラーは即返し、以降のイベントは消費しない。発出済みの増分はそのまま。
+    assert_eq!(err.code, "err.generic");
+    assert_eq!(drain(&mut rx), vec![StreamProgress::Narration { delta: "前半".into() }]);
+  }
+
+  #[tokio::test]
+  async fn pump_stops_consuming_after_final_response() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let events = ok_events(vec![
+      StreamEvent::Final("done".into()),
+      StreamEvent::Text("after".into()),
+    ]);
+
+    let text = pump(events, cancel, &tx).await.unwrap();
+
+    // Final で打ち切り＝以降のイベントは発出されない。
+    assert_eq!(text, "done");
+    assert!(drain(&mut rx).is_empty());
+  }
+
+  #[tokio::test]
+  async fn pump_returns_empty_text_when_stream_ends_without_final() {
+    // 既定語義（現状維持）: Final 不在の自然終端は Ok("")。
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let events = ok_events(vec![StreamEvent::Text("a".into())]);
+
+    let text = pump(events, cancel, &tx).await.unwrap();
+
+    assert_eq!(text, "");
+    assert_eq!(drain(&mut rx), vec![StreamProgress::Narration { delta: "a".into() }]);
   }
 }
