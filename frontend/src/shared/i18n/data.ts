@@ -4,9 +4,3 @@ import type { Translate } from "@/shared/i18n/translate";
 export function wikiCategoryLabel(category: string, t: Translate): string {
   return category === "全部" ? t("cat.all") : category;
 }
-
-export function qualityLabel(value: number, t: Translate): string {
-  if (value >= 85) return t("quality.excellent");
-  if (value >= 70) return t("quality.good");
-  return t("quality.needsWork");
-}
