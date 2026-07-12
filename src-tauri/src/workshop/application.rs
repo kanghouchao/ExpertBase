@@ -73,7 +73,6 @@ pub async fn chat(
   tx: UnboundedSender<StreamProgress>,
   pending: confirm::PendingConfirms,
 ) -> Result<String, AppError> {
-  let system = agent_system_with(&sources);
   // 破壊的ツール用の確認ゲート。進捗 tx へ確認要求を流し、workshop_confirm の回填を待つ。
   let gate = Arc::new(confirm::ConfirmGate { pending, tx: tx.clone(), cancel: cancel.clone() });
   let provider = settings.provider;
@@ -83,6 +82,8 @@ pub async fn chat(
     Provider::Ollama => settings.ollama_url,
   };
   let toolset = tools::build_toolset(&root, &sources, settings.brave_api_key, gate);
+  // system の # Tools 節は toolset の definition() から生成する（ツール契約文の唯一の真源）。
+  let system = agent_system_with(&tools::render_tools_section(&toolset).await, &sources);
   crate::agent::run(provider, &base_url, &model, think, &system, toolset, messages, cancel, &tx).await
 }
 
