@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef } from "react";
 import Link from "next/link";
 
 import { Icon } from "@/shared/ui/icon";
@@ -10,252 +10,104 @@ import { Tag } from "@/shared/ui/tag";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { Button, buttonVariants } from "@/shared/ui/button";
 import { useI18n } from "@/shared/providers/providers";
-import { kbApi, type EntryRef } from "@/shared/api";
+import { kbApi } from "@/shared/api";
 import { useKbStore } from "@/entities/knowledge-base";
 import { cn } from "@/shared/lib/utils";
-import { forceLayout, type Point } from "../model/force-layout";
-import { isOrphanDegree } from "../model/graph-metrics";
+import {
+  H,
+  W,
+  activeNode,
+  catOf,
+  colorOf,
+  deriveIndices,
+  dimEdge,
+  dimNode,
+  dragTarget,
+  edgeActive,
+  initialState,
+  isOrphan,
+  labelFontSize,
+  labelVisible,
+  neighboursOf,
+  nodeRadius,
+  reduce,
+} from "../model/graph-interaction";
 
-// カテゴリへ順番に割り当てる配色（カテゴリ自体はユーザーデータ由来）。
-const CAT_PALETTE = ["var(--ai)", "var(--brand)", "#9b5a6b", "var(--gold)", "#5e7e8b", "#7a5ae0"];
-
-// レイアウト空間（viewBox）。SVG は幅 100% で描き、この座標系を pan/zoom で変換する。
-const W = 1100;
-const H = 680;
-
-type PanMode = { type: "pan"; sx: number; sy: number; px: number; py: number };
-type NodeMode = {
-  type: "node";
-  id: string;
-  ox: number;
-  oy: number;
-  moved: boolean;
-  sx: number;
-  sy: number;
-};
-
+// インタラクションの意味論（ドラッグ/クリック・pan/zoom・焦点淡化）は
+// graph-interaction reducer が持つ。このコンポーネントは SVG の描画と
+// DOM イベントの転送だけを担う。
 export function GraphView() {
   const { t } = useI18n();
   const { available } = useKbStore();
 
-  const [nodes, setNodes] = useState<EntryRef[]>([]);
-  const [edges, setEdges] = useState<[string, string][]>([]);
-  const [pos, setPos] = useState<Record<string, Point>>({});
-  const [selected, setSelected] = useState<string | null>(null);
-  const [hover, setHover] = useState<string | null>(null);
-  const [catFilter, setCatFilter] = useState<string | null>(null);
-  const [showWeak, setShowWeak] = useState(false);
-  const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [relaying, setRelaying] = useState(false);
-
-  const [grabbing, setGrabbing] = useState(false);
-
+  const [s, dispatch] = useReducer(reduce, initialState);
   const svgRef = useRef<SVGSVGElement>(null);
-  const viewRef = useRef(view);
-  const posRef = useRef(pos);
-  const seedRef = useRef(7);
-  const mode = useRef<PanMode | NodeMode | null>(null);
-
-  // ハンドラから最新値を読むためのミラー（描画中は ref を触らない＝ref ルール順守）。
-  useEffect(() => {
-    viewRef.current = view;
-  }, [view]);
-  useEffect(() => {
-    posRef.current = pos;
-  }, [pos]);
 
   useEffect(() => {
     if (!available) return;
     void (async () => {
       const g = await kbApi.graph();
-      setNodes(g.nodes);
-      setEdges(g.edges);
-      setPos(
-        forceLayout(
-          g.nodes.map((n) => n.path),
-          g.edges,
-          W,
-          H
-        )
-      );
+      dispatch({ type: "graphLoaded", nodes: g.nodes, edges: g.edges });
     })();
   }, [available]);
 
-  // 派生インデックス（度数・隣接・id 逆引き・カテゴリ配色）。
-  const deg = useMemo(() => {
-    const d: Record<string, number> = {};
-    nodes.forEach((n) => (d[n.path] = 0));
-    edges.forEach(([a, b]) => {
-      d[a] = (d[a] ?? 0) + 1;
-      d[b] = (d[b] ?? 0) + 1;
-    });
-    return d;
-  }, [nodes, edges]);
-
-  const nbrOf = useMemo(() => {
-    const m: Record<string, Set<string>> = {};
-    nodes.forEach((n) => (m[n.path] = new Set()));
-    edges.forEach(([a, b]) => {
-      m[a]?.add(b);
-      m[b]?.add(a);
-    });
-    return m;
-  }, [nodes, edges]);
-
-  const nodeById = useMemo(() => {
-    const m: Record<string, EntryRef> = {};
-    nodes.forEach((n) => (m[n.path] = n));
-    return m;
-  }, [nodes]);
-
-  const catColors = useMemo(() => {
-    const cats = [...new Set(nodes.map((n) => n.cat || "uncategorized"))];
-    return Object.fromEntries(cats.map((cat, i) => [cat, CAT_PALETTE[i % CAT_PALETTE.length]]));
-  }, [nodes]);
-
-  const active = selected ?? hover;
-  const activeNbr = active ? nbrOf[active] : null;
-  const catOf = (id: string) => nodeById[id]?.cat || "uncategorized";
-  const colorOf = (id: string) => catColors[catOf(id)];
-
-  // 焦点（選択/ホバー）・カテゴリ絞り込み・孤立強調に応じて淡くするか。
-  const dimNode = (id: string) => {
-    if (showWeak) return !isOrphanDegree(deg[id] ?? 0);
-    if (catFilter) return catOf(id) !== catFilter;
-    if (active) return id !== active && !activeNbr?.has(id);
-    return false;
-  };
-  const rad = (id: string) => 7 + Math.min(deg[id] ?? 0, 11) * 2;
-
-  // 画面座標 → レイアウト座標（pan/zoom を打ち消す）。
-  const toLayout = (clientX: number, clientY: number): Point => {
-    const svg = svgRef.current;
-    if (!svg) return { x: 0, y: 0 };
-    const r = svg.getBoundingClientRect();
-    const vx = (clientX - r.left) * (W / r.width);
-    const vy = (clientY - r.top) * (H / r.height);
-    const { zoom, panX, panY } = viewRef.current;
-    return { x: (vx - panX) / zoom, y: (vy - panY) / zoom };
-  };
-
-  // ビュー中心を保ったままズーム。
-  const applyZoom = (next: (z: number) => number) =>
-    setView((v) => {
-      const z = Math.min(2.6, Math.max(0.5, next(v.zoom)));
-      return { zoom: z, panX: v.panX + (W / 2) * (v.zoom - z), panY: v.panY + (H / 2) * (v.zoom - z) };
-    });
-  const resetView = () => setView({ zoom: 1, panX: 0, panY: 0 });
+  // relayout のアニメーション窓（650ms）。タイマーだけビューが持ち、畳む判定は reducer が持つ。
+  useEffect(() => {
+    if (!s.relaying) return;
+    const timer = window.setTimeout(() => dispatch({ type: "relayoutSettled" }), 650);
+    return () => window.clearTimeout(timer);
+  }, [s.relaying]);
 
   // wheel は passive:false でネイティブに張る＝ページスクロールを止めてズームできる。
+  // svg は空状態では描かれないので、出現に合わせて張り直す。
+  const hasGraph = s.nodes.length > 0;
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const d = -e.deltaY * 0.0014;
-      setView((v) => {
-        const z = Math.min(2.6, Math.max(0.5, v.zoom + v.zoom * d));
-        return {
-          zoom: z,
-          panX: v.panX + (W / 2) * (v.zoom - z),
-          panY: v.panY + (H / 2) * (v.zoom - z),
-        };
-      });
+      dispatch({ type: "wheelZoom", deltaY: e.deltaY });
     };
     svg.addEventListener("wheel", onWheel, { passive: false });
     return () => svg.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [hasGraph]);
 
-  const bgDown = (e: React.MouseEvent) => {
-    setSelected(null);
-    setGrabbing(true);
-    mode.current = { type: "pan", sx: e.clientX, sy: e.clientY, px: view.panX, py: view.panY };
-  };
-  const nodeDown = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    const l = toLayout(e.clientX, e.clientY);
-    const p = posRef.current[id];
-    mode.current = {
-      type: "node",
-      id,
-      ox: p.x - l.x,
-      oy: p.y - l.y,
-      moved: false,
-      sx: e.clientX,
-      sy: e.clientY,
-    };
-    setGrabbing(true);
-    setDragId(id);
+  const idx = useMemo(() => deriveIndices(s.nodes, s.edges), [s.nodes, s.edges]);
+  const active = activeNode(s);
+  const dragId = dragTarget(s);
+  const grabbing = s.mode !== null;
+  const selectedNode = s.selected ? idx.nodeById[s.selected] : null;
+  const neighbours = s.selected ? neighboursOf(idx, s.selected) : [];
+
+  const rectOf = () => {
+    const svg = svgRef.current;
+    return svg ? svg.getBoundingClientRect() : { left: 0, top: 0, width: W, height: H };
   };
   const onMove = (e: React.MouseEvent) => {
-    const m = mode.current;
-    if (!m) return;
-    if (m.type === "pan") {
-      setView((v) => ({ ...v, panX: m.px + (e.clientX - m.sx), panY: m.py + (e.clientY - m.sy) }));
-    } else {
-      if (Math.hypot(e.clientX - m.sx, e.clientY - m.sy) > 3) m.moved = true;
-      const l = toLayout(e.clientX, e.clientY);
-      setPos((prev) => ({ ...prev, [m.id]: { x: l.x + m.ox, y: l.y + m.oy } }));
-    }
+    if (!s.mode) return;
+    dispatch({ type: "pointerMove", x: e.clientX, y: e.clientY, rect: rectOf() });
   };
-  const onUp = () => {
-    const m = mode.current;
-    mode.current = null;
-    setDragId(null);
-    setGrabbing(false);
-    // ドラッグせずに離した＝クリック扱いで選択トグル。
-    if (m && m.type === "node" && !m.moved) setSelected((s) => (s === m.id ? null : m.id));
-  };
-
-  const relayout = () => {
-    seedRef.current += 3;
-    setRelaying(true);
-    setPos(
-      forceLayout(
-        nodes.map((n) => n.path),
-        edges,
-        W,
-        H,
-        seedRef.current
-      )
-    );
-    setSelected(null);
-    resetView();
-    window.setTimeout(() => setRelaying(false), 650);
-  };
-
-  const selectedNode = selected ? nodeById[selected] : null;
-  const neighbours: EntryRef[] = selected
-    ? [...(nbrOf[selected] ?? [])]
-        .map((id) => nodeById[id])
-        .filter((n): n is EntryRef => Boolean(n))
-    : [];
 
   return (
     <div className="view-enter">
       <PageHead
         eyebrow={t("graph.eyebrow")}
         title={t("graph.title")}
-        sub={t("graph.sub", { nodes: nodes.length, edges: edges.length })}
+        sub={t("graph.sub", { nodes: s.nodes.length, edges: s.edges.length })}
         right={
           <>
             <Button
               variant="outline"
               className="border-line-strong bg-surface"
-              onClick={relayout}
+              onClick={() => dispatch({ type: "relayout" })}
             >
               <Icon name="layers" size={17} />
               {t("graph.relayout")}
             </Button>
             <Button
-              variant={showWeak ? "default" : "outline"}
-              className={showWeak ? undefined : "border-line-strong bg-surface"}
-              onClick={() => {
-                setShowWeak((v) => !v);
-                setSelected(null);
-                setCatFilter(null);
-              }}
+              variant={s.showWeak ? "default" : "outline"}
+              className={s.showWeak ? undefined : "border-line-strong bg-surface"}
+              onClick={() => dispatch({ type: "toggleWeak" })}
             >
               <Icon name="flag" size={17} />
               {t("graph.weak")}
@@ -270,25 +122,22 @@ export function GraphView() {
           </>
         }
       />
-      {nodes.length === 0 ? (
+      {!hasGraph ? (
         <Panel pad={0}>
           <EmptyState icon="graph" title={t("empty.graph")} sub={t("empty.graph.sub")} />
         </Panel>
       ) : (
-        <div className={cn("grid gap-4.5", selected ? "grid-cols-[1fr_322px]" : "grid-cols-1")}>
+        <div className={cn("grid gap-4.5", s.selected ? "grid-cols-[1fr_322px]" : "grid-cols-1")}>
           <Panel pad={0} className="relative overflow-hidden">
             {/* カテゴリ凡例 / 絞り込み */}
             <div className="absolute top-3.5 left-3.5 z-10 flex max-w-[74%] flex-wrap gap-1.75">
-              {Object.entries(catColors).map(([cat, color]) => {
-                const on = catFilter === cat;
+              {Object.entries(idx.catColors).map(([cat, color]) => {
+                const on = s.catFilter === cat;
                 return (
                   <button
                     key={cat}
                     type="button"
-                    onClick={() => {
-                      setCatFilter(on ? null : cat);
-                      setShowWeak(false);
-                    }}
+                    onClick={() => dispatch({ type: "toggleCatFilter", cat })}
                     className="flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 font-mono text-[11.5px] font-semibold transition-colors"
                     style={{ background: on ? color : "var(--surface)", color: on ? "#fff" : "var(--ink-soft)" }}
                   >
@@ -306,9 +155,9 @@ export function GraphView() {
             <div className="absolute bottom-3.5 left-3.5 z-10 flex flex-col gap-1.5">
               {(
                 [
-                  ["+", () => applyZoom((z) => z + 0.25)],
-                  ["−", () => applyZoom((z) => z - 0.25)],
-                  ["⟳", resetView],
+                  ["+", () => dispatch({ type: "zoomStep", delta: 0.25 })],
+                  ["−", () => dispatch({ type: "zoomStep", delta: -0.25 })],
+                  ["⟳", () => dispatch({ type: "resetView" })],
                 ] as const
               ).map(([label, fn]) => (
                 <button
@@ -324,8 +173,8 @@ export function GraphView() {
 
             {/* 情報行 / 操作ヒント */}
             <div className="absolute right-4.5 bottom-4 z-10 font-mono text-[11.5px] text-ink-faint">
-              {nodes.length} {t("graph.nodes")} · {edges.length} {t("graph.links")} ·{" "}
-              {Math.round(view.zoom * 100)}%
+              {s.nodes.length} {t("graph.nodes")} · {s.edges.length} {t("graph.links")} ·{" "}
+              {Math.round(s.view.zoom * 100)}%
             </div>
             <div className="absolute top-3.5 right-4 z-10 flex items-center gap-1.5 font-mono text-[11px] text-ink-faint">
               <Icon name="drag" size={13} />
@@ -340,10 +189,10 @@ export function GraphView() {
                 background: "radial-gradient(circle at 50% 40%, var(--surface), var(--surface-2))",
                 cursor: grabbing ? "grabbing" : "grab",
               }}
-              onMouseDown={bgDown}
+              onMouseDown={(e) => dispatch({ type: "bgDown", x: e.clientX, y: e.clientY })}
               onMouseMove={onMove}
-              onMouseUp={onUp}
-              onMouseLeave={onUp}
+              onMouseUp={() => dispatch({ type: "pointerUp" })}
+              onMouseLeave={() => dispatch({ type: "pointerUp" })}
             >
               <defs>
                 <radialGradient id="graph-glow">
@@ -351,19 +200,14 @@ export function GraphView() {
                   <stop offset="100%" stopColor="var(--brand)" stopOpacity="0" />
                 </radialGradient>
               </defs>
-              <g transform={`translate(${view.panX},${view.panY}) scale(${view.zoom})`}>
+              <g transform={`translate(${s.view.panX},${s.view.panY}) scale(${s.view.zoom})`}>
                 {/* エッジ */}
-                {edges.map(([a, b], i) => {
-                  const pa = pos[a];
-                  const pb = pos[b];
+                {s.edges.map(([a, b], i) => {
+                  const pa = s.pos[a];
+                  const pb = s.pos[b];
                   if (!pa || !pb) return null;
-                  const on = active != null && (a === active || b === active);
-                  const dim =
-                    (active != null && !on) ||
-                    (catFilter != null && catOf(a) !== catFilter && catOf(b) !== catFilter) ||
-                    (showWeak &&
-                      !isOrphanDegree(deg[a] ?? 0) &&
-                      !isOrphanDegree(deg[b] ?? 0));
+                  const on = edgeActive(s, a, b);
+                  const dim = dimEdge(s, idx, a, b);
                   return (
                     <line
                       key={i}
@@ -375,7 +219,7 @@ export function GraphView() {
                       strokeWidth={on ? 2 : 1}
                       opacity={dim ? 0.1 : on ? 0.85 : 0.4}
                       style={{
-                        transition: relaying
+                        transition: s.relaying
                           ? "all .6s cubic-bezier(.2,.7,.2,1)"
                           : "opacity .2s, stroke .2s",
                       }}
@@ -383,13 +227,13 @@ export function GraphView() {
                   );
                 })}
                 {/* ノード（円） */}
-                {nodes.map((n) => {
-                  const p = pos[n.path];
+                {s.nodes.map((n) => {
+                  const p = s.pos[n.path];
                   if (!p) return null;
-                  const r = rad(n.path);
-                  const dim = dimNode(n.path);
+                  const r = nodeRadius(idx.deg[n.path] ?? 0);
+                  const dim = dimNode(s, idx, n.path);
                   const on = n.path === active;
-                  const orphan = isOrphanDegree(deg[n.path] ?? 0);
+                  const orphan = isOrphan(idx, n.path);
                   const isDrag = n.path === dragId;
                   return (
                     <g
@@ -397,14 +241,17 @@ export function GraphView() {
                       style={{
                         cursor: "grab",
                         opacity: dim ? 0.18 : 1,
-                        transition: relaying ? "transform .6s cubic-bezier(.2,.7,.2,1)" : "opacity .2s",
+                        transition: s.relaying ? "transform .6s cubic-bezier(.2,.7,.2,1)" : "opacity .2s",
                       }}
-                      onMouseEnter={() => !mode.current && setHover(n.path)}
-                      onMouseLeave={() => setHover(null)}
-                      onMouseDown={(e) => nodeDown(e, n.path)}
+                      onMouseEnter={() => dispatch({ type: "hoverEnter", id: n.path })}
+                      onMouseLeave={() => dispatch({ type: "hoverLeave" })}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        dispatch({ type: "nodeDown", id: n.path, x: e.clientX, y: e.clientY, rect: rectOf() });
+                      }}
                     >
                       {on && <circle cx={p.x} cy={p.y} r={r + 30} fill="url(#graph-glow)" />}
-                      {showWeak && orphan && (
+                      {s.showWeak && orphan && (
                         <circle
                           cx={p.x}
                           cy={p.y}
@@ -419,12 +266,12 @@ export function GraphView() {
                         cx={p.x}
                         cy={p.y}
                         r={r}
-                        fill={colorOf(n.path)}
+                        fill={colorOf(idx, n.path)}
                         stroke={isDrag ? "var(--brand)" : "var(--surface)"}
                         strokeWidth={isDrag ? 3.5 : 2.5}
                         style={{
                           filter: on || isDrag ? "brightness(1.1)" : "none",
-                          transition: relaying
+                          transition: s.relaying
                             ? "cx .6s cubic-bezier(.2,.7,.2,1), cy .6s cubic-bezier(.2,.7,.2,1)"
                             : "stroke .15s",
                         }}
@@ -433,27 +280,19 @@ export function GraphView() {
                   );
                 })}
                 {/* ラベル（最終パス＝どの円にも隠れない。紙色の縁取りで可読性を確保） */}
-                {nodes.map((n) => {
-                  const p = pos[n.path];
+                {s.nodes.map((n) => {
+                  const p = s.pos[n.path];
                   if (!p) return null;
-                  const r = rad(n.path);
+                  if (!labelVisible(s, idx, n.path)) return null;
+                  const r = nodeRadius(idx.deg[n.path] ?? 0);
                   const on = n.path === active;
-                  const orphan = isOrphanDegree(deg[n.path] ?? 0);
-                  const isDrag = n.path === dragId;
-                  const showLabel =
-                    on ||
-                    isDrag ||
-                    Boolean(activeNbr?.has(n.path)) ||
-                    (deg[n.path] ?? 0) >= 4 ||
-                    (showWeak && orphan);
-                  if (!showLabel) return null;
                   return (
                     <text
                       key={n.path}
                       x={p.x}
                       y={p.y + r + 14}
                       textAnchor="middle"
-                      fontSize={Math.max(11, 10 + (deg[n.path] ?? 0) * 0.3)}
+                      fontSize={labelFontSize(idx.deg[n.path] ?? 0)}
                       fontWeight={on ? 700 : 600}
                       className="font-serif"
                       fill="var(--ink)"
@@ -463,8 +302,8 @@ export function GraphView() {
                       strokeLinejoin="round"
                       style={{
                         pointerEvents: "none",
-                        opacity: dimNode(n.path) ? 0.18 : 1,
-                        transition: relaying ? "all .6s cubic-bezier(.2,.7,.2,1)" : "opacity .2s",
+                        opacity: dimNode(s, idx, n.path) ? 0.18 : 1,
+                        transition: s.relaying ? "all .6s cubic-bezier(.2,.7,.2,1)" : "opacity .2s",
                       }}
                     >
                       {n.title}
@@ -481,13 +320,13 @@ export function GraphView() {
                 <Tag tone="line">
                   <span
                     className="size-1.75 rounded-full"
-                    style={{ background: colorOf(selectedNode.path) }}
+                    style={{ background: colorOf(idx, selectedNode.path) }}
                   />
-                  {selectedNode.cat || "uncategorized"}
+                  {catOf(idx, selectedNode.path)}
                 </Tag>
                 <button
                   type="button"
-                  onClick={() => setSelected(null)}
+                  onClick={() => dispatch({ type: "clearSelection" })}
                   className="text-ink-muted transition-colors hover:text-ink"
                 >
                   <Icon name="x" size={16} />
@@ -499,7 +338,7 @@ export function GraphView() {
               <div className="mt-1.5 font-mono text-[12.5px] text-ink-muted">
                 {t("graph.connections", { count: neighbours.length })}
               </div>
-              {isOrphanDegree(deg[selectedNode.path] ?? 0) && (
+              {isOrphan(idx, selectedNode.path) && (
                 <div className="mt-4 flex gap-2.5 rounded-[10px] bg-brand-wash px-3.5 py-2.75">
                   <Icon name="flag" size={16} className="mt-0.5 flex-none text-brand" />
                   <span className="text-[12.5px] leading-relaxed text-ink-soft">
@@ -512,16 +351,16 @@ export function GraphView() {
                   <button
                     key={node.path}
                     type="button"
-                    onClick={() => setSelected(node.path)}
+                    onClick={() => dispatch({ type: "select", id: node.path })}
                     className="flex items-center gap-2.5 rounded-lg border border-line bg-surface-2 px-3 py-2 text-left transition-colors hover:border-line-strong"
                   >
                     <span
                       className="size-2 rounded-full"
-                      style={{ background: colorOf(node.path) }}
+                      style={{ background: colorOf(idx, node.path) }}
                     />
                     <span className="text-[13.5px] font-semibold text-ink">{node.title}</span>
                     <span className="ml-auto font-mono text-[11px] text-ink-faint">
-                      {node.cat || "uncategorized"}
+                      {catOf(idx, node.path)}
                     </span>
                   </button>
                 ))}
