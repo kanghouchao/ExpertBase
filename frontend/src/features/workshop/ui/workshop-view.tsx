@@ -18,16 +18,7 @@ import { PageHead } from "@/shared/ui/page-head";
 import { cn } from "@/shared/lib/utils";
 import { useI18n } from "@/shared/providers/providers";
 import { translateError } from "@/shared/i18n/translate";
-import {
-  aiHasKey,
-  getAiSettings,
-  getWorkshopConversation,
-  listOllamaModels,
-  pickLocalFile,
-  saveWorkshopConversation,
-  type AiProvider,
-  type OllamaModel,
-} from "@/shared/api/tauri/client";
+import { agentApi, workshopApi, type AiProvider, type OllamaModel } from "@/shared/api";
 import { RAW_TYPE, type RawMaterial, type RawType } from "@/entities/material";
 import { useKbStore } from "@/entities/knowledge-base";
 import {
@@ -112,7 +103,7 @@ export function WorkshopView() {
       //    ＝ Ollama が落ちていても llama.app を選べる（設定読み込みを巻き込まない）。
       let defaultModel = "";
       try {
-        const settings = await getAiSettings();
+        const settings = await agentApi.getSettings();
         setProvider(settings.provider);
         setSettingsModel(settings.model);
         defaultModel = settings.model;
@@ -121,7 +112,10 @@ export function WorkshopView() {
       }
       // 2) Ollama の探測とモデル一覧は別系統。失敗しても上の設定は保持する。
       try {
-        const [ollama, modelList] = await Promise.all([aiHasKey(), listOllamaModels()]);
+        const [ollama, modelList] = await Promise.all([
+          agentApi.hasKey(),
+          agentApi.listOllamaModels(),
+        ]);
         setHasOllama(ollama);
         setModels(modelList);
         // 既定モデルの nudge: 設定の既定 → Qwen3（2026 本地工具调用最稳）→ 任意の tools 対応 → 先頭。
@@ -191,7 +185,7 @@ export function WorkshopView() {
 
   // 外部のローカルファイルを素材に追加する（id は絶対パス。AI が read_source で読む、KB へは落とさない）。
   async function addLocalFile() {
-    const path = await pickLocalFile();
+    const path = await workshopApi.pickSourceFile();
     if (!path) return;
     const material = materialFromFile(path, t("workshop.addLocalFile"));
     setSources((current) =>
@@ -240,7 +234,8 @@ export function WorkshopView() {
         return;
       }
       setError(null);
-      void getWorkshopConversation(requestedConversationId)
+      void workshopApi
+        .getConversation(requestedConversationId)
         .then((conversation) => {
           if (!current) return;
           conversationIdRef.current = conversation.id;
@@ -271,12 +266,13 @@ export function WorkshopView() {
 
     setInstruction(rollback.prompt);
     setMessages(rollback.history);
-    void saveWorkshopConversation({
-      kbPath,
-      id: viewedId,
-      sourceIds: sources.map((source) => source.id),
-      messages: rollback.history,
-    })
+    void workshopApi
+      .saveConversation({
+        kbPath,
+        id: viewedId,
+        sourceIds: sources.map((source) => source.id),
+        messages: rollback.history,
+      })
       .then(() => notifyWorkshopHistoryChanged())
       .catch((saveError) => setError(translateError(t, saveError)));
   }, [kbPath, sources, viewedId, setError, setInstruction, setMessages, t]);
@@ -302,7 +298,12 @@ export function WorkshopView() {
     // 送信時に即存盤＝後台生成が会話 id を捕獲でき、切り戻しても消えない。失敗時だけ入力を戻す。
     let id = conversationIdRef.current;
     try {
-      const saved = await saveWorkshopConversation({ kbPath, id, sourceIds, messages: baseHistory });
+      const saved = await workshopApi.saveConversation({
+        kbPath,
+        id,
+        sourceIds,
+        messages: baseHistory,
+      });
       id = saved.id;
     } catch (saveError) {
       setError(translateError(t, saveError));

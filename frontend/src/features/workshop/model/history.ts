@@ -1,4 +1,4 @@
-import type { WorkshopConversationSummary } from "@/shared/api/tauri/client";
+import type { WorkshopConversationSummary } from "@/shared/api";
 
 export const HISTORY_PAGE_SIZE = 20;
 

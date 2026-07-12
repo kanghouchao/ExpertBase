@@ -2,14 +2,7 @@
 //! 会話を切り替えても実行を殺さず（後台で継続）、終わったら捕獲した会話 id へ存盤する。
 //! 本地モデルは直列なので同時に 1 ターンだけ＝後端の単飛取消フラグのままで足りる。
 
-import {
-  saveWorkshopConversation,
-  workshopCancel,
-  workshopChat,
-  workshopConfirm,
-  type ChatPhase,
-  type WorkshopMessage,
-} from "@/shared/api/tauri/client";
+import { workshopApi, type ChatPhase, type WorkshopMessage } from "@/shared/api";
 
 import { notifyWorkshopHistoryChanged } from "./history";
 import { toChatTurn, type ChatUiPhase, type ToolEvent } from "./process-state";
@@ -116,7 +109,7 @@ async function run(args: StartArgs): Promise<void> {
   let narration = "";
   let thinking = "";
   try {
-    const reply = await workshopChat(
+    const reply = await workshopApi.chat(
       sourceIds,
       baseHistory.map(toChatTurn),
       args.model,
@@ -186,7 +179,7 @@ async function run(args: StartArgs): Promise<void> {
 
 async function finishSave(args: StartArgs, completed: WorkshopMessage[]): Promise<void> {
   try {
-    await saveWorkshopConversation({
+    await workshopApi.saveConversation({
       kbPath: args.kbPath,
       id: args.conversationId,
       sourceIds: args.sourceIds,
@@ -215,7 +208,7 @@ export function stopActive(
 
   const hasOutput = !!active.narration || !!active.thinking || active.tools.length > 0;
   if (hasOutput) {
-    void workshopCancel();
+    void workshopApi.cancel();
     return null;
   }
 
@@ -225,7 +218,7 @@ export function stopActive(
       ? { prompt: last.text, history: active.baseHistory.slice(0, -1) }
       : null;
   emit({ active: null, error: null });
-  void workshopCancel();
+  void workshopApi.cancel();
   return rollback;
 }
 
@@ -240,7 +233,7 @@ export async function answerConfirm(
   if (!isRunForConversation(active, kbPath, conversationId) || !active.confirm) return;
   const request = active.confirm;
   try {
-    await workshopConfirm(request.id, approved);
+    await workshopApi.confirm(request.id, approved);
     patch(active.kbPath, active.conversationId, { confirm: null });
   } catch (cause) {
     if (!isActive(active.kbPath, active.conversationId)) return;
@@ -257,5 +250,5 @@ export function discardActive(): void {
   if (!state.active) return;
   cancelled = true;
   emit({ active: null, error: null });
-  void workshopCancel();
+  void workshopApi.cancel();
 }

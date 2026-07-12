@@ -29,7 +29,7 @@ When working under `frontend/`, follow this file in addition to the repository-l
 - `src/widgets/`: app-shell composition that binds features, entities, and shared.
 - `src/features/`: complete user scenarios (UI under `ui/`), exposed through a slice `index.ts`.
 - `src/entities/`: domain-facing client models, types, and adapters under `model/` (no UI), exposed through a slice `index.ts`.
-- `src/shared/`: reusable primitives and framework-neutral helpers — `shared/ui` (shadcn + custom primitives), `shared/api/tauri` (typed IPC client), `shared/config`, `shared/i18n`, `shared/lib`, `shared/providers`.
+- `src/shared/`: reusable primitives and framework-neutral helpers — `shared/ui` (shadcn + custom primitives), `shared/api` (typed backend seam: domain interfaces `kbApi`/`agentApi`/`workshopApi` with Tauri and fake adapters; `@tauri-apps` is imported only by `shared/api/tauri.ts`), `shared/config`, `shared/i18n`, `shared/lib`, `shared/providers`.
 - `src/shared/ui/`: shadcn/ui generated primitives and shared custom primitives. Do not edit shadcn primitives casually; treat changes as local forks of upstream components.
 
 Create new folders only when the first real file needs them. Do not add empty architecture folders.
@@ -60,7 +60,7 @@ src/app -> src/widgets -> src/features -> src/entities -> src/shared
 - Avoid request waterfalls. Start independent async work early and await it together.
 - Do not pass large server objects into Client Components. Pass minimal serialized props.
 - Use route-level `loading.tsx`, `error.tsx`, and `not-found.tsx` only when the route needs them.
-- Keep Tauri IPC calls behind the typed client in `src/shared/api/tauri` instead of scattering `invoke` calls through UI components.
+- Keep Tauri IPC calls behind the backend seam in `src/shared/api` (domain api objects) instead of scattering `invoke` calls through UI components. Tests swap the backend with `setBackend()` on top of `fakeBackend` instead of module mocking.
 
 ## shadcn/ui Practices
 

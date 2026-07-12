@@ -10,7 +10,7 @@ import { Tag } from "@/shared/ui/tag";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { Button, buttonVariants } from "@/shared/ui/button";
 import { useI18n } from "@/shared/providers/providers";
-import { graph as fetchGraph, type EntryRef } from "@/shared/api/tauri/client";
+import { kbApi, type EntryRef } from "@/shared/api";
 import { useKbStore } from "@/entities/knowledge-base";
 import { cn } from "@/shared/lib/utils";
 import { forceLayout, type Point } from "../model/force-layout";
@@ -68,7 +68,7 @@ export function GraphView() {
   useEffect(() => {
     if (!available) return;
     void (async () => {
-      const g = await fetchGraph();
+      const g = await kbApi.graph();
       setNodes(g.nodes);
       setEdges(g.edges);
       setPos(

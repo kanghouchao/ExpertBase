@@ -15,15 +15,13 @@ import { SegTabs } from "@/shared/ui/seg-tabs";
 import { ACCENTS, useI18n, useTheme } from "@/shared/providers/providers";
 import { LANGS } from "@/shared/i18n/dictionaries";
 import {
+  agentApi,
   DEFAULT_AI_SETTINGS,
   DEFAULT_PROVIDER_URL,
-  getAiSettings,
-  listModels,
-  setAiSettings,
   type AiProvider,
   type AiSettings,
   type OllamaModel,
-} from "@/shared/api/tauri/client";
+} from "@/shared/api";
 
 const PROVIDERS = ["ollama", "llamaApp"] as const;
 const PROVIDER_LABELS: Record<AiProvider, string> = {
@@ -52,7 +50,8 @@ export function SettingsDialog({
     if (!open) return;
     // 開くたびに設定を読み直す。読み込み失敗（不正 ai.toml 等）でも既定値へ倒し、AI 節が静かに
     // 消えないようにする。前回のモデル候補/検証状態は finally でクリア（effect 本体での同期 setState を避ける）。
-    void getAiSettings()
+    void agentApi
+      .getSettings()
       .then(setAi, () => setAi(DEFAULT_AI_SETTINGS))
       .finally(() => {
         setModels([]);
@@ -62,13 +61,13 @@ export function SettingsDialog({
 
   function saveAi(next: AiSettings) {
     setAi(next);
-    void setAiSettings(next);
+    void agentApi.setSettings(next);
   }
 
   // Esc やバックドロップで閉じると入力中フィールドの blur が走らないことがあるため、
   // 閉じる瞬間に現在の編集内容を保存してから閉じる（保存漏れの防止）。
   function handleOpenChange(next: boolean) {
-    if (!next && ai) void setAiSettings(ai);
+    if (!next && ai) void agentApi.setSettings(ai);
     onOpenChange(next);
   }
 
@@ -83,7 +82,7 @@ export function SettingsDialog({
     if (!ai) return;
     setVerify("loading");
     try {
-      const list = await listModels(ai.provider, currentUrl);
+      const list = await agentApi.listModels(ai.provider, currentUrl);
       setModels(list);
       setVerify("ok");
     } catch {
