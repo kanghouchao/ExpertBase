@@ -54,6 +54,51 @@ pub(crate) fn build_toolset(
   ]
 }
 
+/// system プロンプトの # Tools 節本文を toolset の `definition()` から生成する。
+/// ツールの契約文は definition() が唯一の真源＝散文との二重管理・分岐を構造的に排除する。
+/// 形式: `- name(args): description` + 引数ごとの箇条書き（説明があるもののみ）。
+pub(crate) async fn render_tools_section(toolset: &[Box<dyn rig_core::tool::ToolDyn>]) -> String {
+  let mut lines = Vec::new();
+  for tool in toolset {
+    let def = tool.definition(String::new()).await;
+    let params = ordered_params(&def.parameters);
+    let names = params.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ");
+    lines.push(format!("- {}({}): {}", def.name, names, def.description));
+    for (name, desc) in &params {
+      if !desc.is_empty() {
+        lines.push(format!("  - {name}: {desc}"));
+      }
+    }
+  }
+  lines.join("\n")
+}
+
+/// JSON Schema の parameters から（引数名, 説明）を取り出す。serde_json の object は
+/// 辞書順で反復されるため、宣言順を保つ `required` 配列を先頭に、残りの optional を後ろに置く。
+fn ordered_params(schema: &serde_json::Value) -> Vec<(String, String)> {
+  let Some(props) = schema.get("properties").and_then(|v| v.as_object()) else {
+    return Vec::new();
+  };
+  let required: Vec<&str> = schema
+    .get("required")
+    .and_then(|v| v.as_array())
+    .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+    .unwrap_or_default();
+  let mut names: Vec<&str> = required.clone();
+  names.extend(props.keys().map(String::as_str).filter(|k| !required.contains(k)));
+  names
+    .into_iter()
+    .map(|name| {
+      let desc = props
+        .get(name)
+        .and_then(|p| p.get("description"))
+        .and_then(|d| d.as_str())
+        .unwrap_or_default();
+      (name.to_string(), desc.to_string())
+    })
+    .collect()
+}
+
 /// read_source の引数。id（素材識別子）を緩く受ける。
 #[derive(Deserialize)]
 pub struct ReadArgs {
@@ -97,7 +142,7 @@ impl Tool for ReadSource {
     ToolDefinition {
       name: Self::NAME.to_string(),
       description:
-        "Read the full text of an attached source material by its id (see the # Sources list). Read a source before translating, rewriting, summarizing, or answering questions about it."
+        "Read the full text of an attached source material by its id (see the # Sources list). Read a source before translating, rewriting, summarizing, or answering questions about it. Do not summarize or rewrite a source unless the user asks."
           .to_string(),
       parameters: json!({
         "type": "object",
@@ -134,7 +179,7 @@ impl Tool for SearchKb {
     ToolDefinition {
       name: Self::NAME.to_string(),
       description:
-        "Search existing knowledge base entries by keyword. Returns matching entry titles and excerpts."
+        "Search existing knowledge base entries by keyword. Returns matching entry titles and excerpts. Use it to find related notes and avoid duplicates."
           .to_string(),
       parameters: json!({
         "type": "object",
@@ -170,7 +215,7 @@ impl Tool for SearchWeb {
     ToolDefinition {
       name: Self::NAME.to_string(),
       description:
-        "Search the web by keywords. Returns a JSON array of results with title, url, and snippet; returns a parenthesized plain-text notice when there are no results or the search fails. Use fetch_web on a selected URL to read the page."
+        "Search the web by keywords. Returns a JSON array of results with title, url, and snippet; returns a parenthesized plain-text notice when there are no results or the search fails. Use fetch_web on a selected result before relying on or saving its content."
           .to_string(),
       parameters: json!({
         "type": "object",
@@ -218,7 +263,7 @@ impl Tool for ListKb {
     ToolDefinition {
       name: Self::NAME.to_string(),
       description:
-        "List knowledge base entries (title, category, path), newest first. Shows at most 100 entries; if more exist, the output ends with how many were omitted."
+        "List knowledge base entries (title, category, path), newest first. Shows at most 100 entries; if more exist, the output ends with how many were omitted. Use it to get an overview of what the knowledge base contains."
           .to_string(),
       parameters: json!({ "type": "object", "properties": {} }),
     }
@@ -256,7 +301,7 @@ impl Tool for ReadEntry {
     ToolDefinition {
       name: Self::NAME.to_string(),
       description:
-        "Read the full Markdown text of an existing knowledge base entry by its path (entries/*.md) or exact title. Use list_kb or search_kb first to find the entry."
+        "Read the full Markdown text of an existing knowledge base entry by its path (entries/*.md) or exact title. Use list_kb or search_kb first to find the entry. Read an entry before answering questions about it or building on it."
           .to_string(),
       parameters: json!({
         "type": "object",
@@ -296,14 +341,14 @@ impl Tool for WriteEntry {
     ToolDefinition {
       name: Self::NAME.to_string(),
       description:
-        "Save a new entry into the knowledge base. Call only when the user asks to save or store the content."
+        "Save a new entry into the knowledge base. Call only when the user asks to save or store the content. The user is asked to approve the save before it happens; if they deny it, do not retry unless asked."
           .to_string(),
       parameters: json!({
         "type": "object",
         "properties": {
           "title": { "type": "string", "description": "Concise entry heading" },
-          "cat": { "type": "string", "description": "Short lowercase English category, e.g. tea, finance" },
-          "body": { "type": "string", "description": "Entry body in Markdown" }
+          "cat": { "type": "string", "description": "Short lowercase English category, e.g. tea, finance, privacy" },
+          "body": { "type": "string", "description": "Entry body in Markdown, using [[title]] links to related notes" }
         },
         "required": ["title", "body"]
       }),
@@ -356,7 +401,7 @@ impl Tool for UpdateEntry {
     ToolDefinition {
       name: Self::NAME.to_string(),
       description:
-        "Overwrite the body of an existing knowledge base entry, located by its path (entries/*.md) or exact title. The new body replaces the old one entirely. Call only when the user asks to change a saved entry."
+        "Overwrite the body of an existing knowledge base entry, located by its path (entries/*.md) or exact title. The new body replaces the old one entirely, so read the entry first and include everything that should remain. Call only when the user asks to change a saved entry. The user is asked to approve the change before it happens; if they deny it, do not retry unless asked."
           .to_string(),
       parameters: json!({
         "type": "object",
@@ -425,7 +470,7 @@ impl Tool for DeleteEntry {
     ToolDefinition {
       name: Self::NAME.to_string(),
       description:
-        "Delete an existing knowledge base entry, located by its path (entries/*.md) or exact title. This is irreversible. Call only when the user asks to delete a saved entry."
+        "Delete an existing knowledge base entry, located by its path (entries/*.md) or exact title. This is irreversible and breaks [[links]] pointing to the entry. Call only when the user asks to delete a saved entry. The user is asked to approve the deletion before it happens; if they deny it, do not retry unless asked."
           .to_string(),
       parameters: json!({
         "type": "object",
@@ -771,6 +816,58 @@ mod tests {
       body: body.into(),
     };
     index::upsert_entry(conn, path, &entry).unwrap();
+  }
+
+  #[tokio::test]
+  async fn tools_section_renders_each_definition_with_signature_and_params() {
+    let tmp = tempfile::tempdir().unwrap();
+    let toolset =
+      build_toolset(tmp.path(), &["/abs/a.md".to_string()], String::new(), auto_gate(true));
+
+    let out = render_tools_section(&toolset).await;
+
+    // 全ツールが definition() 由来の 1 行で並ぶ（名前 + 署名 + 説明）。
+    assert!(out.contains("- read_source(id): Read the full text"), "was: {out}");
+    assert!(out.contains("- list_kb(): List knowledge base entries"), "was: {out}");
+    assert!(out.contains("- search_kb(query): "), "was: {out}");
+    assert!(out.contains("- search_web(query): "), "was: {out}");
+    assert!(out.contains("- read_entry(id): "), "was: {out}");
+    assert!(out.contains("- update_entry(id, body): "), "was: {out}");
+    assert!(out.contains("- delete_entry(id): "), "was: {out}");
+    assert!(out.contains("- fetch_web(url): "), "was: {out}");
+    // 署名は required の宣言順が先、optional（cat）が後ろ（serde_json は挿入順を保持しないため）。
+    assert!(out.contains("- write_entry(title, body, cat): "), "was: {out}");
+    // 引数の説明も definition() の parameters から箇条書きで並ぶ。
+    assert!(
+      out.contains("- body: Entry body in Markdown, using [[title]] links to related notes"),
+      "was: {out}"
+    );
+  }
+
+  #[tokio::test]
+  async fn tool_definitions_carry_the_full_contract_text() {
+    // 旧 prompt.rs の散文にだけあった契約（書き込み門控・確認ゲート・素材の扱い）が
+    // definition() に一本化されている＝モデルが見る物語は一つ。
+    let tmp = tempfile::tempdir().unwrap();
+    let toolset =
+      build_toolset(tmp.path(), &["/abs/a.md".to_string()], String::new(), auto_gate(true));
+
+    let out = render_tools_section(&toolset).await;
+
+    // read_source: 頼まれない限り要約・書き換えしない。
+    assert!(out.contains("Do not summarize or rewrite a source unless the user asks."), "was: {out}");
+    // list_kb / search_kb / read_entry / search_web: 使いどころの案内。
+    assert!(out.contains("Use it to get an overview"), "was: {out}");
+    assert!(out.contains("avoid duplicates"), "was: {out}");
+    assert!(out.contains("before answering questions about it or building on it"), "was: {out}");
+    assert!(out.contains("before relying on or saving its content"), "was: {out}");
+    // 書き込み門控: ユーザーが頼んだときだけ + 実行前確認 + 拒否時は再試行しない。
+    assert!(out.contains("Call only when the user asks to save"), "was: {out}");
+    assert!(out.contains("The user is asked to approve the save before it happens"), "was: {out}");
+    assert!(out.contains("read the entry first and include everything that should remain"), "was: {out}");
+    assert!(out.contains("The user is asked to approve the change before it happens"), "was: {out}");
+    assert!(out.contains("breaks [[links]] pointing to the entry"), "was: {out}");
+    assert!(out.contains("The user is asked to approve the deletion before it happens"), "was: {out}");
   }
 
   #[tokio::test]
