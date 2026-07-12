@@ -1,7 +1,7 @@
 //! workshop インフラ: Rig の `Tool` トレイト実装（KB 操作の AI ツール）。
 //! search_kb は読み取り（FTS 検索）、write_entry は書き込み（application::confirm へ委譲）。
 //! `Tool::call` は async だが sqlite/FS はブロッキングなので spawn_blocking で橋渡しし、
-//! 各呼び出しで root から索引を開き直す（`Connection` は Sync ではないため共有しない）。
+//! 読み取り経路は with_index で root から索引を一度だけ開く（`Connection` は Sync ではないため共有しない）。
 
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
@@ -555,38 +555,44 @@ fn read_blocking(sources: &[String], used_sources: &UsedSources, id: &str) -> St
   }
 }
 
+/// 索引を一度だけ開いて読み取り操作へ渡すヘルパー。索引を開けなかった
+/// ときの「索引エラー → モデル向け文字列」整形をここへ一元化する
+/// （操作側のエラー整形は各操作が持つ）。
+fn with_index<T>(
+  root: &Path,
+  f: impl FnOnce(&rusqlite::Connection) -> Result<T, String>,
+) -> Result<T, String> {
+  let conn = index::open_index(root).map_err(|e| format!("(index error: {e:?})"))?;
+  f(&conn)
+}
+
 /// FTS 検索（ブロッキング）。空クエリ・無ヒット・エラーもモデル向け文字列で返す（ループ継続）。
 fn search_blocking(root: &Path, query: &str) -> String {
   let query = query.trim();
   if query.is_empty() {
     return "(empty query)".to_string();
   }
-  let conn = match index::open_index(root) {
-    Ok(c) => c,
-    Err(e) => return format!("(index error: {e:?})"),
-  };
-  match index::search(&conn, query) {
+  with_index(root, |conn| match index::search(conn, query) {
     Ok(hits) if !hits.is_empty() => {
       let shown = hits.len().min(5);
-      hits
-        .iter()
-        .take(shown)
-        .map(|h| format!("- {}: {}", h.title, h.excerpt))
-        .collect::<Vec<_>>()
-        .join("\n")
+      Ok(
+        hits
+          .iter()
+          .take(shown)
+          .map(|h| format!("- {}: {}", h.title, h.excerpt))
+          .collect::<Vec<_>>()
+          .join("\n"),
+      )
     }
-    Ok(_) => "(no matching entries)".to_string(),
-    Err(e) => format!("(search error: {e:?})"),
-  }
+    Ok(_) => Ok("(no matching entries)".to_string()),
+    Err(e) => Err(format!("(search error: {e:?})")),
+  })
+  .unwrap_or_else(|notice| notice)
 }
 
 /// 条目一覧（ブロッキング）。コンテキスト保護のため先頭 100 件で打ち切り、残数を添える。
 fn list_blocking(root: &Path) -> String {
-  let conn = match index::open_index(root) {
-    Ok(c) => c,
-    Err(e) => return format!("(index error: {e:?})"),
-  };
-  match index::list_entries(&conn) {
+  with_index(root, |conn| match index::list_entries(conn) {
     Ok(refs) if !refs.is_empty() => {
       let total = refs.len();
       let mut lines: Vec<String> = refs
@@ -603,18 +609,19 @@ fn list_blocking(root: &Path) -> String {
       if total > 100 {
         lines.push(format!("(and {} more entries)", total - 100));
       }
-      lines.join("\n")
+      Ok(lines.join("\n"))
     }
-    Ok(_) => "(no entries)".to_string(),
-    Err(e) => format!("(list error: {e:?})"),
-  }
+    Ok(_) => Ok("(no entries)".to_string()),
+    Err(e) => Err(format!("(list error: {e:?})")),
+  })
+  .unwrap_or_else(|notice| notice)
 }
 
 /// id（path / 正確な title）を索引で既存条目へ解決し、entries/*.md へ再検証した相対パスと
-/// タイトルを返す（read_entry / update_entry 共用）。失敗は全てモデル向け文字列（ループ継続）。
-fn resolve_entry_blocking(root: &Path, id: &str) -> Result<(String, String), String> {
-  let conn = index::open_index(root).map_err(|e| format!("(index error: {e:?})"))?;
-  let refs = index::list_entries(&conn).map_err(|e| format!("(index error: {e:?})"))?;
+/// タイトルを返す（read_entry / update_entry / delete_entry 共用）。接続は呼び出し側の
+/// with_index から借りる。失敗は全てモデル向け文字列（ループ継続）。
+fn resolve_entry(conn: &rusqlite::Connection, id: &str) -> Result<(String, String), String> {
+  let refs = index::list_entries(conn).map_err(|e| format!("(index error: {e:?})"))?;
   // ponytail: 線形探索。条目一覧はメモリに収まる規模なので専用 SQL は不要。
   let Some(hit) = refs.into_iter().find(|r| r.path == id || r.title == id) else {
     return Err(format!("(no entry found: {id})"));
@@ -632,7 +639,7 @@ fn read_entry_blocking(root: &Path, id: &str) -> String {
   if id.is_empty() {
     return "(read_entry needs a non-empty path or title)".to_string();
   }
-  let rel = match resolve_entry_blocking(root, id) {
+  let rel = match with_index(root, |conn| resolve_entry(conn, id)) {
     Ok((rel, _title)) => rel,
     Err(notice) => return notice,
   };
@@ -645,7 +652,7 @@ fn read_entry_blocking(root: &Path, id: &str) -> String {
 /// update_entry の位置決め（ブロッキング・読み取りのみ）。対象の相対パス・タイトル・
 /// 旧本文の文字数（確認カードの差異概要用）を返す。
 fn update_prepare(root: &Path, id: &str) -> Result<(String, String, usize), String> {
-  let (rel, title) = resolve_entry_blocking(root, id)?;
+  let (rel, title) = with_index(root, |conn| resolve_entry(conn, id))?;
   let text = std::fs::read_to_string(root.join(&rel)).map_err(|e| format!("(read error: {e})"))?;
   let entry =
     crate::kb::entry::parse_entry(&text).map_err(|e| format!("(parse error: {e:?})"))?;
@@ -663,15 +670,17 @@ fn update_blocking(root: &Path, rel: &str, body: &str) -> String {
 
 /// delete_entry の位置決め（ブロッキング・読み取りのみ）。対象の相対パス・タイトル・
 /// 被参照元のタイトル一覧（確認カードの断リンク警告用）を返す。
+/// resolve と backlinks は同じ接続を共用する（一回の delete で二度開かない）。
 fn delete_prepare(root: &Path, id: &str) -> Result<(String, String, Vec<String>), String> {
-  let (rel, title) = resolve_entry_blocking(root, id)?;
-  let conn = index::open_index(root).map_err(|e| format!("(index error: {e:?})"))?;
-  let backlinks = index::backlinks(&conn, &title)
-    .map_err(|e| format!("(index error: {e:?})"))?
-    .into_iter()
-    .map(|r| r.title)
-    .collect();
-  Ok((rel, title, backlinks))
+  with_index(root, |conn| {
+    let (rel, title) = resolve_entry(conn, id)?;
+    let backlinks = index::backlinks(conn, &title)
+      .map_err(|e| format!("(index error: {e:?})"))?
+      .into_iter()
+      .map(|r| r.title)
+      .collect();
+    Ok((rel, title, backlinks))
+  })
 }
 
 /// 条目削除（ブロッキング）。kb::delete_entry_at（条目持久化）でファイルと索引を原子的に消す。
@@ -682,14 +691,10 @@ fn delete_blocking(root: &Path, rel: &str) -> String {
   }
 }
 
-/// 条目書き込み（ブロッキング）。title/body を検証 → kb::create_entry（条目持久化）で確定する。
+/// 条目書き込み（ブロッキング）。kb::create_entry（条目持久化）で確定する。
+/// title/body の空検証は `WriteEntry::call` が確認カードの前に済ませている。
 fn write_blocking(root: &Path, source_refs: &[String], args: WriteArgs) -> String {
-  let title = args.title.trim();
-  let body = args.body.trim();
-  if title.is_empty() || body.is_empty() {
-    return "(write_entry needs a non-empty title and body)".to_string();
-  }
-  match crate::kb::create_entry(root, title, args.cat.trim(), body, source_refs) {
+  match crate::kb::create_entry(root, args.title.trim(), args.cat.trim(), args.body.trim(), source_refs) {
     Ok(rel) => format!("Saved entry to {rel}"),
     Err(e) => format!("(write error: {e:?})"),
   }
@@ -928,6 +933,20 @@ mod tests {
     let out = tool.call(SearchArgs { query: "淹れ方".into() }).await.unwrap();
 
     assert!(out.contains("緑茶の淹れ方"));
+  }
+
+  #[tokio::test]
+  async fn search_kb_tool_reports_index_open_failure() {
+    // root がファイルだと .expertbase/ が作れず索引を開けない＝(index error) を返す
+    // （with_index が受け持つ「索引エラー → モデル向け文字列」の特性テスト）。
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("not-a-dir");
+    std::fs::write(&file, "x").unwrap();
+
+    let tool = SearchKb { root: file };
+    let out = tool.call(SearchArgs { query: "茶".into() }).await.unwrap();
+
+    assert!(out.contains("(index error"), "was: {out}");
   }
 
   #[tokio::test]
