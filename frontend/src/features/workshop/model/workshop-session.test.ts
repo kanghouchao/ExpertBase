@@ -348,6 +348,125 @@ describe("stop と会話読込", () => {
     detach();
   });
 
+  test("在途の読込は「新規会話へ移動」で無効化される", async () => {
+    // 旧視図は effect cleanup(current=false)で在途読込を捨てていた。その等価物を鎖定する。
+    let resolveLoad: (c: WorkshopConversation) => void = () => {};
+    getConversationImpl = () =>
+      new Promise<WorkshopConversation>((resolve) => {
+        resolveLoad = resolve;
+      });
+    const { session, detach } = await readySession(7); // 読込は在途のまま
+
+    session.syncRoute({ kbPath: KB, conversationId: null, available: true }); // 新規会話へ
+    resolveLoad({
+      id: 7,
+      title: "t",
+      sourceIds: ["/a.pdf"],
+      messages: [{ role: "user", text: "旧" }],
+      createdAt: "",
+      updatedAt: "",
+    });
+    await tick();
+
+    // 遅れて落ちた読込が新規会話画面を汚染しない。
+    const snap = session.getSnapshot();
+    expect(snap.messages).toEqual([]);
+    expect(snap.sourceIds).toEqual([]);
+    expect(snap.conversationId).toBeNull();
+    detach();
+  });
+
+  test("在途の読込は「生成中の会話へ移動」でも無効化される", async () => {
+    const { session, detach } = await readySession();
+    let rejectChat: (reason: unknown) => void = () => {};
+    chatImpl = () =>
+      new Promise<string>((_resolve, reject) => {
+        rejectChat = reject;
+      });
+    session.setInstruction("問い");
+    await session.send(); // run: 会話 99
+
+    // 会話 3 の読込を在途にしたまま、生成中の会話 99 へ戻る。
+    let resolveLoad: (c: WorkshopConversation) => void = () => {};
+    getConversationImpl = () =>
+      new Promise<WorkshopConversation>((resolve) => {
+        resolveLoad = resolve;
+      });
+    session.syncRoute({ kbPath: KB, conversationId: 3, available: true });
+    session.syncRoute({ kbPath: KB, conversationId: 99, available: true });
+    resolveLoad({
+      id: 3,
+      title: "old",
+      sourceIds: ["/other.pdf"],
+      messages: [{ role: "user", text: "旧" }],
+      createdAt: "",
+      updatedAt: "",
+    });
+    await tick();
+
+    // 会話 3 の素材・id で汚染されない(汚染されると stop() が誤った素材を存盤する)。
+    const snap = session.getSnapshot();
+    expect(snap.conversationId).toBe(99);
+    expect(snap.sourceIds).toEqual([]);
+    expect(snap.displayMessages).toEqual([{ role: "user", text: "問い" }]); // run 実時態
+
+    discardActive();
+    rejectChat(new Error("Cancelled"));
+    await tick();
+    detach();
+  });
+
+  test("読込失敗後に別会話へ移ると、error は settle を待たず即座に消える", async () => {
+    const boom = { code: "err.notFound" };
+    getConversationImpl = () => Promise.reject(boom);
+    const { session, detach } = await readySession(7);
+    expect(session.getSnapshot().error).toBe(boom);
+
+    getConversationImpl = () => new Promise(() => {}); // 次の読込は永遠に settle しない
+    session.syncRoute({ kbPath: KB, conversationId: 8, available: true });
+
+    expect(session.getSnapshot().error).toBeNull();
+    detach();
+  });
+
+  test("生成中に再掛載しても、run 収尾で DB から定稿を読み直す", async () => {
+    // 最後の流式イベント後〜finishSave の間に再掛載した窓でも収尾を見逃さないこと。
+    const { session: first, detach: detachFirst } = await readySession();
+    let resolveChat: (v: string) => void = () => {};
+    chatImpl = () =>
+      new Promise<string>((resolve) => {
+        resolveChat = resolve;
+      });
+    first.setInstruction("問い");
+    await first.send(); // run: 会話 99
+    detachFirst();
+
+    // 再掛載(新実例)。以降、収尾まで流式イベントは一度も来ない。
+    const { session, detach } = makeSession();
+    session.syncRoute({ kbPath: KB, conversationId: 99, available: true });
+    await tick();
+    expect(session.getSnapshot().generating).toBeTrue();
+
+    getConversationImpl = async () => ({
+      id: 99,
+      title: "t",
+      sourceIds: [],
+      messages: [
+        { role: "user", text: "問い" },
+        { role: "ai", text: "答え" },
+      ],
+      createdAt: "",
+      updatedAt: "",
+    });
+    resolveChat("答え");
+    await tick(); // run の finishSave
+    await tick(); // 収尾検知 → DB 再読
+
+    expect(session.getSnapshot().generating).toBeFalse();
+    expect(session.getSnapshot().messages.at(-1)).toEqual({ role: "ai", text: "答え" });
+    detach();
+  });
+
   test("run 完了: 保存済みの会話を DB から読み直して確定態へ入れる", async () => {
     const { session, detach } = await readySession();
     let resolveChat: (v: string) => void = () => {};

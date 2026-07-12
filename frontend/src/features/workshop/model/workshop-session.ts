@@ -169,6 +169,9 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
 
   // ── 会話同期: URL が指す会話を確定態へ読み込む ──
   function syncConversation(): void {
+    // 呼ばれた時点で在途の読込を全部無効化する(旧 effect cleanup の等価物)。
+    // 早期 return の分岐でも遅着の読込が状態を汚染しない。
+    const seq = ++loadSeq;
     const requested = route.conversationId;
     if (requested === null) {
       if (capturedId !== null) {
@@ -184,7 +187,7 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
       return;
     }
     localError = null;
-    const seq = ++loadSeq;
+    emit(); // 前の読込エラーは settle を待たず即座に消す。
     void workshopApi
       .getConversation(requested)
       .then((conversation) => {
@@ -253,6 +256,8 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
 
     /** 外部購読(run ストア・新規会話イベント)を開始する。返り値で解除。 */
     attach(): () => void {
+      // 掛載時点で走っている run を基準にする = 生成末期に再掛載しても収尾を見逃さない。
+      lastRunKey = getRunSnapshot().active?.conversationId ?? 0;
       const unsubRun = subscribeRun(() => {
         // run の起止でだけ会話同期(完了 → DB 再読で確定態へ)。流式 buffer は投影のみ。
         const runKey = getRunSnapshot().active?.conversationId ?? 0;
