@@ -20,7 +20,12 @@ export function ToolCallCard({ tool }: { tool: ToolEvent }) {
   } catch {
     /* JSON でなければ生文字列のまま表示 */
   }
-  const icon = tool.name === "search_kb" || tool.name === "search_web" ? "search" : "doc";
+  const icon =
+    tool.name === "search_kb" || tool.name === "search_web"
+      ? "search"
+      : tool.name === "activate_skill"
+        ? "plug"
+        : "doc";
   const hasResult = Boolean(tool.summary);
   return (
     <div className="overflow-hidden rounded-lg border border-line bg-surface-2 text-[12.5px]">
