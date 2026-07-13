@@ -14,13 +14,17 @@ import { Input } from "@/shared/ui/input";
 import { SegTabs } from "@/shared/ui/seg-tabs";
 import { ACCENTS, useI18n, useTheme } from "@/shared/providers/providers";
 import { LANGS } from "@/shared/i18n/dictionaries";
+import { useKbStore } from "@/entities/knowledge-base";
+import { SkillPanel } from "@/features/plugin";
 import {
   agentApi,
+  pluginApi,
   DEFAULT_AI_SETTINGS,
   DEFAULT_PROVIDER_URL,
   type AiProvider,
   type AiSettings,
   type OllamaModel,
+  type Skill,
 } from "@/shared/api";
 
 const PROVIDERS = ["ollama", "llamaApp"] as const;
@@ -40,6 +44,7 @@ export function SettingsDialog({
 }) {
   const { dark, setDark, accent, setAccent } = useTheme();
   const { lang, setLang, t } = useI18n();
+  const { active: activeKb } = useKbStore();
 
   // AI 設定はダイアログを開くたびに読み直す。編集は即保存（テーマ/言語と同じ即時反映）。
   const [ai, setAi] = useState<AiSettings | null>(null);
@@ -57,6 +62,15 @@ export function SettingsDialog({
         setModels([]);
         setVerify("idle");
       });
+  }, [open]);
+
+  // 技能は編集しない、発見できているものを眺めるだけ（技能自体は #41 のとおりファイル置くだけ
+  // で追加する。エディタは作らない）。読み込み失敗はエラー表示せず空扱いにする（AI 設定と同じ
+  // 「読めないなら黙って空へ倒す」流儀、失敗の主因はアクティブ KB 無しで正常系）。
+  const [skills, setSkills] = useState<Skill[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    void pluginApi.listSkills().then(setSkills, () => setSkills([]));
   }, [open]);
 
   function saveAi(next: AiSettings) {
@@ -235,6 +249,26 @@ export function SettingsDialog({
                   onBlur={() => saveAi(ai)}
                 />
                 <span className="text-xs text-ink-muted">{t("cfg.braveApiKeyHint")}</span>
+              </div>
+
+              <div className="font-mono text-[10px] font-semibold tracking-[0.12em] text-ink-faint uppercase">
+                {t("cfg.skills")}
+              </div>
+
+              <div className="flex flex-col gap-2.5">
+                <div className="flex flex-col gap-1">
+                  {activeKb && (
+                    <span className="text-xs text-ink-muted">
+                      {t("cfg.skills.kbPath", { path: `${activeKb.path}/skills` })}
+                    </span>
+                  )}
+                  <span className="text-xs text-ink-muted">{t("cfg.skills.userPath")}</span>
+                </div>
+                {skills.length === 0 ? (
+                  <p className="text-xs text-ink-faint">{t("plugin.skills.empty")}</p>
+                ) : (
+                  <SkillPanel skills={skills} />
+                )}
               </div>
             </>
           )}

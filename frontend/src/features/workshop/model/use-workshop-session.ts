@@ -43,6 +43,7 @@ export function useWorkshopSession() {
     toggleSource: session.toggleSource,
     addLocalFile: session.addLocalFile,
     activateSkill: session.activateSkill,
+    deactivateSkill: session.deactivateSkill,
     send: session.send,
     stop: session.stop,
     confirm: session.confirm,

@@ -122,7 +122,7 @@ pub async fn workshop_chat(
         }
       }
       let settings = crate::agent::settings_store::load(&home)?;
-      let skills = crate::plugin::discover_skills(&root, &home);
+      let skills = crate::plugin::discover_skills(Some(&root), &home);
       Ok((root, sources, settings, skills))
     },
   )

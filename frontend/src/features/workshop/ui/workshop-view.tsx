@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Icon } from "@/shared/ui/icon";
 import { Tag } from "@/shared/ui/tag";
@@ -11,10 +11,12 @@ import { cn } from "@/shared/lib/utils";
 import { useI18n } from "@/shared/providers/providers";
 import { translateError } from "@/shared/i18n/translate";
 import type { RawMaterial, RawType } from "@/entities/material";
-import { SkillMenu } from "@/features/plugin";
+import { SkillChip } from "@/features/plugin";
 import { canRemoveSource, runningLabelKey } from "../model/process-state";
+import { useSkillSlash } from "../model/use-skill-slash";
 import { useWorkshopSession } from "../model/use-workshop-session";
 import { Inspector } from "./inspector";
+import { SkillSlashMenu } from "./skill-slash-menu";
 import { SourceChip } from "./source-chip";
 import { ThinkingPanel } from "./thinking-panel";
 import { ToolCallCard, ToolCallLog } from "./tool-call-card";
@@ -26,6 +28,31 @@ export function WorkshopView() {
   const s = useWorkshopSession();
   const threadEnd = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  // 入力欄 `/` 技能発動（issue #44）。カーソル位置は選択範囲が動くたび読み直す。
+  const [cursor, setCursor] = useState(0);
+  const slash = useSkillSlash({ value: s.instruction, cursor, skills: s.skills });
+  // setInstruction 後の再描画を待ってからテキストエリアの実カーソルを動かす（受控入力の作法）。
+  const pendingCursorRef = useRef<number | null>(null);
+  useEffect(() => {
+    const pos = pendingCursorRef.current;
+    if (pos === null) return;
+    pendingCursorRef.current = null;
+    const el = composerRef.current;
+    if (el) el.setSelectionRange(pos, pos);
+    setCursor(pos);
+  }, [s.instruction]);
+
+  // 候補選択の確定: `/query` を打ち消して技能を発動する。ボタン発動と同じ記帳口
+  // （s.activateSkill）に合流するので、以降の挙動（重複排除・chip 表示）は共通。
+  function selectSlashSkill(skill: { name: string }): void {
+    if (!(slash.state.open && "matches" in slash.state)) return;
+    const { lineStart } = slash.state;
+    const next = s.instruction.slice(0, lineStart) + s.instruction.slice(cursor);
+    pendingCursorRef.current = lineStart;
+    s.setInstruction(next);
+    s.activateSkill(skill.name);
+  }
 
   // 新しいメッセージ・流式の進みに合わせて会話を最下部に追従させる。
   useEffect(() => {
@@ -201,21 +228,77 @@ export function WorkshopView() {
                   ))}
                 </div>
               )}
-              <textarea
-                ref={composerRef}
-                value={s.instruction}
-                onChange={(event) => s.setInstruction(event.target.value)}
-                onKeyDown={(event) => {
-                  // Enter で送信、Shift+Enter で改行(複数行入力)。
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    void s.send();
-                  }
-                }}
-                placeholder={t("workshop.composerPh")}
-                rows={1}
-                className="max-h-40 w-full resize-none overflow-y-auto bg-transparent px-1 text-[14.5px] leading-relaxed text-ink outline-none"
-              />
+              {s.activatedSkillNames.length > 0 && (
+                <div className="mb-2.5 flex flex-wrap gap-2">
+                  {s.activatedSkillNames.map((name) => {
+                    const skill = s.skills.find((sk) => sk.name === name);
+                    if (!skill) return null;
+                    return (
+                      <SkillChip key={name} skill={skill} onRemove={() => s.deactivateSkill(name)} />
+                    );
+                  })}
+                </div>
+              )}
+              <div className="relative">
+                {slash.state.open && (
+                  <SkillSlashMenu
+                    matches={"matches" in slash.state ? slash.state.matches : null}
+                    activeIndex={"activeIndex" in slash.state ? slash.state.activeIndex : 0}
+                    onSelect={selectSlashSkill}
+                    onHover={(index) => {
+                      // moveActive は ±1 ずつしか動かせないので、必要な歩数だけ呼ぶ
+                      // （関数更新なので同一イベント内で複数回呼んでも正しく積算される）。
+                      const current = "activeIndex" in slash.state ? slash.state.activeIndex : 0;
+                      const steps = index - current;
+                      for (let i = 0; i < Math.abs(steps); i += 1) {
+                        slash.moveActive(steps > 0 ? 1 : -1);
+                      }
+                    }}
+                  />
+                )}
+                <textarea
+                  ref={composerRef}
+                  value={s.instruction}
+                  onChange={(event) => {
+                    s.setInstruction(event.target.value);
+                    setCursor(event.target.selectionStart ?? event.target.value.length);
+                  }}
+                  onKeyUp={(event) => setCursor(event.currentTarget.selectionStart ?? 0)}
+                  onClick={(event) => setCursor(event.currentTarget.selectionStart ?? 0)}
+                  onKeyDown={(event) => {
+                    if (slash.state.open && "matches" in slash.state) {
+                      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                        event.preventDefault();
+                        slash.moveActive(event.key === "ArrowDown" ? 1 : -1);
+                        return;
+                      }
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        if (slash.activeSkill) selectSlashSkill(slash.activeSkill);
+                        return;
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        slash.close();
+                        return;
+                      }
+                    } else if (slash.state.open && event.key === "Escape") {
+                      // 技能 0 件の案内表示。Esc だけ拾い、Enter は通常の送信へ流す。
+                      event.preventDefault();
+                      slash.close();
+                      return;
+                    }
+                    // Enter で送信、Shift+Enter で改行(複数行入力)。
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      void s.send();
+                    }
+                  }}
+                  placeholder={t("workshop.composerPh")}
+                  rows={1}
+                  className="max-h-40 w-full resize-none overflow-y-auto bg-transparent px-1 text-[14.5px] leading-relaxed text-ink outline-none"
+                />
+              </div>
               <div className="mt-2 flex items-center gap-2.5">
                 {/* ＋ 外部ローカルファイルを素材に追加(OS のファイル選択ダイアログ) */}
                 <button
@@ -227,14 +310,6 @@ export function WorkshopView() {
                 >
                   <Icon name="plus" size={18} />
                 </button>
-                {/* 発見済み技能への入口。選ぶと本文が次の送信から system prompt へ入る(最小限で使える
-                    発動入口、入力欄スラッシュコマンドは別 issue の範囲)。常駐一覧はポップオーバーの
-                    中に畳み、入力欄を押し出さない(技能が無ければボタンごと出ない)。 */}
-                <SkillMenu
-                  skills={s.skills}
-                  activatedNames={s.activatedSkillNames}
-                  onActivate={s.activateSkill}
-                />
                 <div className="flex h-9 min-w-0 max-w-60 items-center gap-1.5 rounded-[10px] border border-line-strong bg-surface px-2.5">
                   <Icon name="bot" size={15} className="flex-none text-ai" />
                   <select

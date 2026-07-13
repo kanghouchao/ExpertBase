@@ -10,13 +10,17 @@ use crate::plugin::domain::parse_skill_frontmatter;
 use crate::plugin::{Skill, SkillSource};
 
 /// KB 内 `skills/` と `~/.agents/skills/` を走査し、決定的順序（name 昇順）の技能一覧を返す。
-pub(crate) fn discover_skills(kb_root: &Path, home: &Path) -> Vec<Skill> {
+/// `kb_root` が `None`（アクティブ KB が無い、例: 設定ダイアログを KB 未選択で開いた場合）なら
+/// KB 側の走査を省略し、user 側だけを返す（呼び出し側をエラーにしない）。
+pub(crate) fn discover_skills(kb_root: Option<&Path>, home: &Path) -> Vec<Skill> {
   let mut by_name: HashMap<String, Skill> = HashMap::new();
   for skill in scan_dir(&home.join(".agents/skills"), SkillSource::User) {
     by_name.insert(skill.name.clone(), skill);
   }
-  for skill in scan_dir(&kb_root.join("skills"), SkillSource::Kb) {
-    by_name.insert(skill.name.clone(), skill); // 同名は KB が勝つ（後勝ち）。
+  if let Some(kb_root) = kb_root {
+    for skill in scan_dir(&kb_root.join("skills"), SkillSource::Kb) {
+      by_name.insert(skill.name.clone(), skill); // 同名は KB が勝つ（後勝ち）。
+    }
   }
   let mut skills: Vec<Skill> = by_name.into_values().collect();
   skills.sort_by(|a, b| a.name.cmp(&b.name));
@@ -79,7 +83,7 @@ mod tests {
   #[test]
   fn discover_skills_returns_empty_when_neither_directory_exists() {
     let tmp = tempfile::tempdir().unwrap();
-    let skills = discover_skills(&tmp.path().join("kb"), &tmp.path().join("home"));
+    let skills = discover_skills(Some(&tmp.path().join("kb")), &tmp.path().join("home"));
     assert!(skills.is_empty());
   }
 
@@ -89,7 +93,7 @@ mod tests {
     let kb_root = tmp.path().join("kb");
     write_skill(&kb_root.join("skills"), "tea-brewing", "tea-brewing", "緑茶の淹れ方", "本文");
 
-    let skills = discover_skills(&kb_root, &tmp.path().join("home"));
+    let skills = discover_skills(Some(&kb_root), &tmp.path().join("home"));
 
     assert_eq!(skills.len(), 1);
     assert_eq!(skills[0].name, "tea-brewing");
@@ -102,7 +106,22 @@ mod tests {
     let home = tmp.path().join("home");
     write_skill(&home.join(".agents/skills"), "coffee-brewing", "coffee-brewing", "コーヒーの淹れ方", "本文");
 
-    let skills = discover_skills(&tmp.path().join("kb"), &home);
+    let skills = discover_skills(Some(&tmp.path().join("kb")), &home);
+
+    assert_eq!(skills.len(), 1);
+    assert_eq!(skills[0].name, "coffee-brewing");
+    assert_eq!(skills[0].source, SkillSource::User);
+  }
+
+  #[test]
+  fn discover_skills_returns_user_skills_when_no_active_kb() {
+    // アクティブ KB が無い（設定ダイアログを KB 未選択で開いた等）場合でも panic せず、
+    // user 側だけ返す。
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    write_skill(&home.join(".agents/skills"), "coffee-brewing", "coffee-brewing", "コーヒーの淹れ方", "本文");
+
+    let skills = discover_skills(None, &home);
 
     assert_eq!(skills.len(), 1);
     assert_eq!(skills[0].name, "coffee-brewing");
@@ -118,7 +137,7 @@ mod tests {
     write_skill(&kb_root.join("skills"), "shared", "shared", "kb 側の説明", "kb 側の本文");
     write_skill(&home.join(".agents/skills"), "user-only", "user-only", "user 専用", "本文");
 
-    let skills = discover_skills(&kb_root, &home);
+    let skills = discover_skills(Some(&kb_root), &home);
 
     // 決定的順序（name 昇順）: shared, user-only。
     assert_eq!(skills.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), vec!["shared", "user-only"]);
@@ -139,7 +158,7 @@ mod tests {
     // SKILL.md が無いサブディレクトリはそもそもスキルではない（無視、ログも出さない）。
     std::fs::create_dir_all(kb_root.join("skills").join("not-a-skill")).unwrap();
 
-    let skills = discover_skills(&kb_root, &tmp.path().join("home"));
+    let skills = discover_skills(Some(&kb_root), &tmp.path().join("home"));
 
     assert_eq!(skills.len(), 1);
     assert_eq!(skills[0].name, "good");
@@ -153,7 +172,7 @@ mod tests {
     std::fs::create_dir_all(kb_root.join("skills/with-scripts/scripts")).unwrap();
     write_skill(&kb_root.join("skills"), "without-scripts", "without-scripts", "説明", "本文");
 
-    let skills = discover_skills(&kb_root, &tmp.path().join("home"));
+    let skills = discover_skills(Some(&kb_root), &tmp.path().join("home"));
 
     let with = skills.iter().find(|s| s.name == "with-scripts").unwrap();
     let without = skills.iter().find(|s| s.name == "without-scripts").unwrap();
