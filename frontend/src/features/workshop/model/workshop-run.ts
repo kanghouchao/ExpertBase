@@ -90,6 +90,22 @@ function patch(kbPath: string, conversationId: number, fields: Partial<RunSnapsh
   emit({ active: { ...(state.active as RunSnapshot), ...fields }, error: state.error });
 }
 
+// 明示発動（スラッシュコマンド/チップ）は activate_skill ツールを呼ばず system prompt へ
+// 直接注入するので、そのままだと「技能が効いた」という手掛かりが会話に一切残らない
+// （検索・書き込みツールと違って何のカードも出ない）。ここで実際のツール呼び出しと同じ
+// ToolEvent を合成し、既存の ToolCallCard/ToolCallLog にそのまま乗せる（新しい表示は作らない、
+// 展開すると注入した本文そのものが見える＝モデル自動発動時の activate_skill 結果と同じ体裁）。
+function activatedSkillToolEvents(args: StartArgs): ToolEvent[] {
+  return args.activatedSkillNames
+    .map((name) => args.skills.find((skill) => skill.name === name))
+    .filter((skill): skill is Skill => skill !== undefined)
+    .map((skill) => ({
+      name: "activate_skill",
+      args: JSON.stringify({ name: skill.name }),
+      summary: skill.body,
+    }));
+}
+
 /** 1 ターンを開始する。アクティブ態を同期で立て、後は後台で流す。 */
 export function startRun(args: StartArgs): void {
   cancelled = false;
@@ -101,7 +117,7 @@ export function startRun(args: StartArgs): void {
       baseHistory: args.baseHistory,
       narration: "",
       thinking: "",
-      tools: [],
+      tools: activatedSkillToolEvents(args),
       confirm: null,
     },
     error: null,
@@ -111,7 +127,7 @@ export function startRun(args: StartArgs): void {
 
 async function run(args: StartArgs): Promise<void> {
   const { kbPath, conversationId, sourceIds, baseHistory } = args;
-  const tools: ToolEvent[] = [];
+  const tools: ToolEvent[] = activatedSkillToolEvents(args);
   let narration = "";
   let thinking = "";
   try {

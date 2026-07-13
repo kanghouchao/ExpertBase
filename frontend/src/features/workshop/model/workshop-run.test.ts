@@ -247,6 +247,46 @@ describe("startRun", () => {
 
     expect(activated).toEqual(["paren-skill"]);
   });
+
+  test("synthesizes an activate_skill tool card for explicitly-activated skills immediately (no real tool call needed)", async () => {
+    // 明示発動(スラッシュコマンド/チップ)は activate_skill ツールを呼ばない = 何もしないと
+    // カードが一切出ない。startRun 時点で ToolEvent を合成し、生成開始と同時に見える必要がある。
+    chatImpl = async (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+      onPhase?.({ phase: "narration", delta: "了解しました" });
+      return "了解しました";
+    };
+    const { seen, unsub } = recordSnapshots();
+
+    startRun({
+      kbPath: "/home/user/ExpertBase/tea",
+      conversationId: 24,
+      sourceIds: [],
+      baseHistory: [{ role: "user", text: "問" }],
+      model: "qwen3:8b",
+      think: false,
+      tools: true,
+      skills: [TEA_SKILL],
+      activatedSkillNames: ["tea-brewing"],
+      onSkillActivated: () => {},
+    });
+
+    // 生成開始の瞬間（ストリームイベントを待たず）に既にカードが立っている。
+    expect(getSnapshot().active?.tools).toEqual([
+      { name: "activate_skill", args: '{"name":"tea-brewing"}', summary: TEA_SKILL.body },
+    ]);
+    await tick();
+
+    // 完了後も保存対象のメッセージに残る（履歴に残す ToolCallLog と同じ仕組み）。
+    expect(saveCalls).toHaveLength(1);
+    const last = saveCalls[0].messages.at(-1) as { tools?: { name: string; summary?: string }[] };
+    expect(last.tools).toEqual([
+      { name: "activate_skill", args: '{"name":"tea-brewing"}', summary: TEA_SKILL.body },
+    ]);
+    // 実際に見えたスナップショットのどれかで tools が非空だったこと(生成中も消えない)を確認。
+    expect(seen.some((s) => (s.active?.tools.length ?? 0) > 0)).toBeTrue();
+
+    unsub();
+  });
 });
 
 describe("answerConfirm", () => {
