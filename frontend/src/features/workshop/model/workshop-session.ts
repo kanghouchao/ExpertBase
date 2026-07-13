@@ -364,6 +364,12 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
       markSkillActivated(name);
     },
 
+    /** 発動済み技能を取り消す(コンポーザーのチップの × から)。 */
+    deactivateSkill(name: string): void {
+      activatedSkillNames = activatedSkillNames.filter((n) => n !== name);
+      emit();
+    },
+
     /** 1 ターン送信。存盤が chat より先 = 後台生成が会話 id を捕獲できる。 */
     async send(): Promise<void> {
       const text = instruction.trim();

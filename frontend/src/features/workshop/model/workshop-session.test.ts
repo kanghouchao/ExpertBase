@@ -540,6 +540,20 @@ describe("Agent Skills", () => {
     detach();
   });
 
+  test("deactivateSkill は発動済み名を取り消す", async () => {
+    const { session, detach } = await readySession();
+
+    session.activateSkill("tea-brewing");
+    session.activateSkill("coffee-brewing");
+    session.deactivateSkill("tea-brewing");
+
+    expect(session.getSnapshot().activatedSkillNames).toEqual(["coffee-brewing"]);
+    // 未発動の名前を取り消しても無害。
+    session.deactivateSkill("not-activated");
+    expect(session.getSnapshot().activatedSkillNames).toEqual(["coffee-brewing"]);
+    detach();
+  });
+
   test("send は発動済み技能名を chat へ渡す", async () => {
     const { session, detach } = await readySession();
     let resolveChat: (v: string) => void = () => {};
