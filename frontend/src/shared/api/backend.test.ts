@@ -5,6 +5,7 @@ import {
   DEFAULT_AI_SETTINGS,
   fakeBackend,
   kbApi,
+  pluginApi,
   setBackend,
   workshopApi,
 } from "./index";
@@ -26,6 +27,7 @@ describe("fakeBackend", () => {
     expect(await agentApi.listModels("ollama", "")).toEqual([]);
     expect(await agentApi.getSettings()).toEqual(DEFAULT_AI_SETTINGS);
     await agentApi.setSettings(DEFAULT_AI_SETTINGS); // no-op で解決する
+    expect(await pluginApi.listSkills()).toEqual([]);
     await workshopApi.cancel(); // no-op で解決する
     await workshopApi.confirm(1, true); // no-op で解決する
     expect(await workshopApi.listConversations(0)).toEqual({ items: [], hasMore: false });
@@ -40,7 +42,7 @@ describe("fakeBackend", () => {
     await expect(kbApi.deleteKb("/t")).rejects.toThrow();
     await expect(kbApi.readEntry("entries/a.md")).rejects.toThrow();
     await expect(kbApi.saveEntry("entries/a.md", "x")).rejects.toThrow();
-    await expect(workshopApi.chat([], [], "m", false, false)).rejects.toThrow();
+    await expect(workshopApi.chat([], [], "m", false, false, [])).rejects.toThrow();
     await expect(workshopApi.getConversation(1)).rejects.toThrow();
     await expect(
       workshopApi.saveConversation({ kbPath: "/t", id: null, sourceIds: [], messages: [] })

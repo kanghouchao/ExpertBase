@@ -42,6 +42,7 @@ export function useWorkshopSession() {
     selectModel: session.selectModel,
     toggleSource: session.toggleSource,
     addLocalFile: session.addLocalFile,
+    activateSkill: session.activateSkill,
     send: session.send,
     stop: session.stop,
     confirm: session.confirm,

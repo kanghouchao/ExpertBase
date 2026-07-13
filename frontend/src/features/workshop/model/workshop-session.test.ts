@@ -6,6 +6,7 @@ import {
   type ChatPhase,
   type ChatTurn,
   type OllamaModel,
+  type Skill,
   type WorkshopConversation,
   type WorkshopMessage,
 } from "@/shared/api";
@@ -20,6 +21,7 @@ type ChatImpl = (
   model: string,
   think: boolean,
   tools: boolean,
+  activatedSkillNames: string[],
   onPhase?: (p: ChatPhase) => void
 ) => Promise<string>;
 
@@ -33,7 +35,18 @@ type SaveInput = {
 // tools 対応モデルが 1 件ある = canGenerate が立つ最小構成。
 const MODELS: OllamaModel[] = [{ name: "qwen3:8b", thinking: true, tools: true }];
 
+const SKILL: Skill = {
+  name: "tea-brewing",
+  description: "緑茶の淹れ方を案内する",
+  body: "本文",
+  location: "/kb/skills/tea-brewing/SKILL.md",
+  source: "kb",
+  hasScripts: false,
+};
+
 let chatImpl: ChatImpl = async () => "";
+let listSkillsImpl: () => Promise<Skill[]> = async () => [];
+let chatCallArgs: Parameters<ChatImpl>[] = [];
 let saveImpl = async (input: SaveInput): Promise<WorkshopConversation> => ({
   id: input.id ?? 99,
   title: "t",
@@ -58,10 +71,15 @@ const sessionTestBackend = {
     hasKey: async () => true,
     listOllamaModels: async () => MODELS,
   },
+  plugin: {
+    ...fakeBackend.plugin,
+    listSkills: () => listSkillsImpl(),
+  },
   workshop: {
     ...fakeBackend.workshop,
     chat: (...args: Parameters<ChatImpl>) => {
       calls.push("chat");
+      chatCallArgs.push(args);
       return chatImpl(...args);
     },
     cancel: async () => {
@@ -115,11 +133,13 @@ beforeEach(() => {
     updatedAt: "",
   });
   getConversationImpl = () => Promise.reject(new Error("not stubbed"));
+  listSkillsImpl = async () => [];
   calls = [];
   saveCalls = [];
   getConversationCalls = [];
   cancelCalls = 0;
   navCalls = [];
+  chatCallArgs = [];
 });
 
 // 上書きを他のテストファイルへ漏らさない。
@@ -311,7 +331,7 @@ describe("stop と会話読込", () => {
   test("生成中の会話は DB を読まず run の実時態を描く", async () => {
     const { session, detach } = await readySession();
     let rejectChat: (reason: unknown) => void = () => {};
-    chatImpl = (_s, _m, _mo, _th, _to, onPhase) => {
+    chatImpl = (_s, _m, _mo, _th, _to, _ac, onPhase) => {
       onPhase?.({ phase: "narration", delta: "途中" });
       return new Promise<string>((_resolve, reject) => {
         rejectChat = reject;
@@ -496,6 +516,79 @@ describe("stop と会話読込", () => {
     const snap = session.getSnapshot();
     expect(snap.generating).toBeFalse();
     expect(snap.messages.at(-1)).toEqual({ role: "ai", text: "答え" });
+    detach();
+  });
+});
+
+describe("Agent Skills", () => {
+  test("KB が定まると技能一覧を読み込む", async () => {
+    listSkillsImpl = async () => [SKILL];
+    const { session, detach } = await readySession();
+
+    expect(session.getSnapshot().skills).toEqual([SKILL]);
+    detach();
+  });
+
+  test("activateSkill は発動済み名を重複排除して追加する", async () => {
+    const { session, detach } = await readySession();
+
+    session.activateSkill("tea-brewing");
+    session.activateSkill("tea-brewing"); // 二重発動は重複排除
+    session.activateSkill("coffee-brewing");
+
+    expect(session.getSnapshot().activatedSkillNames).toEqual(["tea-brewing", "coffee-brewing"]);
+    detach();
+  });
+
+  test("send は発動済み技能名を chat へ渡す", async () => {
+    const { session, detach } = await readySession();
+    let resolveChat: (v: string) => void = () => {};
+    chatImpl = () =>
+      new Promise<string>((resolve) => {
+        resolveChat = resolve;
+      });
+    session.activateSkill("tea-brewing");
+
+    session.setInstruction("問い");
+    await session.send();
+
+    // ChatImpl の引数順: sourceIds, messages, model, think, tools, activatedSkillNames, onPhase。
+    expect(chatCallArgs.at(-1)?.[5]).toEqual(["tea-brewing"]);
+
+    discardActive();
+    resolveChat("");
+    await tick();
+    detach();
+  });
+
+  test("activate_skill の成功をストリームで観測すると発動済みへ記帳される", async () => {
+    listSkillsImpl = async () => [SKILL]; // 成功判定は本文照合なので、skills 側に本文が必要。
+    const { session, detach } = await readySession();
+    chatImpl = async (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+      onPhase?.({ phase: "toolCall", name: "activate_skill", args: '{"name":"tea-brewing"}' });
+      onPhase?.({ phase: "toolResult", name: "activate_skill", summary: "本文" });
+      return "done";
+    };
+    session.setInstruction("緑茶の淹れ方教えて");
+    await session.send();
+    await tick();
+
+    expect(session.getSnapshot().activatedSkillNames).toContain("tea-brewing");
+    detach();
+  });
+
+  test("KB 切替は発動済み技能名を畳む", async () => {
+    const { session, detach } = await readySession();
+    session.activateSkill("tea-brewing");
+    expect(session.getSnapshot().activatedSkillNames).toEqual(["tea-brewing"]);
+
+    session.syncRoute({
+      kbPath: "/home/user/ExpertBase/coffee",
+      conversationId: null,
+      available: true,
+    });
+
+    expect(session.getSnapshot().activatedSkillNames).toEqual([]);
     detach();
   });
 });

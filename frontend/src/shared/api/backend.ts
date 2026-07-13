@@ -1,6 +1,6 @@
 import { fakeBackend } from "./fake";
 import { isTauriRuntime, tauriBackend } from "./tauri";
-import type { AgentApi, Backend, KbApi, WorkshopApi } from "./types";
+import type { AgentApi, Backend, KbApi, PluginApi, WorkshopApi } from "./types";
 
 // 後端の接縫。適配器の選択はここで一度だけ（旧 client.ts の 17 個の isTauri 守衛の集約先）。
 // Node（静的書き出しの prerender）では isTauri が false → fake に倒れる。
@@ -36,9 +36,13 @@ export const agentApi: AgentApi = {
   setSettings: (settings) => current.agent.setSettings(settings),
 };
 
+export const pluginApi: PluginApi = {
+  listSkills: () => current.plugin.listSkills(),
+};
+
 export const workshopApi: WorkshopApi = {
-  chat: (sourceIds, messages, model, think, tools, onPhase) =>
-    current.workshop.chat(sourceIds, messages, model, think, tools, onPhase),
+  chat: (sourceIds, messages, model, think, tools, activatedSkillNames, onPhase) =>
+    current.workshop.chat(sourceIds, messages, model, think, tools, activatedSkillNames, onPhase),
   cancel: () => current.workshop.cancel(),
   confirm: (id, approved) => current.workshop.confirm(id, approved),
   listConversations: (offset) => current.workshop.listConversations(offset),

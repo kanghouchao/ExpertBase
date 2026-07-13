@@ -3,7 +3,7 @@
 //! use-workshop-session.ts の薄い hook が担う。テストは workshop-run と同じ流儀
 //! (setBackend + fake)でこのモジュールを直接実体化して行う。
 
-import { agentApi, workshopApi, type AiProvider, type OllamaModel } from "@/shared/api";
+import { agentApi, pluginApi, workshopApi, type AiProvider, type OllamaModel, type Skill } from "@/shared/api";
 
 import {
   activeKbChanged,
@@ -48,6 +48,9 @@ export type WorkshopSessionSnapshot = {
   selectedTools: boolean;
   canGenerate: boolean;
   someoneGenerating: boolean;
+  // Agent Skills(発見済み一覧 + この会話で発動済みの技能名。ボタン発動・モデル自動発動を問わず一本化)
+  skills: Skill[];
+  activatedSkillNames: string[];
   // run 投影(見ている会話が生成中のときだけ実時態が入る)
   generating: boolean;
   phase: ChatUiPhase;
@@ -86,6 +89,8 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
   let hasOllama = false;
   let models: OllamaModel[] = [];
   let selectedModel = "";
+  let skills: Skill[] = [];
+  let activatedSkillNames: string[] = [];
 
   let prevKbPath: string | null = null;
   let prevAvailable = false;
@@ -142,6 +147,8 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
       canGenerate:
         visibleHasOllama && !!visibleSelectedModel && selectedTools && !someoneGenerating,
       someoneGenerating,
+      skills,
+      activatedSkillNames,
       generating: isViewingActive,
       phase: isViewingActive ? activeRun.phase : "idle",
       displayMessages: isViewingActive ? activeRun.baseHistory : messages,
@@ -164,6 +171,8 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
     sourceIds = [];
     instruction = "";
     localError = null;
+    // 発動済み技能は後端に永続化しない(確定した決定10)＝会話を離れると畳む。
+    activatedSkillNames = [];
     loadSeq += 1; // 途中の読込結果を捨てる
   }
 
@@ -195,6 +204,8 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
         capturedId = conversation.id;
         messages = conversation.messages;
         sourceIds = conversation.sourceIds;
+        // 発動済み技能は後端に永続化しない＝読み込んだ対話には含まれず、都度畳む。
+        activatedSkillNames = [];
         emit();
       })
       .catch((cause) => {
@@ -242,6 +253,25 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
     emit();
   }
 
+  // 発見済み Agent Skill 一覧。常駐キャッシュは持たず、KB 切替のたびに読み直す
+  // （後端も呼び出しごとに毎回走査する、確定した決定1と同じ「キャッシュ整合性を持たない」方針）。
+  async function loadSkills(): Promise<void> {
+    try {
+      skills = await pluginApi.listSkills();
+    } catch {
+      skills = [];
+    }
+    emit();
+  }
+
+  // 技能をこの会話で発動済みにする(重複排除)。ボタン発動(activateSkill)・モデル自動発動
+  // (send() 内の onSkillActivated)どちらもここへ記帳する(処理の重複を避ける単一の記帳口)。
+  function markSkillActivated(name: string): void {
+    if (activatedSkillNames.includes(name)) return;
+    activatedSkillNames = [...activatedSkillNames, name];
+    emit();
+  }
+
   return {
     subscribe(listener: () => void): () => void {
       listeners.add(listener);
@@ -282,6 +312,7 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
     syncRoute(next: RouteInput): void {
       const kbSwitched = activeKbChanged(prevKbPath, next.kbPath);
       prevKbPath = next.kbPath;
+      const kbPathChanged = route.kbPath !== next.kbPath;
       const conversationChanged =
         route.kbPath !== next.kbPath || route.conversationId !== next.conversationId;
       const becameAvailable = next.available && !prevAvailable;
@@ -293,9 +324,12 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
         resetLocal();
         deps.navigate("/workshop");
         emit();
+        if (next.kbPath) void loadSkills();
         return;
       }
       if (becameAvailable) void loadModels();
+      // KB 未選択 → 選択（初回遷移）も含めて、技能一覧は KB が定まるたびに読み直す。
+      if (kbPathChanged && next.kbPath) void loadSkills();
       if (conversationChanged) syncConversation();
     },
 
@@ -323,6 +357,11 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
       if (!path || sourceIds.includes(path)) return;
       sourceIds = [...sourceIds, path];
       emit();
+    },
+
+    /** 技能をこの会話で発動済みにする(重複排除)。 */
+    activateSkill(name: string): void {
+      markSkillActivated(name);
     },
 
     /** 1 ターン送信。存盤が chat より先 = 後台生成が会話 id を捕獲できる。 */
@@ -365,6 +404,9 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
         model: snapshot.visibleSelectedModel,
         think: snapshot.selectedThinking,
         tools: snapshot.selectedTools,
+        skills,
+        activatedSkillNames,
+        onSkillActivated: markSkillActivated,
       });
     },
 

@@ -61,13 +61,20 @@ pub fn list_conversations(root: &Path, offset: usize) -> Result<WorkshopConversa
 /// 自分で読む。Rig で 1 会話分回し、進捗（思考・本文・ツール呼び出し/結果）を tx へ流して、
 /// 最終的な助手の返信本文を返す。書き込みは write_entry ツール経由で「ユーザーが保存を頼んだとき」
 /// だけ起きる＝確定の主導権はユーザー。素材は全て外部絶対パスで、KB へは複製しない。
+/// skills は呼び出し側（interface）が discover_skills 済みの一覧。tools_capable のときだけ
+/// catalog を出し `activate_skill` を登録する（要求3）。activated_skill_names に対応する技能の
+/// 本文は tools_capable に関わらず常に # Activated Skills へ注入する（要求4、明示発動は
+/// tools 能力に依存しない）。
 #[allow(clippy::too_many_arguments)]
 pub async fn chat(
   settings: AiSettings,
   model: String,
   think: bool,
+  tools_capable: bool,
   root: PathBuf,
   sources: Vec<String>,
+  skills: Vec<crate::plugin::Skill>,
+  activated_skill_names: Vec<String>,
   messages: Vec<ChatTurn>,
   cancel: Arc<AtomicBool>,
   tx: UnboundedSender<StreamProgress>,
@@ -81,9 +88,25 @@ pub async fn chat(
     Provider::LlamaApp => settings.llama_app_url,
     Provider::Ollama => settings.ollama_url,
   };
-  let toolset = tools::build_toolset(&root, &sources, settings.brave_api_key, gate);
+  let toolset = tools::build_toolset(
+    &root,
+    &sources,
+    settings.brave_api_key,
+    gate,
+    &skills,
+    tools_capable,
+    &activated_skill_names,
+  );
   // system の # Tools 節は toolset の definition() から生成する（ツール契約文の唯一の真源）。
-  let system = agent_system_with(&tools::render_tools_section(&toolset).await, &sources);
+  // # Skills / # Activated Skills も同じ「内容は plugin が唯一の真源、ここは配置だけ」パターン。
+  let catalog = if tools_capable { crate::plugin::render_catalog(&skills) } else { String::new() };
+  let activated_section = crate::plugin::render_activated(&skills, &activated_skill_names);
+  let system = agent_system_with(
+    &tools::render_tools_section(&toolset).await,
+    &sources,
+    &catalog,
+    &activated_section,
+  );
   crate::agent::run(provider, &base_url, &model, think, &system, toolset, messages, cancel, &tx).await
 }
 

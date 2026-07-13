@@ -11,6 +11,7 @@ import { cn } from "@/shared/lib/utils";
 import { useI18n } from "@/shared/providers/providers";
 import { translateError } from "@/shared/i18n/translate";
 import type { RawMaterial, RawType } from "@/entities/material";
+import { SkillMenu } from "@/features/plugin";
 import { canRemoveSource, runningLabelKey } from "../model/process-state";
 import { useWorkshopSession } from "../model/use-workshop-session";
 import { Inspector } from "./inspector";
@@ -54,6 +55,7 @@ export function WorkshopView() {
   const visibleSources = s.sourceIds.map((path) =>
     materialFromFile(path, t("workshop.addLocalFile"))
   );
+  const composerHint = composerHintKey(s);
 
   return (
     <div className="view-enter flex flex-col lg:h-full">
@@ -225,6 +227,14 @@ export function WorkshopView() {
                 >
                   <Icon name="plus" size={18} />
                 </button>
+                {/* 発見済み技能への入口。選ぶと本文が次の送信から system prompt へ入る(最小限で使える
+                    発動入口、入力欄スラッシュコマンドは別 issue の範囲)。常駐一覧はポップオーバーの
+                    中に畳み、入力欄を押し出さない(技能が無ければボタンごと出ない)。 */}
+                <SkillMenu
+                  skills={s.skills}
+                  activatedNames={s.activatedSkillNames}
+                  onActivate={s.activateSkill}
+                />
                 <div className="flex h-9 min-w-0 max-w-60 items-center gap-1.5 rounded-[10px] border border-line-strong bg-surface px-2.5">
                   <Icon name="bot" size={15} className="flex-none text-ai" />
                   <select
@@ -268,28 +278,10 @@ export function WorkshopView() {
                   </Button>
                 )}
               </div>
-              {!s.visibleHasOllama && (
-                <div className="mt-2 px-1 text-[12px] text-ink-faint">{t("workshop.noKey")}</div>
-              )}
-              {s.visibleHasOllama && s.visibleModels.length === 0 && (
-                <div className="mt-2 px-1 text-[12px] text-ink-faint">
-                  {t("workshop.noModelsHint")}
-                </div>
-              )}
-              {/* tools 非対応モデルでは送信不可＝素材読み取り/書き込みが回らない。理由を提示する。 */}
-              {s.visibleHasOllama &&
-                s.visibleModels.length > 0 &&
-                s.visibleSelectedModel &&
-                !s.selectedTools && (
-                  <div className="mt-2 px-1 text-[12px] text-ink-faint">
-                    {t("workshop.toolsRequired")}
-                  </div>
-                )}
-              {/* 他の対話が生成中＝本地モデルは直列なのでここでは送れない、と理由を出す。 */}
-              {s.someoneGenerating && !s.generating && (
-                <div className="mt-2 px-1 text-[12px] text-ink-faint">
-                  {t("workshop.generatingElsewhere")}
-                </div>
+              {/* 送信不可の理由は一行だけ(Ollama 未起動/モデル無し/tools 非対応/他会話が生成中は
+                  互いに排他なので、常に高々一件しか出ない一本のステータス行にまとめる)。 */}
+              {composerHint && (
+                <div className="mt-2 px-1 text-[12px] text-ink-faint">{t(composerHint)}</div>
               )}
               {s.error != null && (
                 <div className="mt-2 px-1 text-[12.5px] font-semibold text-brand">
@@ -327,6 +319,23 @@ function materialFromFile(path: string, label: string): RawMaterial {
     title: name,
     source: label,
   };
+}
+
+// コンポーザー下の一行ステータス。4条件は互いに排他(Ollama 未起動 → モデル無し →
+// 選択モデルが tools 非対応 → 他会話が生成中、の優先順)なので、常に高々一つの i18n key を返す。
+function composerHintKey(s: {
+  visibleHasOllama: boolean;
+  visibleModels: unknown[];
+  visibleSelectedModel: string;
+  selectedTools: boolean;
+  someoneGenerating: boolean;
+  generating: boolean;
+}): string | null {
+  if (!s.visibleHasOllama) return "workshop.noKey";
+  if (s.visibleModels.length === 0) return "workshop.noModelsHint";
+  if (s.visibleSelectedModel && !s.selectedTools) return "workshop.toolsRequired";
+  if (s.someoneGenerating && !s.generating) return "workshop.generatingElsewhere";
+  return null;
 }
 
 function ProcessTopBar({ t }: { t: (key: string) => string }) {

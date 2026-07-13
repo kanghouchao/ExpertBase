@@ -2,7 +2,7 @@
 //! 会話を切り替えても実行を殺さず（後台で継続）、終わったら捕獲した会話 id へ存盤する。
 //! 本地モデルは直列なので同時に 1 ターンだけ＝後端の単飛取消フラグのままで足りる。
 
-import { workshopApi, type ChatPhase, type WorkshopMessage } from "@/shared/api";
+import { workshopApi, type ChatPhase, type Skill, type WorkshopMessage } from "@/shared/api";
 
 import { notifyWorkshopHistoryChanged } from "./history";
 import { toChatTurn, type ChatUiPhase, type ToolEvent } from "./process-state";
@@ -38,6 +38,12 @@ type StartArgs = {
   model: string;
   think: boolean;
   tools: boolean;
+  /** 発見済み技能一覧（activate_skill の成功判定に本文を照合するため）。 */
+  skills: Skill[];
+  /** この会話で発動済みの技能名（ボタン発動・モデル自動発動を問わず一本化、重複排除済み）。 */
+  activatedSkillNames: string[];
+  /** activate_skill ツールの成功を観測したら呼ぶ（呼び出し側が activatedSkillNames へ記帳する）。 */
+  onSkillActivated: (name: string) => void;
 };
 
 let state: RunStoreState = { active: null, error: null };
@@ -115,6 +121,7 @@ async function run(args: StartArgs): Promise<void> {
       args.model,
       args.think,
       args.tools,
+      args.activatedSkillNames,
       (p: ChatPhase) => {
         if (!isActive(kbPath, conversationId)) return; // 破棄済みなら書かない
         if (p.phase === "narration") {
@@ -132,6 +139,19 @@ async function run(args: StartArgs): Promise<void> {
           const target = [...tools].reverse().find((tool) => tool.name === p.name && !tool.summary);
           if (target) target.summary = p.summary;
           patch(kbPath, conversationId, { tools: [...tools], confirm: null });
+          // activate_skill の成功を観測したら発動済みへ記帳する。技能名は toolResult 自体には
+          // 乗らないので、対応する toolCall の args から拾う。成功時の戻り値は該当技能の本文
+          // そのもの（activate_skill.rs）なので、本文と一致するかで成功/失敗を判定する
+          // （失敗通知の文面に依存しない＝本文がたまたま "(" で始まっても誤判定しない）。
+          if (p.name === "activate_skill" && target) {
+            try {
+              const skillName = (JSON.parse(target.args) as { name?: string }).name;
+              const skill = skillName ? args.skills.find((s) => s.name === skillName) : undefined;
+              if (skill && p.summary === skill.body) args.onSkillActivated(skill.name);
+            } catch {
+              // args の解析に失敗しても無視する（記帳漏れは次ターンの catalog 再掲で回復可能）。
+            }
+          }
         } else if (p.phase === "confirmRequest") {
           patch(kbPath, conversationId, { confirm: { id: p.id, summary: p.summary } });
         } else {

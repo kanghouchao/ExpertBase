@@ -10,6 +10,7 @@ import type {
   KbList,
   OllamaModel,
   SearchHit,
+  Skill,
   Stats,
   AiSettings,
   WorkshopConversation,
@@ -52,8 +53,11 @@ export const tauriBackend: Backend = {
       await invoke("ai_set_settings", { settings });
     },
   },
+  plugin: {
+    listSkills: () => invoke<Skill[]>("plugin_list_skills"),
+  },
   workshop: {
-    chat: (sourceIds, messages, model, think, tools, onPhase) => {
+    chat: (sourceIds, messages, model, think, tools, activatedSkillNames, onPhase) => {
       const channel = new Channel<ChatPhase>();
       if (onPhase) channel.onmessage = onPhase;
       return invoke<string>("workshop_chat", {
@@ -62,6 +66,7 @@ export const tauriBackend: Backend = {
         model,
         think,
         tools,
+        activatedSkillNames,
         onEvent: channel,
       });
     },
