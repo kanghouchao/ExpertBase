@@ -78,6 +78,22 @@ export type OllamaModel = {
   tools: boolean;
 };
 
+/** 技能の由来（Rust SkillSource と一致）。 */
+export type SkillSource = "kb" | "user";
+
+/** 発見済み Agent Skill（Rust plugin::Skill と一致）。 */
+export type Skill = {
+  name: string;
+  description: string;
+  /** frontmatter 剥離済みの本文。 */
+  body: string;
+  /** SKILL.md への絶対パス（表示用）。 */
+  location: string;
+  source: SkillSource;
+  /** `scripts/` サブディレクトリの有無（本バージョンは実行しない、UI 注記用）。 */
+  hasScripts: boolean;
+};
+
 /** AI プロバイダ（Rust Provider と一致）。ローカル端点のみ。 */
 export type AiProvider = "ollama" | "llamaApp";
 
@@ -148,9 +164,16 @@ export type AgentApi = {
   setSettings(settings: AiSettings): Promise<void>;
 };
 
+/** 発見済み Agent Skill の一覧。 */
+export type PluginApi = {
+  /** KB `skills/` + `~/.agents/skills/` の発見済み技能一覧（同名は KB 側が勝つ）。 */
+  listSkills(): Promise<Skill[]>;
+};
+
 /** 工坊の対話エージェントと対話履歴。 */
 export type WorkshopApi = {
   /** 添付素材（外部ファイルの絶対パス id）+ 会話履歴で対話エージェントを 1 ターン回す。
+   * activatedSkillNames はこの会話で発動済みの技能名（ボタン発動・モデル自動発動を問わず）。
    * 最終返信本文を返す。onPhase で進捗を受け取る。 */
   chat(
     sourceIds: string[],
@@ -158,6 +181,7 @@ export type WorkshopApi = {
     model: string,
     think: boolean,
     tools: boolean,
+    activatedSkillNames: string[],
     onPhase?: (phase: ChatPhase) => void
   ): Promise<string>;
   /** 進行中の生成を中断する（停止ボタン）。共有フラグを立てるだけで即返る。 */
@@ -183,5 +207,6 @@ export type WorkshopApi = {
 export type Backend = {
   kb: KbApi;
   agent: AgentApi;
+  plugin: PluginApi;
   workshop: WorkshopApi;
 };

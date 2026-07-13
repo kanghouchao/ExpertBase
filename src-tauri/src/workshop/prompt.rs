@@ -17,13 +17,30 @@ When you need a tool, call it directly. Never announce or describe a tool call i
 /// の目録）を付けて system プロンプトを組む。素材は本文を注入せず、id だけ並べて
 /// `read_source(id)` で AI 自身に読ませる＝「AI が読んだ内容」と「我々のプロンプト」を構造的に分離。
 /// 素材が無ければ `# Sources` 節ごと省略する。
-pub fn agent_system_with(tools_section: &str, source_ids: &[String]) -> String {
+///
+/// `skills_catalog`（`# Skills`）と `activated_skills_section`（`# Activated Skills`）は
+/// 互いに独立な節（plugin::render_catalog / render_activated が内容の唯一の真源、ここは
+/// 「どこに置くか」だけを持つ）。空文字列ならそれぞれ節ごと省略する。catalog は tools 能力が
+/// 無いモデルには渡さない（呼び出し側が空文字列を渡す）が、activated は tools 能力に関わらず
+/// 常に評価する（明示発動は tools 能力に依存しない、要求4）。
+pub fn agent_system_with(
+  tools_section: &str,
+  source_ids: &[String],
+  skills_catalog: &str,
+  activated_skills_section: &str,
+) -> String {
   let mut s = format!("{AGENT_SYSTEM}\n\n# Tools\n{tools_section}");
   if !source_ids.is_empty() {
     let list = source_ids.iter().map(|id| format!("- {id}")).collect::<Vec<_>>().join("\n");
     s.push_str(&format!(
       "\n\n# Sources\nThe following source materials are attached. Call read_source(id) to read one before working on it.\n{list}"
     ));
+  }
+  if !skills_catalog.is_empty() {
+    s.push_str(&format!("\n\n# Skills\n{skills_catalog}"));
+  }
+  if !activated_skills_section.is_empty() {
+    s.push_str(&format!("\n\n# Activated Skills\n{activated_skills_section}"));
   }
   s
 }
@@ -37,6 +54,8 @@ mod tests {
     let s = agent_system_with(
       "- read_source(id): Read a source.",
       &["inbox/a.md".into(), "/abs/b.pdf".into()],
+      "",
+      "",
     );
     // # Tools は infra が definition() から生成した本文をそのまま節に収める。
     assert!(s.contains("# Tools\n- read_source(id): Read a source."), "was: {s}");
@@ -50,10 +69,49 @@ mod tests {
   #[test]
   fn agent_system_omits_sources_section_when_empty() {
     // 素材なしなら # Sources 節ごと省略する（# Tools 節は常に付く）。
-    let s = agent_system_with("- x(): y", &[]);
+    let s = agent_system_with("- x(): y", &[], "", "");
     assert!(s.contains("# Tools\n- x(): y"), "was: {s}");
     assert!(!s.contains("# Sources"));
     assert!(!s.contains("source materials are attached"));
+  }
+
+  #[test]
+  fn agent_system_includes_skills_catalog_when_non_empty() {
+    let s = agent_system_with("- x(): y", &[], "- tea-brewing: 緑茶の淹れ方", "");
+    assert!(s.contains("# Skills\n- tea-brewing: 緑茶の淹れ方"), "was: {s}");
+    assert!(!s.contains("# Activated Skills"));
+  }
+
+  #[test]
+  fn agent_system_omits_skills_catalog_when_empty() {
+    let s = agent_system_with("- x(): y", &[], "", "");
+    assert!(!s.contains("# Skills"));
+  }
+
+  #[test]
+  fn agent_system_includes_activated_skills_section_when_non_empty() {
+    let s = agent_system_with("- x(): y", &[], "", "## tea-brewing\n本文");
+    assert!(s.contains("# Activated Skills\n## tea-brewing\n本文"), "was: {s}");
+    assert!(!s.contains("# Skills\n"));
+  }
+
+  #[test]
+  fn agent_system_omits_activated_skills_section_when_empty() {
+    let s = agent_system_with("- x(): y", &[], "", "");
+    assert!(!s.contains("# Activated Skills"));
+  }
+
+  #[test]
+  fn agent_system_shows_skills_catalog_and_activated_skills_independently_when_both_present() {
+    // 要求3(catalog)と要求4(明示発動)は独立の節。両方同時に出うる。
+    let s = agent_system_with(
+      "- x(): y",
+      &[],
+      "- tea-brewing: 緑茶の淹れ方",
+      "## coffee-brewing\nコーヒーの淹れ方本文",
+    );
+    assert!(s.contains("# Skills\n- tea-brewing: 緑茶の淹れ方"), "was: {s}");
+    assert!(s.contains("# Activated Skills\n## coffee-brewing\nコーヒーの淹れ方本文"), "was: {s}");
   }
 
   #[test]

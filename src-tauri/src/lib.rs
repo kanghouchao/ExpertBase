@@ -2,6 +2,7 @@ mod agent;
 mod error;
 mod extract;
 mod kb;
+mod plugin;
 mod workshop;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -40,6 +41,7 @@ pub fn run() {
       agent::interface::ai_list_models,
       agent::interface::ai_get_settings,
       agent::interface::ai_set_settings,
+      plugin::interface::plugin_list_skills,
       workshop::interface::workshop_chat,
       workshop::interface::workshop_get_conversation,
       workshop::interface::workshop_list_conversations,

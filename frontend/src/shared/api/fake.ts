@@ -30,6 +30,9 @@ export const fakeBackend: Backend = {
     getSettings: async () => DEFAULT_AI_SETTINGS,
     setSettings: async () => {},
   },
+  plugin: {
+    listSkills: async () => [],
+  },
   workshop: {
     chat: () => desktopOnly(),
     cancel: async () => {},

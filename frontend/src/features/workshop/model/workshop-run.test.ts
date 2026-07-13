@@ -19,6 +19,7 @@ type ChatImpl = (
   model: string,
   think: boolean,
   tools: boolean,
+  activatedSkillNames: string[],
   onPhase?: (p: ChatPhase) => void
 ) => Promise<string>;
 
@@ -111,7 +112,7 @@ test("run identity includes the opaque KB path on every platform", () => {
 
 describe("startRun", () => {
   test("streams buffers then saves the AI reply to the captured conversation id", async () => {
-    chatImpl = async (_s, _m, _mo, _th, _to, onPhase) => {
+    chatImpl = async (_s, _m, _mo, _th, _to, _ac, onPhase) => {
       onPhase?.({ phase: "loadingModel" });
       onPhase?.({ phase: "thinking", delta: "考え" });
       onPhase?.({ phase: "narration", delta: "答え" });
@@ -133,6 +134,9 @@ describe("startRun", () => {
       model: "qwen3:8b",
       think: true,
       tools: true,
+      skills: [],
+      activatedSkillNames: [],
+      onSkillActivated: () => {},
     });
     await tick();
 
@@ -158,12 +162,97 @@ describe("startRun", () => {
     unsub();
     window.removeEventListener(HISTORY_EVENT, onHistory);
   });
+
+  const TEA_SKILL = {
+    name: "tea-brewing",
+    description: "緑茶の淹れ方",
+    body: "緑茶の淹れ方本文",
+    location: "/skills/tea-brewing/SKILL.md",
+    source: "kb" as const,
+    hasScripts: false,
+  };
+
+  test("reports a successful activate_skill call via onSkillActivated, using the toolCall args for the name", async () => {
+    chatImpl = async (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+      onPhase?.({ phase: "toolCall", name: "activate_skill", args: '{"name":"tea-brewing"}' });
+      onPhase?.({ phase: "toolResult", name: "activate_skill", summary: "緑茶の淹れ方本文" });
+      return "done";
+    };
+    const activated: string[] = [];
+
+    startRun({
+      kbPath: "/home/user/ExpertBase/tea",
+      conversationId: 21,
+      sourceIds: [],
+      baseHistory: [{ role: "user", text: "緑茶の淹れ方教えて" }],
+      model: "qwen3:8b",
+      think: false,
+      tools: true,
+      skills: [TEA_SKILL],
+      activatedSkillNames: [],
+      onSkillActivated: (name) => activated.push(name),
+    });
+    await tick();
+
+    expect(activated).toEqual(["tea-brewing"]);
+  });
+
+  test("does not report a failed activate_skill call (summary does not match the skill's body)", async () => {
+    chatImpl = async (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+      onPhase?.({ phase: "toolCall", name: "activate_skill", args: '{"name":"missing"}' });
+      onPhase?.({ phase: "toolResult", name: "activate_skill", summary: "(no skill found: missing)" });
+      return "done";
+    };
+    const activated: string[] = [];
+
+    startRun({
+      kbPath: "/home/user/ExpertBase/tea",
+      conversationId: 22,
+      sourceIds: [],
+      baseHistory: [{ role: "user", text: "問" }],
+      model: "qwen3:8b",
+      think: false,
+      tools: true,
+      skills: [TEA_SKILL],
+      activatedSkillNames: [],
+      onSkillActivated: (name) => activated.push(name),
+    });
+    await tick();
+
+    expect(activated).toEqual([]);
+  });
+
+  test("reports success even when a skill body happens to start with '(' (does not rely on failure-message prefix)", async () => {
+    const parenSkill = { ...TEA_SKILL, name: "paren-skill", body: "(注意事項) まず湯を沸かす" };
+    chatImpl = async (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+      onPhase?.({ phase: "toolCall", name: "activate_skill", args: '{"name":"paren-skill"}' });
+      onPhase?.({ phase: "toolResult", name: "activate_skill", summary: parenSkill.body });
+      return "done";
+    };
+    const activated: string[] = [];
+
+    startRun({
+      kbPath: "/home/user/ExpertBase/tea",
+      conversationId: 23,
+      sourceIds: [],
+      baseHistory: [{ role: "user", text: "問" }],
+      model: "qwen3:8b",
+      think: false,
+      tools: true,
+      skills: [parenSkill],
+      activatedSkillNames: [],
+      onSkillActivated: (name) => activated.push(name),
+    });
+    await tick();
+
+    expect(activated).toEqual(["paren-skill"]);
+  });
 });
 
 describe("answerConfirm", () => {
   test("surfaces the confirm request and relays the user's answer", async () => {
     let resolveChat: (v: string) => void = () => {};
-    chatImpl = (_s, _m, _mo, _th, _to, onPhase) => {
+    chatImpl = (_s, _m, _mo, _th, _to, _ac, onPhase) => {
       onPhase?.({ phase: "confirmRequest", id: 42, summary: "delete entries/a.md" });
       return new Promise<string>((resolve) => {
         resolveChat = resolve;
@@ -178,6 +267,9 @@ describe("answerConfirm", () => {
       model: "qwen3:8b",
       think: false,
       tools: true,
+      skills: [],
+      activatedSkillNames: [],
+      onSkillActivated: () => {},
     });
     await tick();
 
@@ -202,7 +294,7 @@ describe("answerConfirm", () => {
       throw new Error("ipc down");
     };
     let resolveChat: (v: string) => void = () => {};
-    chatImpl = (_s, _m, _mo, _th, _to, onPhase) => {
+    chatImpl = (_s, _m, _mo, _th, _to, _ac, onPhase) => {
       onPhase?.({ phase: "confirmRequest", id: 5, summary: "write_entry: 緑茶" });
       return new Promise<string>((resolve) => {
         resolveChat = resolve;
@@ -217,6 +309,9 @@ describe("answerConfirm", () => {
       model: "qwen3:8b",
       think: false,
       tools: true,
+      skills: [],
+      activatedSkillNames: [],
+      onSkillActivated: () => {},
     });
     await tick();
 
@@ -232,7 +327,7 @@ describe("answerConfirm", () => {
 
   test("ignores answers for a different conversation", async () => {
     let resolveChat: (v: string) => void = () => {};
-    chatImpl = (_s, _m, _mo, _th, _to, onPhase) => {
+    chatImpl = (_s, _m, _mo, _th, _to, _ac, onPhase) => {
       onPhase?.({ phase: "confirmRequest", id: 7, summary: "update entries/b.md" });
       return new Promise<string>((resolve) => {
         resolveChat = resolve;
@@ -247,6 +342,9 @@ describe("answerConfirm", () => {
       model: "qwen3:8b",
       think: false,
       tools: true,
+      skills: [],
+      activatedSkillNames: [],
+      onSkillActivated: () => {},
     });
     await tick();
 
@@ -279,6 +377,9 @@ describe("stopActive", () => {
       model: "qwen3:8b",
       think: true,
       tools: true,
+      skills: [],
+      activatedSkillNames: [],
+      onSkillActivated: () => {},
     });
     await tick();
 
@@ -312,6 +413,9 @@ describe("stopActive", () => {
       model: "qwen3:8b",
       think: false,
       tools: true,
+      skills: [],
+      activatedSkillNames: [],
+      onSkillActivated: () => {},
     });
     await tick();
 
@@ -326,7 +430,7 @@ describe("stopActive", () => {
 
   test("keeps the partial narration as the AI reply", async () => {
     let rejectChat: (reason: unknown) => void = () => {};
-    chatImpl = (_s, _m, _mo, _th, _to, onPhase) => {
+    chatImpl = (_s, _m, _mo, _th, _to, _ac, onPhase) => {
       onPhase?.({ phase: "narration", delta: "途中まで" });
       return new Promise<string>((_resolve, reject) => {
         rejectChat = reject;
@@ -341,6 +445,9 @@ describe("stopActive", () => {
       model: "qwen3:8b",
       think: false,
       tools: true,
+      skills: [],
+      activatedSkillNames: [],
+      onSkillActivated: () => {},
     });
     await tick();
     expect(getSnapshot().active?.narration).toBe("途中まで");
@@ -363,7 +470,7 @@ describe("stopActive", () => {
 describe("discardActive", () => {
   test("drops the run without saving", async () => {
     let rejectChat: (reason: unknown) => void = () => {};
-    chatImpl = (_s, _m, _mo, _th, _to, onPhase) => {
+    chatImpl = (_s, _m, _mo, _th, _to, _ac, onPhase) => {
       onPhase?.({ phase: "narration", delta: "x" });
       return new Promise<string>((_resolve, reject) => {
         rejectChat = reject;
@@ -378,6 +485,9 @@ describe("discardActive", () => {
       model: "qwen3:8b",
       think: false,
       tools: true,
+      skills: [],
+      activatedSkillNames: [],
+      onSkillActivated: () => {},
     });
     await tick();
 

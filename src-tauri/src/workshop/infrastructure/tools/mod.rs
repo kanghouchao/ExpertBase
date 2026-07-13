@@ -39,14 +39,22 @@ fn remember_source(used_sources: &UsedSources, source: &str) {
 /// brave_api_key は search_web の backend へだけ渡し、ツール出力には含めない。
 /// gate は破壊的ツール（write_entry / update_entry / delete_entry）が実行前に
 /// ユーザー確認を取るための確認ゲート。
+/// `activate_skill` は tools 能力があり（tools_capable）かつ発見済み技能が 1 件以上あるときだけ
+/// 追加登録する（tools 能力の無いモデルには載せない、要求4は明示発動でのみ使える）。
+/// `activated_skill_names` は前ターンまでに発動済みの技能名（フロント管理）。単発生成内の
+/// 重複排除表 `activated_this_call` をこれで種付けし、既に本文が # Activated Skills に載っている
+/// 技能をモデルが再度 `activate_skill` した場合は「既発動」通知を返す（本文の二重消費を避ける）。
 pub(crate) fn build_toolset(
   root: &Path,
   sources: &[String],
   brave_api_key: String,
   gate: Arc<ConfirmGate>,
+  skills: &[crate::plugin::Skill],
+  tools_capable: bool,
+  activated_skill_names: &[String],
 ) -> Vec<Box<dyn rig_core::tool::ToolDyn>> {
   let used_sources: UsedSources = Arc::new(Mutex::new(Vec::new()));
-  vec![
+  let mut tools: Vec<Box<dyn rig_core::tool::ToolDyn>> = vec![
     Box::new(ReadSource { sources: sources.to_vec(), used_sources: used_sources.clone() }),
     Box::new(ListKb { root: root.to_path_buf() }),
     Box::new(SearchKb { root: root.to_path_buf() }),
@@ -56,7 +64,14 @@ pub(crate) fn build_toolset(
     Box::new(UpdateEntry { root: root.to_path_buf(), gate: gate.clone() }),
     Box::new(DeleteEntry { root: root.to_path_buf(), gate }),
     Box::new(FetchWeb { used_sources }),
-  ]
+  ];
+  if tools_capable && !skills.is_empty() {
+    tools.push(Box::new(crate::plugin::ActivateSkill {
+      skills: skills.to_vec(),
+      activated_this_call: Arc::new(Mutex::new(activated_skill_names.to_vec())),
+    }));
+  }
+  tools
 }
 
 /// system プロンプトの # Tools 節本文を toolset の `definition()` から生成する。
@@ -213,7 +228,15 @@ mod tests {
   async fn tools_section_renders_each_definition_with_signature_and_params() {
     let tmp = tempfile::tempdir().unwrap();
     let toolset =
-      build_toolset(tmp.path(), &["/abs/a.md".to_string()], String::new(), auto_gate(true));
+      build_toolset(
+        tmp.path(),
+        &["/abs/a.md".to_string()],
+        String::new(),
+        auto_gate(true),
+        &[],
+        false,
+        &[],
+      );
 
     let out = render_tools_section(&toolset).await;
 
@@ -241,7 +264,15 @@ mod tests {
     // definition() に一本化されている＝モデルが見る物語は一つ。
     let tmp = tempfile::tempdir().unwrap();
     let toolset =
-      build_toolset(tmp.path(), &["/abs/a.md".to_string()], String::new(), auto_gate(true));
+      build_toolset(
+        tmp.path(),
+        &["/abs/a.md".to_string()],
+        String::new(),
+        auto_gate(true),
+        &[],
+        false,
+        &[],
+      );
 
     let out = render_tools_section(&toolset).await;
 
@@ -259,6 +290,75 @@ mod tests {
     assert!(out.contains("The user is asked to approve the change before it happens"), "was: {out}");
     assert!(out.contains("breaks [[links]] pointing to the entry"), "was: {out}");
     assert!(out.contains("The user is asked to approve the deletion before it happens"), "was: {out}");
+  }
+
+  fn a_skill() -> crate::plugin::Skill {
+    crate::plugin::Skill {
+      name: "tea-brewing".to_string(),
+      description: "緑茶の淹れ方を案内する".to_string(),
+      body: "本文".to_string(),
+      location: "/skills/tea-brewing/SKILL.md".to_string(),
+      source: crate::plugin::SkillSource::Kb,
+      has_scripts: false,
+    }
+  }
+
+  #[tokio::test]
+  async fn build_toolset_registers_activate_skill_when_tools_capable_and_skills_exist() {
+    let tmp = tempfile::tempdir().unwrap();
+    let skills = vec![a_skill()];
+    let toolset =
+      build_toolset(tmp.path(), &[], String::new(), auto_gate(true), &skills, true, &[]);
+
+    let out = render_tools_section(&toolset).await;
+
+    assert!(out.contains("- activate_skill(name): "), "was: {out}");
+  }
+
+  #[tokio::test]
+  async fn build_toolset_omits_activate_skill_when_not_tools_capable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let skills = vec![a_skill()];
+    let toolset =
+      build_toolset(tmp.path(), &[], String::new(), auto_gate(true), &skills, false, &[]);
+
+    let out = render_tools_section(&toolset).await;
+
+    assert!(!out.contains("activate_skill"), "was: {out}");
+  }
+
+  #[tokio::test]
+  async fn build_toolset_omits_activate_skill_when_no_skills_discovered() {
+    let tmp = tempfile::tempdir().unwrap();
+    let toolset = build_toolset(tmp.path(), &[], String::new(), auto_gate(true), &[], true, &[]);
+
+    let out = render_tools_section(&toolset).await;
+
+    assert!(!out.contains("activate_skill"), "was: {out}");
+  }
+
+  #[tokio::test]
+  async fn build_toolset_seeds_activate_skill_dedup_from_already_activated_names() {
+    // 前ターンまでに発動済みの技能は、モデルが再度 activate_skill しても本文を出し直さない
+    // （本文は既に # Activated Skills に載っている、確定した決定10の一行改善）。
+    let tmp = tempfile::tempdir().unwrap();
+    let skills = vec![a_skill()];
+    let toolset = build_toolset(
+      tmp.path(),
+      &[],
+      String::new(),
+      auto_gate(true),
+      &skills,
+      true,
+      &["tea-brewing".to_string()],
+    );
+    let tool = toolset.iter().find(|t| rig_core::tool::ToolDyn::name(t.as_ref()) == "activate_skill").unwrap();
+
+    let out = rig_core::tool::ToolDyn::call(tool.as_ref(), r#"{"name":"tea-brewing"}"#.to_string())
+      .await
+      .unwrap();
+
+    assert!(out.contains("already activated this turn: tea-brewing"), "was: {out}");
   }
 
   #[test]

@@ -78,11 +78,14 @@ pub async fn workshop_list_conversations(
 
 /// 添付素材 + 会話履歴で対話エージェントを 1 会話分回す。素材は本文を注入せず、検証済みの id
 /// 一覧（sources）として渡し、AI が read_source で自分で読む。会話の記憶はフロントが組み立てた
-/// messages。tools 対応モデル必須で read_source / search_kb / write_entry を使える（書き込みは
-/// ユーザーが対話で頼んだとき）。素材 id の検証はブロッキングなので別スレッドへ。Rig エージェント
+/// messages。素材 id の検証 + 技能発見はブロッキングなので別スレッドへ。Rig エージェント
 /// （async）は spawn し、進捗を mpsc 経由で受けて Channel へ転送する（ストリームのコールバック
 /// Send 制約を回避）。戻り値は最終的な助手の返信本文。
-/// `tools` は前端の互換のため受けるが分岐しない（Phase 3 で前端が tools モデルを必須化する）。
+/// `tools`（前端が算出したモデルの tools 能力）は skills catalog / `activate_skill` 登録の
+/// 能力ゲートとして使う（tools 非対応モデルには載せない）。`activated_skill_names` は
+/// フロントが管理する「この会話で発動済みの技能名」（ボタン発動・モデル自動発動を問わず一本化）で、
+/// 対応する技能本文は tools 能力に関わらず system prompt へ注入する（明示発動は tools 能力に依存しない）。
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn workshop_chat(
   app: tauri::AppHandle,
@@ -93,19 +96,22 @@ pub async fn workshop_chat(
   model: String,
   think: bool,
   tools: bool,
+  activated_skill_names: Vec<String>,
   on_event: Channel<StreamProgress>,
 ) -> Result<String, AppError> {
-  let _ = tools;
   let home = app.path().home_dir().map_err(AppError::generic)?;
   // 新しい生成の開始時にフラグを倒す（前回の停止が残らないように）。
   cancel.0.store(false, Ordering::Relaxed);
   let cancel_flag = cancel.0.clone();
 
-  // 素材 id の検証 + Agent 設定の読み込みはブロッキング寄り。root + sources + 設定を別スレッドで用意。
+  // 素材 id の検証 + Agent 設定の読み込み + 技能発見はブロッキング寄り。
   // 本文はここでは読まない＝AI が read_source で個別に読む。id は外部ファイルの絶対パスのみ。
   // 設定はグローバル（前端の設定画面で編集）。model は会話ごとに前端が渡す。
-  let (root, sources, settings) = tauri::async_runtime::spawn_blocking(
-    move || -> Result<(PathBuf, Vec<String>, crate::agent::AiSettings), AppError> {
+  let (root, sources, settings, skills) = tauri::async_runtime::spawn_blocking(
+    move || -> Result<
+      (PathBuf, Vec<String>, crate::agent::AiSettings, Vec<crate::plugin::Skill>),
+      AppError,
+    > {
       let (root, _conn) = crate::kb::open_active(&home)?;
       let mut sources = Vec::with_capacity(source_ids.len());
       for id in &source_ids {
@@ -116,7 +122,8 @@ pub async fn workshop_chat(
         }
       }
       let settings = crate::agent::settings_store::load(&home)?;
-      Ok((root, sources, settings))
+      let skills = crate::plugin::discover_skills(&root, &home);
+      Ok((root, sources, settings, skills))
     },
   )
   .await
@@ -126,7 +133,18 @@ pub async fn workshop_chat(
   let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<StreamProgress>();
   let pending = confirms.0.clone();
   let agent = tauri::async_runtime::spawn(application::chat(
-    settings, model, think, root, sources, messages, cancel_flag, tx, pending,
+    settings,
+    model,
+    think,
+    tools,
+    root,
+    sources,
+    skills,
+    activated_skill_names,
+    messages,
+    cancel_flag,
+    tx,
+    pending,
   ));
   while let Some(p) = rx.recv().await {
     if on_event.send(p).is_err() {
