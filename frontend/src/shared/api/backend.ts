@@ -41,8 +41,7 @@ export const pluginApi: PluginApi = {
 };
 
 export const workshopApi: WorkshopApi = {
-  chat: (sourceIds, messages, model, think, tools, activatedSkillNames, onPhase) =>
-    current.workshop.chat(sourceIds, messages, model, think, tools, activatedSkillNames, onPhase),
+  chat: (input, onPhase) => current.workshop.chat(input, onPhase),
   cancel: () => current.workshop.cancel(),
   confirm: (id, approved) => current.workshop.confirm(id, approved),
   listConversations: (offset) => current.workshop.listConversations(offset),

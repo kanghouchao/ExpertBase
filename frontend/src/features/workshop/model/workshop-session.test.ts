@@ -4,9 +4,9 @@ import {
   fakeBackend,
   setBackend,
   type ChatPhase,
-  type ChatTurn,
   type OllamaModel,
   type Skill,
+  type WorkshopChatInput,
   type WorkshopConversation,
   type WorkshopMessage,
 } from "@/shared/api";
@@ -15,15 +15,7 @@ import {
 (globalThis as { window?: EventTarget }).window = new EventTarget();
 
 // 後端を fake 土台 + 上書きで差し替える(実 IPC を呼ばない・猴補なし)。
-type ChatImpl = (
-  sourceIds: string[],
-  messages: ChatTurn[],
-  model: string,
-  think: boolean,
-  tools: boolean,
-  activatedSkillNames: string[],
-  onPhase?: (p: ChatPhase) => void
-) => Promise<string>;
+type ChatImpl = (input: WorkshopChatInput, onPhase?: (p: ChatPhase) => void) => Promise<string>;
 
 type SaveInput = {
   kbPath: string;
@@ -331,7 +323,7 @@ describe("stop と会話読込", () => {
   test("生成中の会話は DB を読まず run の実時態を描く", async () => {
     const { session, detach } = await readySession();
     let rejectChat: (reason: unknown) => void = () => {};
-    chatImpl = (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+    chatImpl = (_input, onPhase) => {
       onPhase?.({ phase: "narration", delta: "途中" });
       return new Promise<string>((_resolve, reject) => {
         rejectChat = reject;
@@ -566,8 +558,7 @@ describe("Agent Skills", () => {
     session.setInstruction("問い");
     await session.send();
 
-    // ChatImpl の引数順: sourceIds, messages, model, think, tools, activatedSkillNames, onPhase。
-    expect(chatCallArgs.at(-1)?.[5]).toEqual(["tea-brewing"]);
+    expect(chatCallArgs.at(-1)?.[0].activatedSkillNames).toEqual(["tea-brewing"]);
 
     discardActive();
     resolveChat("");
@@ -578,7 +569,7 @@ describe("Agent Skills", () => {
   test("activate_skill の成功をストリームで観測すると発動済みへ記帳される", async () => {
     listSkillsImpl = async () => [SKILL]; // 成功判定は本文照合なので、skills 側に本文が必要。
     const { session, detach } = await readySession();
-    chatImpl = async (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+    chatImpl = async (_input, onPhase) => {
       onPhase?.({ phase: "toolCall", name: "activate_skill", args: '{"name":"tea-brewing"}' });
       onPhase?.({ phase: "toolResult", name: "activate_skill", summary: "本文" });
       return "done";

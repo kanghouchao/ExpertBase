@@ -132,12 +132,14 @@ async function run(args: StartArgs): Promise<void> {
   let thinking = "";
   try {
     const reply = await workshopApi.chat(
-      sourceIds,
-      baseHistory.map(toChatTurn),
-      args.model,
-      args.think,
-      args.tools,
-      args.activatedSkillNames,
+      {
+        sourceIds,
+        messages: baseHistory.map(toChatTurn),
+        model: args.model,
+        think: args.think,
+        tools: args.tools,
+        activatedSkillNames: args.activatedSkillNames,
+      },
       (p: ChatPhase) => {
         if (!isActive(kbPath, conversationId)) return; // 破棄済みなら書かない
         if (p.phase === "narration") {

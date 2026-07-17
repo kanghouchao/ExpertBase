@@ -57,18 +57,10 @@ export const tauriBackend: Backend = {
     listSkills: () => invoke<Skill[]>("plugin_list_skills"),
   },
   workshop: {
-    chat: (sourceIds, messages, model, think, tools, activatedSkillNames, onPhase) => {
+    chat: (input, onPhase) => {
       const channel = new Channel<ChatPhase>();
       if (onPhase) channel.onmessage = onPhase;
-      return invoke<string>("workshop_chat", {
-        sourceIds,
-        messages,
-        model,
-        think,
-        tools,
-        activatedSkillNames,
-        onEvent: channel,
-      });
+      return invoke<string>("workshop_chat", { ...input, onEvent: channel });
     },
     cancel: async () => {
       await invoke("workshop_cancel");
