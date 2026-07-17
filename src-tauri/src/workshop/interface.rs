@@ -81,8 +81,8 @@ pub async fn workshop_list_conversations(
 /// messages。素材 id の検証 + 技能発見はブロッキングなので別スレッドへ。Rig エージェント
 /// （async）は spawn し、進捗を mpsc 経由で受けて Channel へ転送する（ストリームのコールバック
 /// Send 制約を回避）。戻り値は最終的な助手の返信本文。
-/// `tools`（前端が算出したモデルの tools 能力）は skills catalog / `activate_skill` 登録の
-/// 能力ゲートとして使う（tools 非対応モデルには載せない）。`activated_skill_names` は
+/// `tools`（前端が算出したモデルの tools 能力）は toolset 全体 / skills catalog の
+/// 能力ゲートとして使う（tools 非対応モデルにはツールを一切載せない）。`activated_skill_names` は
 /// フロントが管理する「この会話で発動済みの技能名」（ボタン発動・モデル自動発動を問わず一本化）で、
 /// 対応する技能本文は tools 能力に関わらず system prompt へ注入する（明示発動は tools 能力に依存しない）。
 #[allow(clippy::too_many_arguments)]

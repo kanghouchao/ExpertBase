@@ -24,8 +24,9 @@ type SaveInput = {
   messages: WorkshopMessage[];
 };
 
-// tools 対応モデルが 1 件ある = canGenerate が立つ最小構成。
+// tools 対応モデルが 1 件ある = canGenerate が立つ最小構成。テストごとに差し替え可。
 const MODELS: OllamaModel[] = [{ name: "qwen3:8b", thinking: true, tools: true }];
+let modelsImpl: OllamaModel[] = MODELS;
 
 const SKILL: Skill = {
   name: "tea-brewing",
@@ -61,7 +62,7 @@ const sessionTestBackend = {
   agent: {
     ...fakeBackend.agent,
     hasKey: async () => true,
-    listOllamaModels: async () => MODELS,
+    listOllamaModels: async () => modelsImpl,
   },
   plugin: {
     ...fakeBackend.plugin,
@@ -126,6 +127,7 @@ beforeEach(() => {
   });
   getConversationImpl = () => Promise.reject(new Error("not stubbed"));
   listSkillsImpl = async () => [];
+  modelsImpl = MODELS;
   calls = [];
   saveCalls = [];
   getConversationCalls = [];
@@ -594,6 +596,29 @@ describe("Agent Skills", () => {
     });
 
     expect(session.getSnapshot().activatedSkillNames).toEqual([]);
+    detach();
+  });
+
+  test("tools 非対応モデルでも送信できる(明示発動は tools 能力に依存しない、#41/#44)", async () => {
+    modelsImpl = [{ name: "llama3.1:8b", thinking: false, tools: false }];
+    const { session, detach } = await readySession();
+    let resolveChat: (v: string) => void = () => {};
+    chatImpl = () =>
+      new Promise<string>((resolve) => {
+        resolveChat = resolve;
+      });
+
+    expect(session.getSnapshot().canGenerate).toBeTrue();
+
+    session.setInstruction("問い");
+    await session.send();
+
+    // 後端へは tools=false が伝わる(toolset を組まない・catalog を出さない判定材料)。
+    expect(chatCallArgs.at(-1)?.[0].tools).toBeFalse();
+
+    discardActive();
+    resolveChat("");
+    await tick();
     detach();
   });
 });

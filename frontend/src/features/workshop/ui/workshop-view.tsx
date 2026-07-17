@@ -353,7 +353,7 @@ export function WorkshopView() {
                   </Button>
                 )}
               </div>
-              {/* 送信不可の理由は一行だけ(Ollama 未起動/モデル無し/tools 非対応/他会話が生成中は
+              {/* 送信不可の理由は一行だけ(Ollama 未起動/モデル無し/他会話が生成中は
                   互いに排他なので、常に高々一件しか出ない一本のステータス行にまとめる)。 */}
               {composerHint && (
                 <div className="mt-2 px-1 text-[12px] text-ink-faint">{t(composerHint)}</div>
@@ -396,19 +396,16 @@ function materialFromFile(path: string, label: string): RawMaterial {
   };
 }
 
-// コンポーザー下の一行ステータス。4条件は互いに排他(Ollama 未起動 → モデル無し →
-// 選択モデルが tools 非対応 → 他会話が生成中、の優先順)なので、常に高々一つの i18n key を返す。
+// コンポーザー下の一行ステータス。3条件は互いに排他(Ollama 未起動 → モデル無し →
+// 他会話が生成中、の優先順)なので、常に高々一つの i18n key を返す。
 function composerHintKey(s: {
   visibleHasOllama: boolean;
   visibleModels: unknown[];
-  visibleSelectedModel: string;
-  selectedTools: boolean;
   someoneGenerating: boolean;
   generating: boolean;
 }): string | null {
   if (!s.visibleHasOllama) return "workshop.noKey";
   if (s.visibleModels.length === 0) return "workshop.noModelsHint";
-  if (s.visibleSelectedModel && !s.selectedTools) return "workshop.toolsRequired";
   if (s.someoneGenerating && !s.generating) return "workshop.generatingElsewhere";
   return null;
 }

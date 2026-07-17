@@ -34,13 +34,16 @@ fn remember_source(used_sources: &UsedSources, source: &str) {
 }
 
 /// 工作坊のツール一式を組んで汎用 `agent` へ注入するために返す。
-/// read_source・list_kb・search_kb・search_web・read_entry・write_entry・fetch_web を常に登録する。
+/// tools 能力の無いモデル（`tools_capable == false`）には一切登録せず空を返す
+/// （#41 受入条件「ツールを登録しない」。呼べないツールをリクエストに載せると Ollama が
+/// エラーになる。明示発動＝# Activated Skills 注入だけが使える経路）。
+/// tools 能力があれば read_source・list_kb・search_kb・search_web・read_entry・write_entry・
+/// fetch_web を常に登録する。
 /// used_sources は read/fetch で読んだ素材を write_entry が entry.sources に残すための共有状態。
 /// brave_api_key は search_web の backend へだけ渡し、ツール出力には含めない。
 /// gate は破壊的ツール（write_entry / update_entry / delete_entry）が実行前に
 /// ユーザー確認を取るための確認ゲート。
-/// `activate_skill` は tools 能力があり（tools_capable）かつ発見済み技能が 1 件以上あるときだけ
-/// 追加登録する（tools 能力の無いモデルには載せない、要求4は明示発動でのみ使える）。
+/// `activate_skill` は発見済み技能が 1 件以上あるときだけ追加登録する。
 /// `activated_skill_names` は前ターンまでに発動済みの技能名（フロント管理）。単発生成内の
 /// 重複排除表 `activated_this_call` をこれで種付けし、既に本文が # Activated Skills に載っている
 /// 技能をモデルが再度 `activate_skill` した場合は「既発動」通知を返す（本文の二重消費を避ける）。
@@ -53,6 +56,9 @@ pub(crate) fn build_toolset(
   tools_capable: bool,
   activated_skill_names: &[String],
 ) -> Vec<Box<dyn rig_core::tool::ToolDyn>> {
+  if !tools_capable {
+    return Vec::new();
+  }
   let used_sources: UsedSources = Arc::new(Mutex::new(Vec::new()));
   let mut tools: Vec<Box<dyn rig_core::tool::ToolDyn>> = vec![
     Box::new(ReadSource { sources: sources.to_vec(), used_sources: used_sources.clone() }),
@@ -65,7 +71,7 @@ pub(crate) fn build_toolset(
     Box::new(DeleteEntry { root: root.to_path_buf(), gate }),
     Box::new(FetchWeb { used_sources }),
   ];
-  if tools_capable && !skills.is_empty() {
+  if !skills.is_empty() {
     tools.push(Box::new(crate::plugin::ActivateSkill {
       skills: skills.to_vec(),
       activated_this_call: Arc::new(Mutex::new(activated_skill_names.to_vec())),
@@ -234,7 +240,7 @@ mod tests {
         String::new(),
         auto_gate(true),
         &[],
-        false,
+        true,
         &[],
       );
 
@@ -270,7 +276,7 @@ mod tests {
         String::new(),
         auto_gate(true),
         &[],
-        false,
+        true,
         &[],
       );
 
@@ -316,15 +322,15 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn build_toolset_omits_activate_skill_when_not_tools_capable() {
+  async fn build_toolset_returns_no_tools_for_non_tools_capable_models() {
+    // #41 受入条件「tools 非対応モデル: ツールを登録しない」。空 toolset は rig が
+    // リクエストの tools 欄ごと省略する(skip_serializing_if)ので Ollama 側も安全。
     let tmp = tempfile::tempdir().unwrap();
     let skills = vec![a_skill()];
     let toolset =
       build_toolset(tmp.path(), &[], String::new(), auto_gate(true), &skills, false, &[]);
 
-    let out = render_tools_section(&toolset).await;
-
-    assert!(!out.contains("activate_skill"), "was: {out}");
+    assert!(toolset.is_empty());
   }
 
   #[tokio::test]
