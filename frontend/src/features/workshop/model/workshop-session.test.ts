@@ -621,4 +621,42 @@ describe("Agent Skills", () => {
     await tick();
     detach();
   });
+
+  test("明示発動の合成カードは初発動のターンだけに出る(再送で重放しない)", async () => {
+    listSkillsImpl = async () => [SKILL];
+    const { session, detach } = await readySession();
+    let resolveChat: (v: string) => void = () => {};
+    chatImpl = () =>
+      new Promise<string>((resolve) => {
+        resolveChat = resolve;
+      });
+    session.activateSkill("tea-brewing");
+
+    session.setInstruction("一回目");
+    await session.send();
+
+    // 初発動のターン: カードが合成される。
+    expect(getRunSnapshot().active?.tools).toEqual([
+      { name: "activate_skill", args: '{"name":"tea-brewing"}', summary: "本文" },
+    ]);
+    resolveChat("答え");
+    await tick(); // run 収尾(finishSave)
+    await tick();
+
+    chatImpl = () =>
+      new Promise<string>((resolve) => {
+        resolveChat = resolve;
+      });
+    session.setInstruction("二回目");
+    await session.send();
+
+    // 発動済みは chat へ渡り続けるが、カードは再合成しない(偽のツール記録を増やさない)。
+    expect(chatCallArgs.at(-1)?.[0].activatedSkillNames).toEqual(["tea-brewing"]);
+    expect(getRunSnapshot().active?.tools).toEqual([]);
+
+    discardActive();
+    resolveChat("");
+    await tick();
+    detach();
+  });
 });

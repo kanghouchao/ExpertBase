@@ -91,6 +91,10 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
   let selectedModel = "";
   let skills: Skill[] = [];
   let activatedSkillNames: string[] = [];
+  // 明示発動されてからまだ一度も送信に乗っていない技能名（合成カードの対象）。
+  // 送信のたびに畳む＝カードは初発動のターンにだけ出る（以降のターンで再合成すると
+  // 「このターンに呼ばれた」ように見える偽のツール記録になる）。
+  let pendingSkillCardNames: string[] = [];
 
   let prevKbPath: string | null = null;
   let prevAvailable = false;
@@ -173,6 +177,7 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
     localError = null;
     // 発動済み技能は後端に永続化しない(確定した決定10)＝会話を離れると畳む。
     activatedSkillNames = [];
+    pendingSkillCardNames = [];
     loadSeq += 1; // 途中の読込結果を捨てる
   }
 
@@ -359,14 +364,18 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
       emit();
     },
 
-    /** 技能をこの会話で発動済みにする(重複排除)。 */
+    /** 技能をこの会話で発動済みにする(重複排除)。初発動なら次の送信で合成カードを出す。 */
     activateSkill(name: string): void {
+      if (!activatedSkillNames.includes(name)) {
+        pendingSkillCardNames = [...pendingSkillCardNames, name];
+      }
       markSkillActivated(name);
     },
 
     /** 発動済み技能を取り消す(コンポーザーのチップの × から)。 */
     deactivateSkill(name: string): void {
       activatedSkillNames = activatedSkillNames.filter((n) => n !== name);
+      pendingSkillCardNames = pendingSkillCardNames.filter((n) => n !== name);
       emit();
     },
 
@@ -412,8 +421,10 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
         tools: snapshot.selectedTools,
         skills,
         activatedSkillNames,
+        newlyActivatedSkillNames: pendingSkillCardNames,
         onSkillActivated: markSkillActivated,
       });
+      pendingSkillCardNames = []; // カードは初発動のターンで出し切った
     },
 
     /** 進行中の生成を止める。出力前なら送信直前の入力と履歴へ戻し、回退分も存盤する。 */
