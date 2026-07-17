@@ -190,27 +190,26 @@ export function WorkshopView() {
             </div>
           </div>
 
-          {/* ── サジェスト + コンポーザー ── */}
+          {/* ── コンポーザー ── */}
           <div className="mx-auto mt-3 w-full max-w-3xl">
-            {s.displayMessages.length === 0 && s.visibleHasOllama && (
-              <div className="mb-2.5 flex flex-wrap items-center gap-2">
-                <span className="font-mono text-[10.5px] font-bold tracking-widest text-ink-faint uppercase">
-                  {t("workshop.sug.label")}
-                </span>
-                {[t("workshop.sug.1"), t("workshop.sug.2"), t("workshop.sug.3")].map((sug) => (
-                  <button
-                    key={sug}
-                    type="button"
-                    onClick={() => s.setInstruction(sug)}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-surface px-3 py-1.5 text-[12.5px] font-semibold text-ink-soft shadow-(--shadow-sm) transition-colors hover:bg-surface-2"
-                  >
-                    <Icon name="spark" size={12} className="text-ai" />
-                    {sug}
-                  </button>
-                ))}
-              </div>
+            {/* 技能候補は入力カードの外、直上に同幅の独立カードとして差し込む
+                （会話へ覆い被さらず、開くとコンポーザー全体が伸びる）。 */}
+            {slash.state.open && (
+              <SkillSlashMenu
+                matches={"matches" in slash.state ? slash.state.matches : null}
+                activeIndex={"activeIndex" in slash.state ? slash.state.activeIndex : 0}
+                onSelect={selectSlashSkill}
+                onHover={(index) => {
+                  // moveActive は ±1 ずつしか動かせないので、必要な歩数だけ呼ぶ
+                  // （関数更新なので同一イベント内で複数回呼んでも正しく積算される）。
+                  const current = "activeIndex" in slash.state ? slash.state.activeIndex : 0;
+                  const steps = index - current;
+                  for (let i = 0; i < Math.abs(steps); i += 1) {
+                    slash.moveActive(steps > 0 ? 1 : -1);
+                  }
+                }}
+              />
             )}
-
             <div className="rounded-[18px] border border-line-strong bg-surface p-3 shadow-(--shadow-md)">
               {/* 関連文档は会話開始前だけ示す。最初の送信で文脈に入るので以降は隠す(+ は常に追加可)。 */}
               {visibleSources.length > 0 && s.displayMessages.length === 0 && (
@@ -239,70 +238,52 @@ export function WorkshopView() {
                   })}
                 </div>
               )}
-              <div className="relative">
-                {slash.state.open && (
-                  <SkillSlashMenu
-                    matches={"matches" in slash.state ? slash.state.matches : null}
-                    activeIndex={"activeIndex" in slash.state ? slash.state.activeIndex : 0}
-                    onSelect={selectSlashSkill}
-                    onHover={(index) => {
-                      // moveActive は ±1 ずつしか動かせないので、必要な歩数だけ呼ぶ
-                      // （関数更新なので同一イベント内で複数回呼んでも正しく積算される）。
-                      const current = "activeIndex" in slash.state ? slash.state.activeIndex : 0;
-                      const steps = index - current;
-                      for (let i = 0; i < Math.abs(steps); i += 1) {
-                        slash.moveActive(steps > 0 ? 1 : -1);
-                      }
-                    }}
-                  />
-                )}
-                <textarea
-                  ref={composerRef}
-                  value={s.instruction}
-                  onChange={(event) => {
-                    s.setInstruction(event.target.value);
-                    setCursor(event.target.selectionStart ?? event.target.value.length);
-                  }}
-                  onKeyUp={(event) => setCursor(event.currentTarget.selectionStart ?? 0)}
-                  onClick={(event) => setCursor(event.currentTarget.selectionStart ?? 0)}
-                  onKeyDown={(event) => {
-                    if (slash.state.open && "matches" in slash.state) {
-                      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                        event.preventDefault();
-                        slash.moveActive(event.key === "ArrowDown" ? 1 : -1);
-                        return;
-                      }
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        if (slash.activeSkill) selectSlashSkill(slash.activeSkill);
-                        return;
-                      }
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        slash.close();
-                        return;
-                      }
-                    } else if (
-                      slash.state.open &&
-                      (event.key === "Escape" || (event.key === "Enter" && !event.shiftKey))
-                    ) {
-                      // 技能 0 件の案内表示。開いている間は Enter で送信させず（#44 要求2）、
-                      // Esc と同じく案内を畳むだけにする（もう一度 Enter で普通に送信できる）。
+              <textarea
+                ref={composerRef}
+                value={s.instruction}
+                onChange={(event) => {
+                  s.setInstruction(event.target.value);
+                  setCursor(event.target.selectionStart ?? event.target.value.length);
+                }}
+                onKeyUp={(event) => setCursor(event.currentTarget.selectionStart ?? 0)}
+                onClick={(event) => setCursor(event.currentTarget.selectionStart ?? 0)}
+                onKeyDown={(event) => {
+                  if (slash.state.open && "matches" in slash.state) {
+                    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                      event.preventDefault();
+                      slash.moveActive(event.key === "ArrowDown" ? 1 : -1);
+                      return;
+                    }
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      if (slash.activeSkill) selectSlashSkill(slash.activeSkill);
+                      return;
+                    }
+                    if (event.key === "Escape") {
                       event.preventDefault();
                       slash.close();
                       return;
                     }
-                    // Enter で送信、Shift+Enter で改行(複数行入力)。
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      void s.send();
-                    }
-                  }}
-                  placeholder={t("workshop.composerPh")}
-                  rows={1}
-                  className="max-h-40 w-full resize-none overflow-y-auto bg-transparent px-1 text-[14.5px] leading-relaxed text-ink outline-none"
-                />
-              </div>
+                  } else if (
+                    slash.state.open &&
+                    (event.key === "Escape" || (event.key === "Enter" && !event.shiftKey))
+                  ) {
+                    // 技能 0 件の案内表示。開いている間は Enter で送信させず（#44 要求2）、
+                    // Esc と同じく案内を畳むだけにする（もう一度 Enter で普通に送信できる）。
+                    event.preventDefault();
+                    slash.close();
+                    return;
+                  }
+                  // Enter で送信、Shift+Enter で改行(複数行入力)。
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void s.send();
+                  }
+                }}
+                placeholder={t("workshop.composerPh")}
+                rows={1}
+                className="max-h-40 w-full resize-none overflow-y-auto bg-transparent px-1 text-[14.5px] leading-relaxed text-ink outline-none"
+              />
               <div className="mt-2 flex items-center gap-2.5">
                 {/* ＋ 外部ローカルファイルを素材に追加(OS のファイル選択ダイアログ) */}
                 <button

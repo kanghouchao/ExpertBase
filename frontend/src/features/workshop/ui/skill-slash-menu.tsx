@@ -6,8 +6,8 @@ import { SkillSourceTag } from "@/features/plugin";
 import { Icon } from "@/shared/ui/icon";
 import { cn } from "@/shared/lib/utils";
 
-// 入力欄 `/` の技能候補ポップオーバー（issue #44）。入力欄自体に張り付く、
-// キーボード操作前提の候補列。
+// 入力欄 `/` の技能候補（issue #44）。会話へ重ねるオーバーレイではなく、入力カードの直上に
+// 同幅で置く独立カード（視覚は入力カードと同格）。キーボード操作前提の候補列。
 export function SkillSlashMenu({
   matches,
   activeIndex,
@@ -23,7 +23,7 @@ export function SkillSlashMenu({
   const { t } = useI18n();
 
   return (
-    <div className="absolute bottom-full left-0 z-10 mb-2 max-h-72 w-full overflow-y-auto rounded-2xl border border-line bg-surface p-1.5 shadow-(--shadow-lg)">
+    <div className="mb-2 max-h-72 w-full overflow-y-auto rounded-[18px] border border-line-strong bg-surface p-1.5 shadow-(--shadow-md)">
       {matches === null ? (
         <p className="px-3 py-3 text-center text-[12.5px] text-ink-faint">
           {t("plugin.skills.empty")}
