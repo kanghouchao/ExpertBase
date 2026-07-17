@@ -5,6 +5,8 @@ import type { Skill } from "@/shared/api";
 import { Icon } from "@/shared/ui/icon";
 import { Tag } from "@/shared/ui/tag";
 
+import { SkillSourceTag } from "./skill-source-tag";
+
 // 発見済み Agent Skill の行の並び（設定ダイアログの「発見できている技能を眺めるだけ」用途、
 // 読み取り専用）。判定・状態は持たない提示コンポーネント（source-chip.tsx と同じ流儀）。
 // 発動そのものは入力欄の `/` スラッシュコマンド（#44、use-skill-slash.ts）の管轄。
@@ -18,10 +20,8 @@ export function SkillPanel({ skills }: { skills: Skill[] }) {
           <div className="flex flex-wrap items-center gap-1.5">
             <Icon name="plug" size={13} className="flex-none text-ink-faint" />
             <span className="truncate text-[12.5px] font-semibold text-ink">{skill.name}</span>
-            <Tag tone={skill.source === "kb" ? "accent" : "muted"}>
-              {skill.source === "kb" ? t("plugin.skills.source.kb") : t("plugin.skills.source.user")}
-            </Tag>
-            {skill.hasScripts && <Tag tone="line">{t("plugin.skills.noScripts")}</Tag>}
+            <SkillSourceTag source={skill.source} />
+            {skill.hasScripts && <Tag tone="line">{t("plugin.skills.scriptsNotExecuted")}</Tag>}
           </div>
           <p className="mt-1 text-[12px] leading-relaxed text-ink-muted">{skill.description}</p>
         </div>
