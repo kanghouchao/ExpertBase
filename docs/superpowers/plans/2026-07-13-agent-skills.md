@@ -2,7 +2,7 @@
 
 > 設計は [specs/2026-07-13-agent-skills-design.md](../specs/2026-07-13-agent-skills-design.md)。ステップは `- [ ]` で追跡。各タスク後に `bun run test` / `bun run lint` を確認。
 
-**Goal:** 新設の頂上モジュール `plugin`（`src-tauri/src/plugin/`）で KB 内 `skills/` と `~/.agents/skills/` の二段スキャン + SKILL.md 解析を実装し、tools 対応モデルへは catalog 注入 + `activate_skill` ツール、tools 能力に関わらずユーザー明示発動（技能一覧 UI + 本文の system prompt 注入）を提供する。workshop は消費方に徹し（`build_toolset` へ `activate_skill` を混ぜる、`prompt.rs` へ2節を足す）、フロントは新設 `features/plugin` が一覧 UI を持ち、workshop がそれを組み込む。
+**Goal:** 新設の頂上モジュール `plugin`（`src-tauri/src/plugin/`）で KB 内 `skills/` と `~/.agents/skills/` の二段スキャン + SKILL.md 解析を実装し、tools 対応モデルへは catalog 注入 + `activate_skill` ツール、tools 能力に関わらずユーザー明示発動（技能一覧 UI + 本文の system prompt 注入）を提供する。workshop は消費側に徹し（`build_toolset` へ `activate_skill` を混ぜる、`prompt.rs` へ2節を足す）、フロントは新設 `features/plugin` が一覧 UI を持ち、workshop がそれを組み込む。
 
 **Tech Stack:** Rust / Tauri 2 / rig-core 0.39（`Tool`/`ToolDyn` 手書き実装、既存パターン踏襲）、TypeScript / React / Next.js（FSD、`features/plugin` 新設）
 

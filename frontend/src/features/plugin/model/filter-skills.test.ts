@@ -34,7 +34,7 @@ describe("filterSkills", () => {
     expect(filterSkills(SKILLS, "会議")).toEqual([SKILLS[1]]);
   });
 
-  test("大小写を無視する", () => {
+  test("大文字・小文字を無視する", () => {
     expect(filterSkills(SKILLS, "TEA")).toEqual([SKILLS[0]]);
   });
 

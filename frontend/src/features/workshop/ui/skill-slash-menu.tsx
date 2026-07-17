@@ -2,12 +2,12 @@
 
 import type { Skill } from "@/shared/api";
 import { useI18n } from "@/shared/providers/providers";
+import { SkillSourceTag } from "@/features/plugin";
 import { Icon } from "@/shared/ui/icon";
-import { Tag } from "@/shared/ui/tag";
 import { cn } from "@/shared/lib/utils";
 
-// 入力欄 `/` の技能候補浮層（issue #44）。入力欄自体に張り付く、キーボード操作前提の候補列。
-// 視覚言語（角丸・枠線・影）は shared/ui/popover.tsx の生成内容と揃え、行同士の統一感を保つ。
+// 入力欄 `/` の技能候補ポップオーバー（issue #44）。入力欄自体に張り付く、
+// キーボード操作前提の候補列。
 export function SkillSlashMenu({
   matches,
   activeIndex,
@@ -53,9 +53,7 @@ export function SkillSlashMenu({
             >
               {skill.name}
             </span>
-            <Tag tone={skill.source === "kb" ? "accent" : "muted"} className="flex-none">
-              {skill.source === "kb" ? t("plugin.skills.source.kb") : t("plugin.skills.source.user")}
-            </Tag>
+            <SkillSourceTag source={skill.source} className="flex-none" />
             <span className="min-w-0 flex-1 truncate text-[12px] text-ink-muted">
               {skill.description}
             </span>

@@ -6,9 +6,9 @@
 
 ## 目標
 
-AGENTS.md の頂上原則「プラグイン化」を Agent Skills（<https://agentskills.io/specification>）で兌現する。KB 内 `skills/` と `~/.agents/skills/` の二段スキャンでスキルを発見し、tools 能力を持つモデルには catalog をシステムプロンプトへ注入 + `activate_skill` ツールで自動発動できるようにし、tools 能力の有無に関わらずユーザーが技能一覧 UI から明示発動できるようにする。新設の頂上モジュール `plugin`（`src-tauri/src/plugin/`）にスキャン・解析・活動化ロジックを置き、workshop は消費方に徹する。スクリプト実行（`scripts/`）・技能編集・KB 同期は v1 の非目標（issue 明記）。
+AGENTS.md の頂上原則「プラグイン化」を Agent Skills（<https://agentskills.io/specification>）で実現する。KB 内 `skills/` と `~/.agents/skills/` の二段スキャンでスキルを発見し、tools 能力を持つモデルには catalog をシステムプロンプトへ注入 + `activate_skill` ツールで自動発動できるようにし、tools 能力の有無に関わらずユーザーが技能一覧 UI から明示発動できるようにする。新設の頂上モジュール `plugin`（`src-tauri/src/plugin/`）にスキャン・解析・活動化ロジックを置き、workshop は消費側に徹する。スクリプト実行（`scripts/`）・技能編集・KB 同期は v1 の非目標（issue 明記）。
 
-## 核心的な洞察（読源码確認した事実）
+## 核心的な洞察（ソースコードを読んで確認した事実）
 
 - **rig-core 0.39.0 の `Tool` トレイト**（`~/.cargo/registry/.../rig-core-0.39.0/src/tool/mod.rs`）: `definition(&self, prompt: String) -> ToolDefinition { name, description, parameters: serde_json::Value }` を手書きする。本リポジトリの全既存ツール（`workshop/infrastructure/tools/kb_read.rs` ほか）は `#[derive(rig_derive::rig_tool)]` などのマクロを一切使わず、素の `impl Tool` + `serde_json::json!()` で `parameters` を組んでいる。**enum 制約は `parameters` の JSON Schema に `"enum": [...]` を手で足すだけ**で、rig 側に専用 API は無い（`read_entry(id)` のような限定値パターンの先例は無いが、JSON Schema の `enum` キーは標準機能なのでモデル側には効く）。`activate_skill` の `name` 引数は、発見済みスキル名のリストを起動時に `json!({"enum": names})` へ動的に詰めれば良い。
 - **KB ディレクトリ規約**（`kb/application.rs`, `kb/infrastructure/*`）: KB ルート直下に `entries/`（条目本体）と `.expertbase/`（`kb.toml` + `index.sqlite`、内部メタデータ専用）。ユーザー編集対象のコンテンツ用ディレクトリは `entries/` と同格に置く慣習 → KB 内技能ディレクトリは **`<kb ルート>/skills/`**（`entries/` と同格、`.expertbase/` の中ではない）。

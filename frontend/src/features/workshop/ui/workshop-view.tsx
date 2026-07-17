@@ -32,7 +32,7 @@ export function WorkshopView() {
   // 入力欄 `/` 技能発動（issue #44）。カーソル位置は選択範囲が動くたび読み直す。
   const [cursor, setCursor] = useState(0);
   const slash = useSkillSlash({ value: s.instruction, cursor, skills: s.skills });
-  // setInstruction 後の再描画を待ってからテキストエリアの実カーソルを動かす（受控入力の作法）。
+  // setInstruction 後の再描画を待ってからテキストエリアの実カーソルを動かす（制御された入力の作法）。
   const pendingCursorRef = useRef<number | null>(null);
   useEffect(() => {
     const pos = pendingCursorRef.current;
