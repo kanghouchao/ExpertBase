@@ -27,8 +27,10 @@ export function Inspector({
   const status = generating
     ? { label: runningLabel, color: "var(--gold)" }
     : { label: t("workshop.st.idle"), color: "var(--ink-muted)" };
+  // lg では flex 行の既定 stretch で列いっぱいに伸びてしまうので、self-start で
+  // 内容ぶんの高さに畳む（内容が収まらないときだけ max-h + 内部スクロール）。
   return (
-    <aside className="flex w-full flex-none flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-(--shadow-sm) lg:w-80">
+    <aside className="flex w-full flex-none flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-(--shadow-sm) lg:max-h-full lg:w-80 lg:self-start">
       <div className="flex items-center gap-2.5 border-b border-line px-4.5 py-3.5">
         <Icon name="layers" size={16} className="text-ai" />
         <div className="text-[13.5px] font-bold text-ink">{t("workshop.insp.title")}</div>
