@@ -282,8 +282,12 @@ export function WorkshopView() {
                         slash.close();
                         return;
                       }
-                    } else if (slash.state.open && event.key === "Escape") {
-                      // 技能 0 件の案内表示。Esc だけ拾い、Enter は通常の送信へ流す。
+                    } else if (
+                      slash.state.open &&
+                      (event.key === "Escape" || (event.key === "Enter" && !event.shiftKey))
+                    ) {
+                      // 技能 0 件の案内表示。開いている間は Enter で送信させず（#44 要求2）、
+                      // Esc と同じく案内を畳むだけにする（もう一度 Enter で普通に送信できる）。
                       event.preventDefault();
                       slash.close();
                       return;
