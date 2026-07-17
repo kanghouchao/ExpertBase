@@ -4,7 +4,7 @@ import {
   fakeBackend,
   setBackend,
   type ChatPhase,
-  type ChatTurn,
+  type WorkshopChatInput,
   type WorkshopMessage,
 } from "@/shared/api";
 import type { RunStoreState } from "./workshop-run";
@@ -13,15 +13,7 @@ import type { RunStoreState } from "./workshop-run";
 (globalThis as { window?: EventTarget }).window = new EventTarget();
 
 // 後端を fake 土台 + workshop 域の上書きで差し替える（実 IPC を呼ばない・猴補なし）。
-type ChatImpl = (
-  sourceIds: string[],
-  messages: ChatTurn[],
-  model: string,
-  think: boolean,
-  tools: boolean,
-  activatedSkillNames: string[],
-  onPhase?: (p: ChatPhase) => void
-) => Promise<string>;
+type ChatImpl = (input: WorkshopChatInput, onPhase?: (p: ChatPhase) => void) => Promise<string>;
 
 let chatImpl: ChatImpl = async () => "";
 let saveCalls: {
@@ -112,7 +104,7 @@ test("run identity includes the opaque KB path on every platform", () => {
 
 describe("startRun", () => {
   test("streams buffers then saves the AI reply to the captured conversation id", async () => {
-    chatImpl = async (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+    chatImpl = async (_input, onPhase) => {
       onPhase?.({ phase: "loadingModel" });
       onPhase?.({ phase: "thinking", delta: "考え" });
       onPhase?.({ phase: "narration", delta: "答え" });
@@ -173,7 +165,7 @@ describe("startRun", () => {
   };
 
   test("reports a successful activate_skill call via onSkillActivated, using the toolCall args for the name", async () => {
-    chatImpl = async (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+    chatImpl = async (_input, onPhase) => {
       onPhase?.({ phase: "toolCall", name: "activate_skill", args: '{"name":"tea-brewing"}' });
       onPhase?.({ phase: "toolResult", name: "activate_skill", summary: "緑茶の淹れ方本文" });
       return "done";
@@ -198,7 +190,7 @@ describe("startRun", () => {
   });
 
   test("does not report a failed activate_skill call (summary does not match the skill's body)", async () => {
-    chatImpl = async (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+    chatImpl = async (_input, onPhase) => {
       onPhase?.({ phase: "toolCall", name: "activate_skill", args: '{"name":"missing"}' });
       onPhase?.({ phase: "toolResult", name: "activate_skill", summary: "(no skill found: missing)" });
       return "done";
@@ -224,7 +216,7 @@ describe("startRun", () => {
 
   test("reports success even when a skill body happens to start with '(' (does not rely on failure-message prefix)", async () => {
     const parenSkill = { ...TEA_SKILL, name: "paren-skill", body: "(注意事項) まず湯を沸かす" };
-    chatImpl = async (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+    chatImpl = async (_input, onPhase) => {
       onPhase?.({ phase: "toolCall", name: "activate_skill", args: '{"name":"paren-skill"}' });
       onPhase?.({ phase: "toolResult", name: "activate_skill", summary: parenSkill.body });
       return "done";
@@ -251,7 +243,7 @@ describe("startRun", () => {
   test("synthesizes an activate_skill tool card for explicitly-activated skills immediately (no real tool call needed)", async () => {
     // 明示発動(スラッシュコマンド/チップ)は activate_skill ツールを呼ばない = 何もしないと
     // カードが一切出ない。startRun 時点で ToolEvent を合成し、生成開始と同時に見える必要がある。
-    chatImpl = async (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+    chatImpl = async (_input, onPhase) => {
       onPhase?.({ phase: "narration", delta: "了解しました" });
       return "了解しました";
     };
@@ -292,7 +284,7 @@ describe("startRun", () => {
 describe("answerConfirm", () => {
   test("surfaces the confirm request and relays the user's answer", async () => {
     let resolveChat: (v: string) => void = () => {};
-    chatImpl = (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+    chatImpl = (_input, onPhase) => {
       onPhase?.({ phase: "confirmRequest", id: 42, summary: "delete entries/a.md" });
       return new Promise<string>((resolve) => {
         resolveChat = resolve;
@@ -334,7 +326,7 @@ describe("answerConfirm", () => {
       throw new Error("ipc down");
     };
     let resolveChat: (v: string) => void = () => {};
-    chatImpl = (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+    chatImpl = (_input, onPhase) => {
       onPhase?.({ phase: "confirmRequest", id: 5, summary: "write_entry: 緑茶" });
       return new Promise<string>((resolve) => {
         resolveChat = resolve;
@@ -367,7 +359,7 @@ describe("answerConfirm", () => {
 
   test("ignores answers for a different conversation", async () => {
     let resolveChat: (v: string) => void = () => {};
-    chatImpl = (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+    chatImpl = (_input, onPhase) => {
       onPhase?.({ phase: "confirmRequest", id: 7, summary: "update entries/b.md" });
       return new Promise<string>((resolve) => {
         resolveChat = resolve;
@@ -470,7 +462,7 @@ describe("stopActive", () => {
 
   test("keeps the partial narration as the AI reply", async () => {
     let rejectChat: (reason: unknown) => void = () => {};
-    chatImpl = (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+    chatImpl = (_input, onPhase) => {
       onPhase?.({ phase: "narration", delta: "途中まで" });
       return new Promise<string>((_resolve, reject) => {
         rejectChat = reject;
@@ -510,7 +502,7 @@ describe("stopActive", () => {
 describe("discardActive", () => {
   test("drops the run without saving", async () => {
     let rejectChat: (reason: unknown) => void = () => {};
-    chatImpl = (_s, _m, _mo, _th, _to, _ac, onPhase) => {
+    chatImpl = (_input, onPhase) => {
       onPhase?.({ phase: "narration", delta: "x" });
       return new Promise<string>((_resolve, reject) => {
         rejectChat = reject;

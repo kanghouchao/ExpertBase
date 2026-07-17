@@ -57,29 +57,48 @@ pub fn list_conversations(root: &Path, offset: usize) -> Result<WorkshopConversa
   history::list(&history::open(root)?, offset, HISTORY_PAGE_SIZE)
 }
 
+/// 対話エージェント 1 ターン分の入力一式。interface（IPC）が組み立て、`chat` が消費する。
+/// これらのフィールドは interface → chat → build_toolset を常に結伴して旅するので、
+/// 個別引数ではなく一括りで渡す（フィールドが増えても署名の散弾修正を避ける）。
+pub struct ChatInput {
+  pub settings: AiSettings,
+  pub model: String,
+  pub think: bool,
+  /// 前端が算出した選択モデルの tools 能力。toolset / catalog の能力ゲート。
+  pub tools_capable: bool,
+  pub root: PathBuf,
+  pub sources: Vec<String>,
+  /// 呼び出し側（interface）が discover_skills 済みの一覧。
+  pub skills: Vec<crate::plugin::Skill>,
+  /// この会話で発動済みの技能名（フロント管理、ボタン発動・モデル自動発動を問わず）。
+  pub activated_skill_names: Vec<String>,
+  pub messages: Vec<ChatTurn>,
+}
+
 /// 対話エージェント経路。素材は本文を注入せず id の目録だけ system に置き、AI が read_source で
 /// 自分で読む。Rig で 1 会話分回し、進捗（思考・本文・ツール呼び出し/結果）を tx へ流して、
 /// 最終的な助手の返信本文を返す。書き込みは write_entry ツール経由で「ユーザーが保存を頼んだとき」
 /// だけ起きる＝確定の主導権はユーザー。素材は全て外部絶対パスで、KB へは複製しない。
-/// skills は呼び出し側（interface）が discover_skills 済みの一覧。tools_capable のときだけ
-/// catalog を出し `activate_skill` を登録する（要求3）。activated_skill_names に対応する技能の
-/// 本文は tools_capable に関わらず常に # Activated Skills へ注入する（要求4、明示発動は
-/// tools 能力に依存しない）。
-#[allow(clippy::too_many_arguments)]
+/// tools_capable のときだけ toolset を組み catalog を出す（要求3）。activated_skill_names に
+/// 対応する技能の本文は tools_capable に関わらず常に # Activated Skills へ注入する
+/// （要求4、明示発動は tools 能力に依存しない）。
 pub async fn chat(
-  settings: AiSettings,
-  model: String,
-  think: bool,
-  tools_capable: bool,
-  root: PathBuf,
-  sources: Vec<String>,
-  skills: Vec<crate::plugin::Skill>,
-  activated_skill_names: Vec<String>,
-  messages: Vec<ChatTurn>,
+  input: ChatInput,
   cancel: Arc<AtomicBool>,
   tx: UnboundedSender<StreamProgress>,
   pending: confirm::PendingConfirms,
 ) -> Result<String, AppError> {
+  let ChatInput {
+    settings,
+    model,
+    think,
+    tools_capable,
+    root,
+    sources,
+    skills,
+    activated_skill_names,
+    messages,
+  } = input;
   // 破壊的ツール用の確認ゲート。進捗 tx へ確認要求を流し、workshop_confirm の回填を待つ。
   let gate = Arc::new(confirm::ConfirmGate { pending, tx: tx.clone(), cancel: cancel.clone() });
   let provider = settings.provider;

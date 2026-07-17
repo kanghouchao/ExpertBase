@@ -170,20 +170,24 @@ export type PluginApi = {
   listSkills(): Promise<Skill[]>;
 };
 
+/** chat 1 ターン分の入力一式（結伴して旅するフィールドは個別引数ではなく一括りで渡す）。 */
+export type WorkshopChatInput = {
+  /** 添付素材（外部ファイルの絶対パス id）。 */
+  sourceIds: string[];
+  /** 会話履歴（末尾が今回の user 発話）。 */
+  messages: ChatTurn[];
+  model: string;
+  think: boolean;
+  /** 選択モデルの tools 能力。false ならツールを一切登録しない（明示発動だけが効く）。 */
+  tools: boolean;
+  /** この会話で発動済みの技能名（ボタン発動・モデル自動発動を問わず）。 */
+  activatedSkillNames: string[];
+};
+
 /** 工坊の対話エージェントと対話履歴。 */
 export type WorkshopApi = {
-  /** 添付素材（外部ファイルの絶対パス id）+ 会話履歴で対話エージェントを 1 ターン回す。
-   * activatedSkillNames はこの会話で発動済みの技能名（ボタン発動・モデル自動発動を問わず）。
-   * 最終返信本文を返す。onPhase で進捗を受け取る。 */
-  chat(
-    sourceIds: string[],
-    messages: ChatTurn[],
-    model: string,
-    think: boolean,
-    tools: boolean,
-    activatedSkillNames: string[],
-    onPhase?: (phase: ChatPhase) => void
-  ): Promise<string>;
+  /** 対話エージェントを 1 ターン回す。最終返信本文を返す。onPhase で進捗を受け取る。 */
+  chat(input: WorkshopChatInput, onPhase?: (phase: ChatPhase) => void): Promise<string>;
   /** 進行中の生成を中断する（停止ボタン）。共有フラグを立てるだけで即返る。 */
   cancel(): Promise<void>;
   /** エージェントの確認要求へ応答する（許可 / 拒否）。 */

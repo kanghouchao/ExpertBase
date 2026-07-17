@@ -133,15 +133,17 @@ pub async fn workshop_chat(
   let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<StreamProgress>();
   let pending = confirms.0.clone();
   let agent = tauri::async_runtime::spawn(application::chat(
-    settings,
-    model,
-    think,
-    tools,
-    root,
-    sources,
-    skills,
-    activated_skill_names,
-    messages,
+    application::ChatInput {
+      settings,
+      model,
+      think,
+      tools_capable: tools,
+      root,
+      sources,
+      skills,
+      activated_skill_names,
+      messages,
+    },
     cancel_flag,
     tx,
     pending,
