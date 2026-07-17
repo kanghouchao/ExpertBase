@@ -16,7 +16,8 @@ When you need a tool, call it directly. Never announce or describe a tool call i
 /// AGENT_SYSTEM に # Tools（toolset の definition() から生成された契約文）と # Sources（素材 id
 /// の目録）を付けて system プロンプトを組む。素材は本文を注入せず、id だけ並べて
 /// `read_source(id)` で AI 自身に読ませる＝「AI が読んだ内容」と「我々のプロンプト」を構造的に分離。
-/// 素材が無ければ `# Sources` 節ごと省略する。
+/// 素材が無ければ `# Sources` 節ごと、契約文が空（tools 非対応モデル＝空 toolset）なら
+/// `# Tools` 節ごと省略する。
 ///
 /// `skills_catalog`（`# Skills`）と `activated_skills_section`（`# Activated Skills`）は
 /// 互いに独立な節（plugin::render_catalog / render_activated が内容の唯一の真源、ここは
@@ -29,7 +30,10 @@ pub fn agent_system_with(
   skills_catalog: &str,
   activated_skills_section: &str,
 ) -> String {
-  let mut s = format!("{AGENT_SYSTEM}\n\n# Tools\n{tools_section}");
+  let mut s = AGENT_SYSTEM.to_string();
+  if !tools_section.is_empty() {
+    s.push_str(&format!("\n\n# Tools\n{tools_section}"));
+  }
   if !source_ids.is_empty() {
     let list = source_ids.iter().map(|id| format!("- {id}")).collect::<Vec<_>>().join("\n");
     s.push_str(&format!(
@@ -68,11 +72,18 @@ mod tests {
 
   #[test]
   fn agent_system_omits_sources_section_when_empty() {
-    // 素材なしなら # Sources 節ごと省略する（# Tools 節は常に付く）。
+    // 素材なしなら # Sources 節ごと省略する。
     let s = agent_system_with("- x(): y", &[], "", "");
     assert!(s.contains("# Tools\n- x(): y"), "was: {s}");
     assert!(!s.contains("# Sources"));
     assert!(!s.contains("source materials are attached"));
+  }
+
+  #[test]
+  fn agent_system_omits_tools_section_when_empty() {
+    // tools 非対応モデル(空 toolset)では # Tools 節ごと省略する＝呼べないツールを語らない。
+    let s = agent_system_with("", &[], "", "");
+    assert!(!s.contains("# Tools"));
   }
 
   #[test]

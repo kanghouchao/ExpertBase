@@ -143,9 +143,9 @@ export function createWorkshopSession(deps: WorkshopSessionDeps) {
       visibleSelectedModel,
       selectedThinking,
       selectedTools,
-      // 工坊は tools 対応モデル必須。他会話が生成中なら本地モデルは直列なので送れない。
-      canGenerate:
-        visibleHasOllama && !!visibleSelectedModel && selectedTools && !someoneGenerating,
+      // tools 非対応モデルでも送れる（明示発動の技能注入は tools 能力に依存しない、
+      // issue #41/#44 受入条件）。他会話が生成中なら本地モデルは直列なので送れない。
+      canGenerate: visibleHasOllama && !!visibleSelectedModel && !someoneGenerating,
       someoneGenerating,
       skills,
       activatedSkillNames,
