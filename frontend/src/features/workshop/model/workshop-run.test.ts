@@ -128,6 +128,7 @@ describe("startRun", () => {
       tools: true,
       skills: [],
       activatedSkillNames: [],
+      newlyActivatedSkillNames: [],
       onSkillActivated: () => {},
     });
     await tick();
@@ -182,6 +183,7 @@ describe("startRun", () => {
       tools: true,
       skills: [TEA_SKILL],
       activatedSkillNames: [],
+      newlyActivatedSkillNames: [],
       onSkillActivated: (name) => activated.push(name),
     });
     await tick();
@@ -207,6 +209,7 @@ describe("startRun", () => {
       tools: true,
       skills: [TEA_SKILL],
       activatedSkillNames: [],
+      newlyActivatedSkillNames: [],
       onSkillActivated: (name) => activated.push(name),
     });
     await tick();
@@ -233,6 +236,7 @@ describe("startRun", () => {
       tools: true,
       skills: [parenSkill],
       activatedSkillNames: [],
+      newlyActivatedSkillNames: [],
       onSkillActivated: (name) => activated.push(name),
     });
     await tick();
@@ -259,6 +263,7 @@ describe("startRun", () => {
       tools: true,
       skills: [TEA_SKILL],
       activatedSkillNames: ["tea-brewing"],
+      newlyActivatedSkillNames: ["tea-brewing"],
       onSkillActivated: () => {},
     });
 
@@ -278,6 +283,35 @@ describe("startRun", () => {
     expect(seen.some((s) => (s.active?.tools.length ?? 0) > 0)).toBeTrue();
 
     unsub();
+  });
+
+  test("does not re-synthesize cards for skills activated in earlier turns", async () => {
+    // 発動済み(activatedSkillNames)でも、このターンの新規発動(newlyActivatedSkillNames)で
+    // なければカードを合成しない＝過去ターンの発動が「このターンに呼ばれた」ように見える
+    // 偽のツール記録として毎ターン増殖しない。
+    chatImpl = async () => "done";
+
+    startRun({
+      kbPath: "/home/user/ExpertBase/tea",
+      conversationId: 25,
+      sourceIds: [],
+      baseHistory: [{ role: "user", text: "次の問い" }],
+      model: "qwen3:8b",
+      think: false,
+      tools: true,
+      skills: [TEA_SKILL],
+      activatedSkillNames: ["tea-brewing"],
+      newlyActivatedSkillNames: [],
+      onSkillActivated: () => {},
+    });
+
+    expect(getSnapshot().active?.tools).toEqual([]);
+    await tick();
+
+    // 保存されるメッセージにも合成カードは付かない。
+    expect(saveCalls).toHaveLength(1);
+    const last = saveCalls[0].messages.at(-1) as { tools?: unknown };
+    expect(last.tools).toBeUndefined();
   });
 });
 
@@ -301,6 +335,7 @@ describe("answerConfirm", () => {
       tools: true,
       skills: [],
       activatedSkillNames: [],
+      newlyActivatedSkillNames: [],
       onSkillActivated: () => {},
     });
     await tick();
@@ -343,6 +378,7 @@ describe("answerConfirm", () => {
       tools: true,
       skills: [],
       activatedSkillNames: [],
+      newlyActivatedSkillNames: [],
       onSkillActivated: () => {},
     });
     await tick();
@@ -376,6 +412,7 @@ describe("answerConfirm", () => {
       tools: true,
       skills: [],
       activatedSkillNames: [],
+      newlyActivatedSkillNames: [],
       onSkillActivated: () => {},
     });
     await tick();
@@ -411,6 +448,7 @@ describe("stopActive", () => {
       tools: true,
       skills: [],
       activatedSkillNames: [],
+      newlyActivatedSkillNames: [],
       onSkillActivated: () => {},
     });
     await tick();
@@ -447,6 +485,7 @@ describe("stopActive", () => {
       tools: true,
       skills: [],
       activatedSkillNames: [],
+      newlyActivatedSkillNames: [],
       onSkillActivated: () => {},
     });
     await tick();
@@ -479,6 +518,7 @@ describe("stopActive", () => {
       tools: true,
       skills: [],
       activatedSkillNames: [],
+      newlyActivatedSkillNames: [],
       onSkillActivated: () => {},
     });
     await tick();
@@ -519,6 +559,7 @@ describe("discardActive", () => {
       tools: true,
       skills: [],
       activatedSkillNames: [],
+      newlyActivatedSkillNames: [],
       onSkillActivated: () => {},
     });
     await tick();

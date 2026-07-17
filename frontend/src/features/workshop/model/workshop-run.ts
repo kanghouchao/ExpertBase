@@ -42,6 +42,10 @@ type StartArgs = {
   skills: Skill[];
   /** この会話で発動済みの技能名（ボタン発動・モデル自動発動を問わず一本化、重複排除済み）。 */
   activatedSkillNames: string[];
+  /** このターンで初めて明示発動された技能名（カード合成の対象）。activatedSkillNames の
+   * 部分集合。過去ターン発動分まで含めると「このターンに呼ばれた」ように見える偽の
+   * ツール記録が毎ターン増殖するので、初発動のターンだけに絞る。 */
+  newlyActivatedSkillNames: string[];
   /** activate_skill ツールの成功を観測したら呼ぶ（呼び出し側が activatedSkillNames へ記帳する）。 */
   onSkillActivated: (name: string) => void;
 };
@@ -92,11 +96,11 @@ function patch(kbPath: string, conversationId: number, fields: Partial<RunSnapsh
 
 // 明示発動（スラッシュコマンド/チップ）は activate_skill ツールを呼ばず system prompt へ
 // 直接注入するので、そのままだと「技能が効いた」という手掛かりが会話に一切残らない
-// （検索・書き込みツールと違って何のカードも出ない）。ここで実際のツール呼び出しと同じ
-// ToolEvent を合成し、既存の ToolCallCard/ToolCallLog にそのまま乗せる（新しい表示は作らない、
-// 展開すると注入した本文そのものが見える＝モデル自動発動時の activate_skill 結果と同じ体裁）。
+// （検索・書き込みツールと違って何のカードも出ない）。初発動のターンだけ実際のツール呼び出しと
+// 同じ ToolEvent を合成し、既存の ToolCallCard/ToolCallLog にそのまま乗せる（新しい表示は
+// 作らない、展開すると注入した本文そのものが見える＝モデル自動発動時と同じ体裁）。
 function activatedSkillToolEvents(args: StartArgs): ToolEvent[] {
-  return args.activatedSkillNames
+  return args.newlyActivatedSkillNames
     .map((name) => args.skills.find((skill) => skill.name === name))
     .filter((skill): skill is Skill => skill !== undefined)
     .map((skill) => ({
@@ -109,6 +113,7 @@ function activatedSkillToolEvents(args: StartArgs): ToolEvent[] {
 /** 1 ターンを開始する。アクティブ態を同期で立て、後は後台で流す。 */
 export function startRun(args: StartArgs): void {
   cancelled = false;
+  const seededTools = activatedSkillToolEvents(args);
   emit({
     active: {
       kbPath: args.kbPath,
@@ -117,17 +122,17 @@ export function startRun(args: StartArgs): void {
       baseHistory: args.baseHistory,
       narration: "",
       thinking: "",
-      tools: activatedSkillToolEvents(args),
+      tools: seededTools,
       confirm: null,
     },
     error: null,
   });
-  void run(args);
+  void run(args, seededTools);
 }
 
-async function run(args: StartArgs): Promise<void> {
+async function run(args: StartArgs, seededTools: ToolEvent[]): Promise<void> {
   const { kbPath, conversationId, sourceIds, baseHistory } = args;
-  const tools: ToolEvent[] = activatedSkillToolEvents(args);
+  const tools: ToolEvent[] = [...seededTools];
   let narration = "";
   let thinking = "";
   try {
